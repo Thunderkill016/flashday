@@ -665,7 +665,7 @@
     'missing-words': 'bỏ sót từ',
     'extra-words': 'thừa từ',
     'word-order': 'lộn thứ tự',
-    'self-check': 'nói chưa được'
+    'self-check': 'tự ghi nhận sai'
   };
 
   // Duolingo-Mistakes-style surface: units whose production attempts keep
