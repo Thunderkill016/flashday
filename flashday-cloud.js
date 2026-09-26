@@ -153,6 +153,26 @@
     return clone(remoteAt >= localAt ? remoteProfile : localProfile);
   }
 
+  // Captures can be edited in place (the miner adds a sentence translation to
+  // an existing row). Plain remote-wins would silently wipe that local edit —
+  // so the side with the newer updatedAt stamp wins, remote breaking ties for
+  // captures that were never edited.
+  function mergeCaptures(remoteValues, localValues) {
+    const merged = new Map();
+    for (const value of Array.isArray(localValues) ? localValues : []) {
+      if (value?.id != null) merged.set(String(value.id), clone(value));
+    }
+    for (const value of Array.isArray(remoteValues) ? remoteValues : []) {
+      if (value?.id == null) continue;
+      const key = String(value.id);
+      const prev = merged.get(key);
+      const localStamp = Number(prev?.updatedAt) || 0;
+      const remoteStamp = Number(value.updatedAt) || 0;
+      merged.set(key, clone(!prev || remoteStamp >= localStamp ? value : prev));
+    }
+    return Array.from(merged.values());
+  }
+
   // Encounter ids are deterministic per unit+capture+day, so the same line
   // re-met on two devices is ONE record — the merge must union interaction
   // kinds rather than let either side's provenance overwrite the other's.
@@ -194,7 +214,7 @@
       createdAt: Number(localDb.createdAt || Date.now()),
       items: mergeById(remoteItems, localDb.items || []),
       bespokeCards: mergeById(remoteCards, localDb.bespokeCards || []),
-      captures: mergeById(remoteCaptures, localDb.captures || []),
+      captures: mergeCaptures(remoteCaptures, localDb.captures || []),
       events,
       transferAttempts,
       encounters,
@@ -243,6 +263,7 @@
     eventFromRow,
     remoteHasLearnerData,
     mergeById,
+    mergeCaptures,
     mergeLearningProfile,
     mergeLearnerDb,
     knownIds,

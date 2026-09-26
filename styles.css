@@ -818,6 +818,11 @@ mark.token-new { border-bottom: 2px solid var(--memory-new); padding: 0 1px; }
 .url-fetch-row input { flex: 1; }
 .url-fetch-row .ghost-btn { flex-shrink: 0; }
 
+/* Memory search — filter row above the unit list. */
+.memory-toolbar { margin: 0 0 12px; }
+.memory-toolbar input { width: 100%; padding: 9px 12px; border: 1px solid var(--fd-border); border-radius: var(--fd-radius-md); background: var(--fd-surface); color: var(--fd-text); font-size: 14px; }
+.memory-toolbar input:focus { outline: none; border-color: var(--fd-accent); }
+
 /* ============================================================
    MODE IDENTITY — 4 kỹ năng mang màu riêng (tokens.css)
    ============================================================ */

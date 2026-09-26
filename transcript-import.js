@@ -145,6 +145,7 @@
         nativeSentence:segment.translation||'',
         pronunciation:segment.pronunciation,
         url:clean(meta.url),
+        sourceId:clean(meta.sourceId||meta.url||meta.fileName)||undefined,
         subtitleFileName:clean(meta.subtitleFileName||meta.fileName),
         mediaTimestamp:segment.start,
         subtitle:{text:segment.text,start:segment.start,end:segment.end,originalStart:segment.start,originalEnd:segment.end,index,track:0},

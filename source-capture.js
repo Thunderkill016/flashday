@@ -115,7 +115,13 @@
       audio:normalizeAudio(raw.audio),image:normalizeImage(raw.image),file:normalizeFile(raw.file),
       word:text(raw.word)||undefined,definition:text(raw.definition)||undefined,note:text(raw.note)||undefined,capturedAt,
       sourceKind:inferSourceKind(raw),
+      // Stable source identity — two different videos/stories that happen to
+      // share a title must not collapse into one source group.
+      sourceId:text(raw.sourceId||raw.source_id)||undefined,
       sourceTitle:text(raw.sourceTitle||raw.title)||undefined,
+      // Last-edit stamp for cloud merge — an in-place edit (e.g. learner adds
+      // a sentence translation while mining) must win over an older remote row.
+      updatedAt:finite(raw.updatedAt,0)||undefined,
       estimatedLevel:normalizeLevel(raw.estimatedLevel||raw.contentLevel),
       linkedUnitIds:uniqueStrings(raw.linkedUnitIds||raw.unitIds),
     };
@@ -131,7 +137,7 @@
       type:'captured-source',label:c.sourceTitle||c.subtitleFileName||c.file?.name||'Nguồn đã capture',
       sourceKind:c.sourceKind,estimatedLevel:c.estimatedLevel,linkedUnitIds:c.linkedUnitIds,
       sentence:c.sentence,native_sentence:c.nativeSentence,pronunciation:c.pronunciation,
-      url:c.url||undefined,mediaTimestamp:c.mediaTimestamp,subtitleFileName:c.subtitleFileName||undefined,
+      url:c.url||undefined,mediaTimestamp:c.mediaTimestamp,subtitleFileName:c.subtitleFileName||undefined,sourceId:c.sourceId||undefined,
       subtitle:c.subtitle,surroundingSubtitles:c.surroundingSubtitles,audio:c.audio,image:c.image,file:c.file,capturedAt:c.capturedAt,
     };
   }
@@ -165,7 +171,7 @@
     const capture=normalizeCapture(raw);
     if(!capture.sentence)throw new Error('Source sentence is required');
     db.captures=Array.isArray(db.captures)?db.captures:[];
-    const duplicate=db.captures.find(c=>c.sentence===capture.sentence&&c.url===capture.url&&c.mediaTimestamp===capture.mediaTimestamp);
+    const duplicate=db.captures.find(c=>c.sentence===capture.sentence&&c.url===capture.url&&c.mediaTimestamp===capture.mediaTimestamp&&c.sourceId===capture.sourceId);
     if(duplicate)return duplicate;
     db.captures.push(capture);return capture;
   }

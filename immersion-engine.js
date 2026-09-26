@@ -25,7 +25,10 @@
 
   function sourceKey(capture){
     const c=SC.normalizeCapture(capture);
-    return c.sourceTitle||c.subtitleFileName||c.file?.name||c.url||null;
+    // sourceId first — a shared title between two different sources must not
+    // merge their lines into one group. Older captures without sourceId fall
+    // back to the title-based key they were already grouped under.
+    return c.sourceId||c.sourceTitle||c.subtitleFileName||c.file?.name||c.url||null;
   }
 
   function meaningfulChars(text){
@@ -134,7 +137,7 @@
       +coverage*40
     );
     return {
-      key,title:key,
+      key,title:captures[0]?.sourceTitle||captures[0]?.subtitleFileName||captures[0]?.file?.name||key,
       segments:parts.length,
       minutes:Math.max(1,Math.round(totals.seconds/60)),
       coverage,

@@ -66,4 +66,14 @@ assert(firestoreRules.includes("'error'"), 'rules allowlist must accept the erro
 assert(cloud.includes('error: optMap(event.error)'), 'cloud mapping must persist the error record');
 assert(cloud.includes('error: optMap(row.error)'), 'cloud mapping must restore the error record');
 
-console.log('FlashDay app P0 contract: 30 checks passed');
+// Memory search is table stakes (LingQ/Anki both ship it): the toolbar input
+// must exist and renderMemory must filter on target + meaning + source context.
+assert(appHtml.includes('id="memorySearch"'), 'memory view must expose a search input');
+assert(source.includes('contextByUnit'), 'memory search must reach captured source sentences, not just target/meaning');
+assert(source.includes("$('memorySearch').oninput = renderMemory"), 'search input must re-render the list on input');
+// Capture edits are the only in-place cloud mutation — the merge must honor
+// updatedAt or a stale remote row wipes the translation the learner typed.
+assert(cloud.includes('mergeCaptures'), 'captures must merge by updatedAt, not blanket remote-wins');
+assert(learningHub.includes('row.updatedAt=Date.now()'), 'in-place capture edits must stamp updatedAt');
+
+console.log('FlashDay app P0 contract: 35 checks passed');

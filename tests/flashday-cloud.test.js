@@ -97,6 +97,26 @@ const C = require('../flashday-cloud.js');
   assert.strictEqual(empty.events.size, 0);
 }
 
+{
+  // Capture edits are the one in-place mutation the product makes (mined
+  // sentence translation). mergeCaptures must prefer the newer updatedAt so
+  // a stale remote row cannot wipe the learner's typed translation.
+  const localCap = { id: 'cap-1', sentence: 's', nativeSentence: 'dịch mới của tôi', updatedAt: 2000 };
+  const remoteStale = { id: 'cap-1', sentence: 's', nativeSentence: '' };
+  let merged = C.mergeCaptures([remoteStale], [localCap]);
+  assert.strictEqual(merged[0].nativeSentence, 'dịch mới của tôi', 'local edit must survive merge');
+  // Remote that was edited LATER wins back.
+  const remoteNewer = { id: 'cap-1', sentence: 's', nativeSentence: 'bản dịch từ máy khác', updatedAt: 3000 };
+  merged = C.mergeCaptures([remoteNewer], [localCap]);
+  assert.strictEqual(merged[0].nativeSentence, 'bản dịch từ máy khác', 'newer remote edit must win');
+  // Neither side stamped → remote wins (legacy rows keep old semantics).
+  merged = C.mergeCaptures([{ id: 'cap-1', sentence: 's', nativeSentence: 'remote' }], [{ id: 'cap-1', sentence: 's', nativeSentence: 'local' }]);
+  assert.strictEqual(merged[0].nativeSentence, 'remote');
+  // New local-only captures still survive.
+  merged = C.mergeCaptures([remoteStale], [localCap, { id: 'cap-2', sentence: 'x' }]);
+  assert.strictEqual(merged.length, 2);
+}
+
 assert.strictEqual(C.remoteHasLearnerData({}), false);
 assert.strictEqual(C.remoteHasLearnerData({ units: [{ id: 'u' }] }), true);
-console.log('FlashDay cloud P0: 5 checks passed');
+console.log('FlashDay cloud P0: 6 checks passed');

@@ -8,6 +8,7 @@
   const IM=window.FlashDayImmersion;
   const WLK=window.FlashDayLookup;
   const CAT=window.FlashDayCatalog;
+  const SC=window.FlashDaySourceCapture;
   const KEY='flashday-memory-engine-repo-driven';
   const PROFILE_TABLE='learner_profiles';
   const $=(id)=>document.getElementById(id);
@@ -287,8 +288,8 @@
     const root=$('starterCatalog');if(!root)return;
     if(!CAT?.ITEMS){root.innerHTML='';return;}
     const db=store.refresh();
-    const importedTitles=new Set((db.captures||[]).map(c=>String(c.sourceTitle||'')));
-    const remaining=CAT.ITEMS.filter(item=>!importedTitles.has(item.title));
+    const importedIds=new Set((db.captures||[]).map(c=>String(c.sourceId||'')));
+    const remaining=CAT.ITEMS.filter(item=>!importedIds.has(item.id));
     if(!remaining.length){root.innerHTML='';return;}
     root.innerHTML=`<div class="starter-catalog-head"><span class="eyebrow">THƯ VIỆN GỢI Ý</span><span>Bundle sẵn — thêm vào là đọc ngay, không cần tải về hay chuẩn bị.</span></div>
       <div class="starter-catalog-row">${remaining.map(item=>`
@@ -313,7 +314,7 @@
       estimatedLevel:item.level,subtitleFileName:item.id,url:item.source.url||'',
       resolveUnitIds:(sentence)=>L.matchUnitsInText(db.items||[],sentence).map(match=>match.unitId)
     }));
-    reloadHub({message:`Đã thêm “${item.title}” từ thư viện gợi ý — đọc và bấm từ để lưu Unit.`,openSource:item.title});
+    reloadHub({message:`Đã thêm “${item.title}” từ thư viện gợi ý — đọc và bấm từ để lưu Unit.`,openSource:item.id});
   }
 
   let readerSourceKey=null;
@@ -482,7 +483,7 @@
           // sentence into a real card via cardsFromCaptures on next rebuild.
           if(capture&&sentenceTranslation){
             const row=(db.captures||[]).find(c=>String(c.id)===String(capture.id));
-            if(row&&!row.nativeSentence)row.nativeSentence=sentenceTranslation;
+            if(row&&!row.nativeSentence){row.nativeSentence=sentenceTranslation;row.updatedAt=Date.now();}
           }
           return {result:true};
         });
@@ -635,7 +636,7 @@
       subtitleFileName:'demo-meetup',
       resolveUnitIds:(sentence)=>L.matchUnitsInText(db.items||[],sentence).map(match=>match.unitId)
     }));
-    reloadHub({message:'Đã thêm transcript mẫu — đọc thử và bấm từ bất kỳ để lưu thành Unit.',openSource:DEMO_SOURCE_TITLE});
+    reloadHub({message:'Đã thêm transcript mẫu — đọc thử và bấm từ bất kỳ để lưu thành Unit.',openSource:'demo-meetup'});
   }
 
   async function importPersonalTranscript(){
@@ -652,9 +653,13 @@
       const segments=file?(isJson?TI.parseJson(raw):TI.parseSrt(raw)):TI.parsePlain(raw);
       const sourceLevel=$('importSourceLevel')?.value||'';
       const sourceTitle=$('importSourceTitle')?.value.trim()||file?.name||'Transcript dán';
+      // Identity: the video URL or file name when present; otherwise a
+      // content hash so two different pasted sources sharing a title do not
+      // collapse into one group (sourceKey collision fix).
+      const sourceId=$('importUrlInput')?.value.trim()||file?.name||SC.stableId('src',[sourceTitle,segments[0]?.text||'',segments.length].join('|'));
       const {result:transactionResult}=store.transact((db)=>{
         const result=TI.importIntoDb(db,segments,{
-          sourceId:$('importUrlInput')?.value.trim()||file?.name||sourceTitle,
+          sourceId,
           sourceKind:'youtube',
           sourceTitle,
           estimatedLevel:sourceLevel,
@@ -673,7 +678,7 @@
       const message=`${result.total} segments · ${result.added} mới · ${result.ready} có translation · ${result.linkedSegments} segment gặp lại ${result.linkedUnitIds.length} Unit đã có.`;
       // Post-import transition: land in the reader on the new source (LingQ
       // "View lesson"), never back at a form or straight into review.
-      const newSourceKey=IM?IM.sourceKey({sourceTitle,subtitleFileName:file?.name||'dán transcript',file:{name:$('importMediaNameInput')?.value.trim()||file?.name||''},url:$('importUrlInput')?.value.trim()||''}):null;
+      const newSourceKey=IM?IM.sourceKey({sourceId,sourceTitle,subtitleFileName:file?.name||'dán transcript',file:{name:$('importMediaNameInput')?.value.trim()||file?.name||''},url:$('importUrlInput')?.value.trim()||''}):null;
       reloadHub({message:`${message} Đã thêm — bắt đầu đọc và bấm từ bất kỳ để lưu Unit.`,suitability,openSource:newSourceKey||sourceTitle});
     }catch(error){
       showInlineMessage(`Import lỗi: ${error.message}`,true);

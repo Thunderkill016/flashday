@@ -132,4 +132,15 @@ const mixed = (unitId) => (unitId === 'u1' ? 'known' : 'learning');
   assert.strictEqual(junk[0].kind, 'line-viewed', 'unknown encounter kinds must not enter the log');
 }
 
-console.log('FlashDay immersion engine: 9 checks passed');
+{
+  // sourceKey collision fix: two DIFFERENT sources that share a title must
+  // stay separate groups once sourceId exists; legacy captures without
+  // sourceId keep the title key they were grouped under.
+  const a = SC.normalizeCapture({ id: 'a', sentence: 's1', sourceTitle: 'Daily vlog', sourceId: 'yt-AAA' });
+  const b = SC.normalizeCapture({ id: 'b', sentence: 's2', sourceTitle: 'Daily vlog', sourceId: 'yt-BBB' });
+  const legacy = SC.normalizeCapture({ id: 'c', sentence: 's3', sourceTitle: 'Daily vlog' });
+  assert.notStrictEqual(IM.sourceKey(a), IM.sourceKey(b), 'same title, different sourceId → different groups');
+  assert.strictEqual(IM.sourceKey(legacy), 'Daily vlog', 'legacy capture keeps title key');
+}
+
+console.log('FlashDay immersion engine: 10 checks passed');

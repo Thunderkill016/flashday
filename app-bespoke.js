@@ -822,7 +822,25 @@
     const list = $('memoryList');
     const engine = A.buildEngine(db);
     const nowMs = Date.now();
-    list.innerHTML = errorMemoryHtml(nowMs) + (db.items || []).map((item) => {
+    // Unit search/filter — memory lists grow past a screen quickly; LingQ and
+    // Anki both treat vocabulary search as table stakes.
+    const query = String($('memorySearch')?.value || '').toLowerCase().trim();
+    // Index captured source sentences by unit so search reaches the context
+    // the learner actually met the unit in, not just target/meaning.
+    const contextByUnit = new Map();
+    if (query) {
+      for (const cap of db.captures || []) {
+        const hay = `${cap.sentence || ''} ${cap.nativeSentence || ''}`.toLowerCase();
+        for (const unitId of cap.linkedUnitIds || []) {
+          contextByUnit.set(unitId, `${contextByUnit.get(unitId) || ''} ${hay}`);
+        }
+      }
+    }
+    const items = (db.items || []).filter((item) =>
+      !query || String(item.target || '').toLowerCase().includes(query)
+        || String(item.meaning || '').toLowerCase().includes(query)
+        || (contextByUnit.get(item.id) || '').includes(query));
+    const itemsHtml = items.map((item) => {
       const statuses = A.itemStatus(db, item.id, nowMs, engine);
       const cardCount = A.cardCountForUnit(db, item.id, engine);
       const seenContexts = A.seenContextCount(db, item.id);
@@ -842,7 +860,9 @@
         : nextDue <= nowMs ? 'đang đến hạn'
         : `hạn ${new Date(nextDue).toLocaleDateString('vi-VN', { day: 'numeric', month: 'numeric' })}`;
       return `<article class="memory-card"><div class="memory-top"><div><div class="memory-title">${esc(item.target)}</div><div class="memory-meaning">${esc(item.meaning)}</div></div><div class="memory-badges"><span class="state-pill state-${state}">${stateLabel}</span><span class="type-pill">${pill}</span></div></div><div class="memory-meta">${dueText} · ${totalRatings} lượt chấm${item.canDo ? ` · ${esc(item.canDo)}` : ''}</div><details class="memory-details"><summary>Chi tiết 4 kỹ năng</summary><div class="cap-grid" style="margin-top:12px">${statuses.map((status) => `<div class="cap-cell" data-mode="${esc(status.mode)}"><label><span>${esc(status.label)}</span><b>${esc(status.status)}</b></label><small>${status.ratings} ratings</small></div>`).join('')}</div></details></article>`;
-    }).join('') || '<div class="empty">Chưa có unit.</div>';
+    }).join('');
+    list.innerHTML = errorMemoryHtml(nowMs)
+      + (itemsHtml || `<div class="empty">${query ? 'Không unit nào khớp bộ lọc.' : 'Chưa có unit.'}</div>`);
   }
 
   function renderDebug(last) {
@@ -1096,6 +1116,7 @@
   });
   $('resetBtn').onclick = resetLearning;
   $('authBtn').onclick = openAuthDialog;
+  if ($('memorySearch')) $('memorySearch').oninput = renderMemory;
   $('themeBtn').onclick = () => {
     const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
     document.documentElement.dataset.theme = next;
