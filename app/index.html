@@ -86,6 +86,7 @@
             <div class="field"><label for="importUrlInput">YouTube URL</label><input id="importUrlInput" type="url" placeholder="https://youtube.com/watch?v=..."></div>
             <div class="field"><label for="importSourceLevel">Level ước lượng của nguồn</label><select id="importSourceLevel"><option value="">Chưa biết</option><option>A1</option><option>A2</option><option>B1</option><option>B2</option><option>C1</option><option>C2</option></select><small class="field-note">Đây là metadata đầu vào để Bridge lọc độ khó; chưa có auto CEFR classifier.</small></div>
             <div class="field file-field"><label for="transcriptFileInput">Transcript JSON / SRT</label><input id="transcriptFileInput" type="file" accept=".json,.srt,application/json,text/plain"></div>
+            <div class="field"><label for="importPasteInput">…hoặc dán transcript thẳng</label><textarea id="importPasteInput" rows="4" placeholder="Mở video → Show transcript → copy → dán vào đây. Hỗ trợ cả dạng có timestamp (0:05) lẫn text thường."></textarea><small class="field-note">Dán text không cần file. Timestamp YouTube tự được nhận diện.</small></div>
             <details class="capture-details">
               <summary>Media nâng cao <span>(tùy chọn)</span></summary>
               <div class="capture-details-body">

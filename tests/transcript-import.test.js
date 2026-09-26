@@ -74,4 +74,37 @@ let checks=0;const ok=()=>checks++;
 assert.strictEqual(TI.formatTimestamp(3661.125),'01:01:01,125');
 ok();
 
+{
+  // YouTube "Show transcript" copy shape: timestamp on its own line, text next.
+  const yt=`0:00\nwelcome back to the channel\n0:05\ntoday we're looking at phones\n1:12\nlet's dive in`;
+  const segments=TI.parsePlain(yt);
+  assert.strictEqual(segments.length,3);
+  assert.strictEqual(segments[0].start,0);
+  assert.strictEqual(segments[1].start,5);
+  assert.strictEqual(segments[1].text,"today we're looking at phones");
+  assert.strictEqual(segments[2].start,72);
+  ok();
+}
+
+{
+  // Inline "0:05 text" shape and bracketed timestamps also parse.
+  const pasted=`[0:02] hello there\n1:30 second line\nplain prose line`;
+  const segments=TI.parsePlain(pasted);
+  assert.strictEqual(segments.length,3);
+  assert.strictEqual(segments[0].start,2);
+  assert.strictEqual(segments[0].text,'hello there');
+  assert.strictEqual(segments[1].start,90);
+  assert.strictEqual(segments[2].text,'plain prose line');
+  ok();
+}
+
+{
+  // Empty and timestamp-free text still yields one segment per line.
+  assert.deepStrictEqual(TI.parsePlain(''),[]);
+  const prose=TI.parsePlain('First line.\n\nSecond line.');
+  assert.strictEqual(prose.length,2);
+  assert.strictEqual(prose[0].text,'First line.');
+  ok();
+}
+
 console.log(`Transcript import: ${checks} audio2anki-derived checks passed`);

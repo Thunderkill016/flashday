@@ -188,3 +188,52 @@ Khi ba thứ đó nối vào nhau, FlashDay có learning loop rõ ràng hơn h�
 IMMERSION → NOTICE → CAPTURE → RETRIEVE → VARY CONTEXT → PRODUCE → IMMERSION
 
 Đây mới là moat hợp lý cho FlashDay: SRS không phải đích đến; SRS là hệ thống điều phối những gì người học cần gặp, nhớ và sử dụng tiếp theo trong tiếng Anh thật.
+
+---
+
+## Round 2 — Audit sau implementation (GPT consult)
+
+Ba feature trên đã ship (`456def3`, `4ebd733`, `38af811`). GPT round-2 audit kết luận:
+
+> FlashDay đã vượt qua "toy SRS app" stage. Khoảng cách hiện tại nằm ở **feedback quality + friction**, không còn nằm ở scheduler.
+
+### Gap nghiêm trọng nhất: correction loop cho output
+
+Write/speak trước đây chỉ pass/fail self-rate — không trả lời được "sai ở đâu, sửa thế nào, có thử lại không". Speak pattern: **feedback → sửa 1 lỗi quan trọng nhất → TRY AGAIN → verify corrected attempt**.
+
+### Round-2 parity check (trạng thái sau khi ship)
+
+| Capability | Ai làm tốt | FlashDay | Trạng thái |
+|---|---|---|---|
+| FSRS / individualized spacing | Anki | ✅ | DONE |
+| Context rotation | LingQ / Migaku | ✅ `rotation=first/rotated/repeated` | DONE |
+| Track known/learning/new xuyên content | LingQ / Migaku | ✅ reader highlighting | DONE |
+| Content difficulty theo vocab state | Migaku / LingQ | ✅ Next-for-you fit score | DONE |
+| Authentic-content import | LR / Migaku | ✅ SRT/JSON + **paste text** | DONE |
+| Recognition→listen→write→speak | Speak / Duolingo | ✅ MODE_LADDER | DONE |
+| Targeted correction sau write/speak | Speak / Duolingo | ✅ word-diff + ONE correction | DONE (round 2) |
+| Error → retry → verify | Speak Practice | ✅ retry loop + `corrected` flag | DONE (round 2) |
+| Memory of recurring errors | Duolingo Mistakes | ✅ `errorStats` → "Lỗi cần sửa" | DONE (round 2) |
+| One-click mining từ content đang xem | Migaku / LR / LingQ | ✅ click-word → save unit | DONE (round 2) |
+| Content ecosystem sẵn | LingQ / Migaku | ❌ | Out of scope (1 dev) |
+| Browser-extension immersion | Migaku / LR | ❌ | Out of scope |
+| Real conversational roleplay | Speak | ❌ | Out of scope (AI chat) |
+| Dictionary lookup cực nhanh | Migaku/LingQ | ⚠️ manual meaning entry | Chấp nhận — không có dict API |
+
+### Đã đủ tốt — đừng đụng (GPT verdict)
+
+- FSRS Unit×mode scheduler — ROI viết scheduler mới thấp hơn sửa feedback loop
+- MODE_LADDER 4 mode — đừng bành thành 11 mode; nâng chất lượng transition
+- Context Rotation — đủ
+- Immersion Difficulty Engine — đủ cho V1 production; đừng tinh chỉnh fit score
+- Streak/daily stats — đủ; không XP/league/gem
+
+### Learning loop sau round 2
+
+```
+REAL CONTENT → NOTICE/CAPTURE (click-word mining) → FSRS → CONTEXT ROTATION
+→ READ → LISTEN → WRITE → SPEAK → ERROR → CORRECTION → RETRY
+→ RECURRING ERROR MEMORY → FUTURE PRACTICE → REAL CONTENT
+```
+
+Remaining distance to LingQ/Migaku = content ecosystem/distribution, not pedagogy.

@@ -677,12 +677,19 @@
       .sort((a, b) => b[1].lastAt - a[1].lastAt)
       .slice(0, 5);
     if (!recent.length) return '';
+    // The user-level pattern matters as much as per-unit misses — "keeps
+    // dropping words" is a habit to break, not a fact about one unit.
+    const topTypes = Object.entries(stats.byType)
+      .sort((a, b) => b[1].count - a[1].count)
+      .slice(0, 3)
+      .map(([type, bucket]) => `${ERROR_LABELS[type] || type} ×${bucket.count}`)
+      .join(' · ');
     const rows = recent.map(([unitId, bucket]) => {
       const item = itemById(unitId);
       const fixed = bucket.correctedCount ? ` · đã sửa ${bucket.correctedCount}×` : '';
       return `<li><b>${esc(item?.target || unitId)}</b><span class="muted-copy"> — ${bucket.count} lần lỗi${fixed}</span></li>`;
     }).join('');
-    return `<div class="error-memory"><b>Lỗi cần sửa</b><ul>${rows}</ul></div>`;
+    return `<div class="error-memory"><b>Lỗi cần sửa</b>${topTypes ? `<p class="muted-copy" style="margin:0 0 6px">Hay gặp: ${esc(topTypes)}</p>` : ''}<ul>${rows}</ul></div>`;
   }
 
   function renderMemory() {

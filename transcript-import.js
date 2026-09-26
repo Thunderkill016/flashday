@@ -78,6 +78,35 @@
     return rows.map(normalizeSegment).filter(s=>s.text);
   }
 
+  // Frictionless capture path: pasted transcript text (e.g. YouTube "Show
+  // transcript" → copy) without an SRT file. Handles both shapes YouTube
+  // produces — a bare timestamp on its own line followed by the text line,
+  // and "0:05 some text" on one line — plus plain prose where every
+  // non-empty line becomes a segment with no real timing.
+  const PLAIN_TS=/^\s*\[?(?:(\d{1,2}):)?(\d{1,2}):(\d{2})(?:[.,](\d{1,3}))?\]?\s*$/;
+  const INLINE_TS=/^\s*\[?(?:(\d{1,2}):)?(\d{1,2}):(\d{2})(?:[.,](\d{1,3}))?\]?\s+(.+)$/;
+  function plainTimestamp(match){
+    const seconds=(Number(match[1]||0)*3600)+(Number(match[2])*60)+Number(match[3]);
+    const millis=match[4]?Number(`0.${match[4]}`):0;
+    return seconds+millis;
+  }
+  function parsePlain(input){
+    const lines=String(input||'').replace(/\r\n?/g,'\n').split('\n');
+    const segments=[];let pendingStart=null;
+    for(const line of lines){
+      const trimmed=line.trim();
+      if(!trimmed)continue;
+      const bare=PLAIN_TS.exec(trimmed);
+      if(bare){pendingStart=plainTimestamp(bare);continue;}
+      const inline=INLINE_TS.exec(trimmed);
+      const start=inline?plainTimestamp(inline):(pendingStart??segments.length*3);
+      const text=inline?inline[5]:trimmed;
+      segments.push(normalizeSegment({start,end:start,text}));
+      pendingStart=null;
+    }
+    return segments;
+  }
+
   // Mirrors audio2anki split_audio boundary calculation. Actual audio extraction
   // remains a server/worker concern; the browser only preserves requested range.
   function clipWindow(segment,{durationSeconds=Infinity,paddingMs=200}={}){
@@ -143,5 +172,5 @@
     return {captures,added,ready,linkedSegments:linked,linkedUnitIds:[...linkedUnits],total:captures.length};
   }
 
-  return {normalizeSegment,timestampToSeconds,formatTimestamp,parseSrt,parseJson,clipWindow,surrounding,segmentsToCaptures,importIntoDb};
+  return {normalizeSegment,timestampToSeconds,formatTimestamp,parseSrt,parseJson,parsePlain,clipWindow,surrounding,segmentsToCaptures,importIntoDb};
 });

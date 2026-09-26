@@ -222,6 +222,50 @@
   }
 
   let readerSourceKey=null;
+  let readerCaptures=[];
+
+  // LingQ-style click-to-mine: an untagged word in the reader is one click
+  // away from becoming a tracked unit with its source sentence attached.
+  function wordSpans(text){
+    return text.split(/(\s+)/).map((token)=>{
+      if(/^\s*$/.test(token))return esc(token);
+      const clean=token.replace(/^[^\p{L}\p{N}'’]+|[^\p{L}\p{N}'’]+$/gu,'');
+      if(!clean||!/[\p{L}]/u.test(clean))return esc(token);
+      return `<span class="tok-word" data-word="${esc(clean)}">${esc(token)}</span>`;
+    }).join('');
+  }
+
+  function openWordCapture(word,capture){
+    const box=$('wordCapturePanel');if(!box)return;
+    box.classList.remove('hidden');
+    box.innerHTML=`<div class="word-capture">
+      <p class="field-note" style="margin:0">Lưu từ/cụm này thành Unit — câu nguồn đi kèm tự động.</p>
+      <div class="field"><label for="wcTarget">Từ / cụm tiếng Anh</label><input id="wcTarget" value="${esc(word)}"></div>
+      <div class="field"><label for="wcMeaning">Nghĩa tiếng Việt</label><input id="wcMeaning" placeholder="ví dụ: đang trên đường tới"></div>
+      <p class="wc-sentence">${esc(capture?.sentence||'')}</p>
+      <div class="secondary-actions"><button id="wcSave" class="primary-btn" type="button">Lưu unit</button><button id="wcCancel" class="ghost-btn" type="button">Huỷ</button></div>
+    </div>`;
+    $('wcMeaning').focus();
+    $('wcCancel').onclick=()=>{box.classList.add('hidden');box.innerHTML='';};
+    $('wcSave').onclick=()=>{
+      try{
+        const target=$('wcTarget').value.trim();
+        const meaning=$('wcMeaning').value.trim();
+        if(!meaning){$('wcMeaning').focus();return;}
+        store.transact((db)=>{D.addItem(db,{
+          target,meaning,
+          type:target.includes(' ')?'chunk':'word_sense',
+          origin:'source-captured',
+          exampleSentence:capture?.sentence||'',
+          exampleTranslation:capture?.nativeSentence||'',
+          contexts:capture?.sourceTitle?[capture.sourceTitle]:[]
+        });return {result:true};});
+        box.classList.add('hidden');box.innerHTML='';
+        showInlineMessage(`Đã lưu “${target}” — sẽ xuất hiện trong lượt ôn.`);
+        openSource(readerSourceKey);
+      }catch(error){showInlineMessage(error.message,true);}
+    };
+  }
 
   // Inline transcript reader — the immersion surface. Unit spans are tinted
   // by knowledge level so seeing a word mid-sentence doubles as a noticing
@@ -231,49 +275,63 @@
     if(readerSourceKey===key){readerSourceKey=null;panel.classList.add('hidden');panel.innerHTML='';return;}
     readerSourceKey=key;
     const db=store.refresh();
-    const captures=(db.captures||[]).filter(c=>IM.sourceKey(c)===key)
+    readerCaptures=(db.captures||[]).filter(c=>IM.sourceKey(c)===key)
       .sort((a,b)=>(Number(a.subtitle?.index)||0)-(Number(b.subtitle?.index)||0)||(Number(a.mediaTimestamp)||0)-(Number(b.mediaTimestamp)||0));
-    const summary=IM.assessSource(db,key,captures);
+    const summary=IM.assessSource(db,key,readerCaptures);
     panel.innerHTML=`<div class="source-reader-head">
         <div><strong>${esc(summary.title)}</strong><span>${summary.segments} câu · ~${summary.minutes} phút · deck phủ ${Math.round(summary.coverage*100)}%</span></div>
         <button type="button" class="ghost-btn" id="closeSourceReader">Đóng</button>
       </div>
-      <div class="source-reader-body">${captures.map(c=>{
+      <div class="source-reader-body">${readerCaptures.map((c,lineIndex)=>{
         const parts=IM.annotatedParts(db,c.sentence||'');
-        const marked=parts.map(part=>part.unitId?`<mark class="token-${part.knowledge}" title="${esc((db.items||[]).find(i=>i.id===part.unitId)?.meaning||'')}">${esc(part.text)}</mark>`:esc(part.text)).join('');
+        const marked=parts.map(part=>part.unitId
+          ?`<mark class="token-${part.knowledge}" title="${esc((db.items||[]).find(i=>i.id===part.unitId)?.meaning||'')}">${esc(part.text)}</mark>`
+          :wordSpans(part.text)).join('');
         return `<div class="reader-line">
           <button type="button" class="reader-play" data-say="${esc(c.sentence||'')}" title="Nghe câu này">▶</button>
-          <div class="reader-text"><p>${marked||esc(c.sentence||'')}</p>${c.nativeSentence?`<small>${esc(c.nativeSentence)}</small>`:''}</div>
+          <div class="reader-text"><p data-line="${lineIndex}">${marked||esc(c.sentence||'')}</p>${c.nativeSentence?`<small>${esc(c.nativeSentence)}</small>`:''}</div>
         </div>`;
       }).join('')}</div>
-      <p class="footer-note">Tô sáng: <mark class="token-known">đã thuộc</mark> <mark class="token-learning">đang học</mark> <mark class="token-new">trong bộ nhưng chưa ôn</mark> — phần không tô là từ ngoài deck.</p>`;
+      <div id="wordCapturePanel" class="hidden"></div>
+      <p class="footer-note">Tô sáng: <mark class="token-known">đã thuộc</mark> <mark class="token-learning">đang học</mark> <mark class="token-new">trong bộ nhưng chưa ôn</mark> — phần không tô là từ ngoài deck. <b>Bấm từ bất kỳ để lưu thành Unit.</b></p>`;
     panel.classList.remove('hidden');
     $('closeSourceReader').onclick=()=>{readerSourceKey=null;panel.classList.add('hidden');panel.innerHTML='';};
     for(const button of panel.querySelectorAll('.reader-play')){
       button.onclick=()=>speakSentence(button.dataset.say||'');
     }
+    for(const word of panel.querySelectorAll('.tok-word')){
+      word.onclick=()=>{
+        const line=word.closest('.reader-line')?.querySelector('[data-line]');
+        const capture=line?readerCaptures[Number(line.dataset.line)]:null;
+        openWordCapture(word.dataset.word,capture);
+      };
+      word.onkeydown=(event)=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();word.click();}};
+    }
   }
 
   async function importPersonalTranscript(){
     const file=$('transcriptFileInput')?.files?.[0];
-    if(!file){showInlineMessage('Chọn file transcript JSON hoặc SRT trước.',true);return;}
+    const pasted=$('importPasteInput')?.value?.trim()||'';
+    if(!file&&!pasted){showInlineMessage('Chọn file transcript JSON/SRT hoặc dán transcript vào ô dưới.',true);return;}
     const button=$('importTranscriptBtn');
     if(button)button.disabled=true;
     try{
-      const raw=await file.text();
-      const isJson=file.name.toLowerCase().endsWith('.json')||file.type.includes('json');
-      const segments=isJson?TI.parseJson(raw):TI.parseSrt(raw);
+      const raw=file?await file.text():pasted;
+      const isJson=file&&(file.name.toLowerCase().endsWith('.json')||file.type.includes('json'));
+      // Paste path uses parsePlain (YouTube copy format or plain lines);
+      // file path keeps the strict JSON/SRT parsers.
+      const segments=file?(isJson?TI.parseJson(raw):TI.parseSrt(raw)):TI.parsePlain(raw);
       const sourceLevel=$('importSourceLevel')?.value||'';
-      const sourceTitle=$('importSourceTitle')?.value.trim()||file.name;
+      const sourceTitle=$('importSourceTitle')?.value.trim()||file?.name||'Transcript dán';
       const {result:transactionResult}=store.transact((db)=>{
         const result=TI.importIntoDb(db,segments,{
-          sourceId:$('importUrlInput')?.value.trim()||file.name,
+          sourceId:$('importUrlInput')?.value.trim()||file?.name||sourceTitle,
           sourceKind:'youtube',
           sourceTitle,
           estimatedLevel:sourceLevel,
           url:$('importUrlInput')?.value.trim()||'',
-          fileName:$('importMediaNameInput')?.value.trim()||file.name,
-          subtitleFileName:file.name,
+          fileName:$('importMediaNameInput')?.value.trim()||file?.name||'',
+          subtitleFileName:file?.name||'dán transcript',
           audioBasePath:$('importAudioBaseInput')?.value.trim()||'',
           contextRadius:1,
           paddingMs:200,
