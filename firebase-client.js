@@ -60,8 +60,9 @@ export function createClient(config) {
   const firestore = getFirestore(app);
 
   // Completes a signInWithRedirect round-trip on whichever page the provider
-  // sends the user back to.
-  getRedirectResult(auth).catch(() => undefined);
+  // sends the user back to. Keep the promise so callers can surface redirect
+  // failures instead of silently landing logged-out.
+  const redirectResult = getRedirectResult(auth).catch((error) => ({ error }));
 
   async function sessionFor(user) {
     if (!user) return null;
@@ -101,6 +102,9 @@ export function createClient(config) {
       try {
         const credential = await signInWithEmailAndPassword(auth, email, password);
         if (!credential.user.emailVerified) {
+          // A lost verification email must not become a permanent lockout —
+          // resend it on every sign-in attempt before refusing access.
+          try { await sendEmailVerification(credential.user); } catch (_e) { /* rate-limited resends still surface the same sign-in error */ }
           await firebaseSignOut(auth);
           return fail(new Error('Email not confirmed'));
         }
@@ -155,6 +159,14 @@ export function createClient(config) {
     getSession: async () => {
       await auth.authStateReady();
       return ok({ session: await sessionFor(auth.currentUser) });
+    },
+
+    // Resolves the pending signInWithRedirect round-trip once; the provider
+    // error is mapped like every other auth failure.
+    getRedirectResult: async () => {
+      const result = await redirectResult;
+      if (result?.error) return fail(result.error);
+      return ok(result || null);
     },
 
     onAuthStateChange: (callback) => {

@@ -233,6 +233,12 @@ if (resetCode) {
 if (!supabase) {
   showStatus('Đăng nhập đang được cấu hình. Hãy thử lại sau.', 'error');
 } else {
+  // Surface a failed Google redirect (unauthorized domain, cancelled sign-in…)
+  // instead of silently landing back on this page logged out.
+  supabase.auth.getRedirectResult().then(({ error }) => {
+    if (error) showStatus(authErrorMessage(error), 'error');
+  });
+
   supabase.auth.getSession().then(({ data, error }) => {
     if (error) {
       showStatus(authErrorMessage(error), 'error');

@@ -25,7 +25,8 @@ export function requiresNewPasswordPolicy(mode) {
 export function authErrorMessage(error) {
   const message = String(error?.message || error || '').toLowerCase();
   if (message.includes('invalid login credentials')) return 'Email hoặc mật khẩu không đúng.';
-  if (message.includes('email not confirmed')) return 'Hãy xác nhận email trước khi đăng nhập.';
+  if (message.includes('user already registered')) return 'Email này đã có tài khoản. Hãy đăng nhập, hoặc dùng “Quên mật khẩu?”.';
+  if (message.includes('email not confirmed')) return 'Email chưa xác nhận — FlashDay vừa gửi lại link xác nhận. Kiểm tra cả spam.';
   if (message.includes('password should be at least')) return `Mật khẩu cần ít nhất ${MIN_PASSWORD_LENGTH} ký tự.`;
   if (message.includes('email rate limit exceeded') || message.includes('too many requests')) {
     return 'Bạn đã thử quá nhiều lần. Hãy đợi ít phút rồi thử lại.';
