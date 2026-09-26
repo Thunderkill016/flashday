@@ -712,3 +712,85 @@ a { text-decoration: none; color: inherit; }
   .auth-inner { padding: 40px 24px; }
 }
 
+
+/* ============================================================
+   01.5 THE LOOP — SRS-assisted immersion cycle
+   ============================================================ */
+.loop-section { padding: 120px 40px; max-width: 1440px; margin: 0 auto; }
+.loop-track { display: flex; align-items: stretch; justify-content: center; flex-wrap: wrap; gap: 12px; position: relative; }
+.loop-node { display: flex; flex-direction: column; gap: 6px; background: var(--ink-800); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 20px 22px; min-width: 150px; flex: 1 1 150px; max-width: 190px; transition: border-color 0.3s, transform 0.3s; }
+.loop-node:hover { border-color: rgba(255,255,255,0.25); transform: translateY(-4px); }
+.loop-node strong { font-family: var(--font-mono); font-size: 13px; letter-spacing: 0.08em; color: var(--paper-50); }
+.loop-node em { font-style: normal; font-size: 12px; color: var(--muted-dark); line-height: 1.45; }
+.loop-num { font-family: var(--font-mono); font-size: 11px; color: var(--flash); letter-spacing: 0.1em; }
+.loop-node--accent { border-color: rgba(232,255,101,0.35); background: rgba(232,255,101,0.06); }
+.loop-arrow { align-self: center; color: var(--muted-dark); font-family: var(--font-mono); font-size: 18px; }
+.loop-return { flex-basis: 100%; text-align: center; margin-top: 8px; font-family: var(--font-mono); font-size: 13px; color: var(--flash); letter-spacing: 0.06em; }
+@media (max-width: 900px) { .loop-arrow { display: none; } .loop-node { max-width: none; } }
+
+/* ============================================================
+   01.7 THE READER — annotated transcript demo
+   ============================================================ */
+.reader-section { background: var(--paper-50); padding: 140px 40px; position: relative; }
+.reader-container { max-width: 1280px; margin: 0 auto; display: grid; grid-template-columns: 5fr 7fr; gap: 64px; align-items: center; }
+.reader-legend { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 32px; }
+.lg-item { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--ink-900); }
+.lg-dot { width: 12px; height: 12px; border-radius: 4px; display: inline-block; }
+.lg-hint { color: var(--ink-900); opacity: 0.5; font-weight: 500; }
+
+.reader-demo { display: flex; flex-direction: column; gap: 20px; }
+.reader-window { background: var(--ink-950); border-radius: 20px; overflow: hidden; box-shadow: 0 30px 80px rgba(9,11,13,0.35); }
+.reader-titlebar { display: flex; align-items: center; gap: 8px; padding: 14px 18px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+.rt-dot { width: 10px; height: 10px; border-radius: 50%; background: rgba(255,255,255,0.18); }
+.rt-title { margin-left: 8px; font-family: var(--font-mono); font-size: 11px; color: var(--muted-dark); letter-spacing: 0.04em; }
+.reader-body { padding: 28px 32px 32px; }
+.reader-line { font-size: 17px; line-height: 2; color: rgba(255,255,255,0.85); margin: 0 0 18px; }
+.tk { border-radius: 5px; padding: 1px 3px; }
+.tk-known { background: rgba(199,244,91,0.16); color: var(--read); }
+.tk-learning { background: rgba(245,184,90,0.16); color: #F5B85A; }
+.tk-new { background: rgba(255,106,94,0.16); color: #FF8B81; }
+.tk-plain { color: rgba(255,255,255,0.55); }
+.tk-capture { background: rgba(232,255,101,0.22); color: var(--flash); position: relative; cursor: pointer; border-bottom: 2px solid var(--flash); }
+.tk-cursor { display: inline-block; width: 2px; height: 1em; background: var(--flash); vertical-align: -0.15em; margin-left: 2px; animation: cursorBlink 1s step-end infinite; }
+@keyframes cursorBlink { 50% { opacity: 0; } }
+.reader-capture-chip { display: inline-flex; align-items: center; gap: 10px; margin-top: 6px; font-size: 13px; color: var(--paper-50); background: rgba(232,255,101,0.1); border: 1px solid rgba(232,255,101,0.3); padding: 10px 16px; border-radius: 100px; }
+.rc-check { color: var(--flash); font-weight: 700; }
+
+.next-for-you { background: #ffffff; border: 1px solid rgba(0,0,0,0.08); border-radius: 20px; padding: 24px 28px; box-shadow: 0 16px 40px rgba(9,11,13,0.08); }
+.nfy-item { padding: 14px 0; }
+.nfy-item + .nfy-item { border-top: 1px solid rgba(0,0,0,0.06); }
+.nfy-name { font-size: 14px; font-weight: 700; color: var(--ink-950); display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.nfy-pill { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; color: var(--ink-950); background: var(--flash); padding: 3px 10px; border-radius: 100px; }
+.nfy-pill.nfy-muted { background: rgba(0,0,0,0.07); color: var(--muted-light); }
+.nfy-bar { display: flex; height: 6px; border-radius: 4px; overflow: hidden; background: rgba(0,0,0,0.06); margin-bottom: 8px; }
+.nfy-bar i { display: block; height: 100%; }
+.nfy-meta { font-size: 12px; color: var(--muted-light); }
+
+@media (max-width: 900px) {
+  .reader-container { grid-template-columns: 1fr; gap: 40px; }
+  .reader-section { padding: 80px 24px; }
+  .reader-body { padding: 20px; }
+  .reader-line { font-size: 15px; }
+}
+
+/* ============================================================
+   04.5 THE CORRECTION LOOP — diff → one fix → retry
+   ============================================================ */
+.correction-section { padding: 140px 40px; max-width: 1440px; margin: 0 auto; }
+.correction-container { display: grid; grid-template-columns: 5fr 6fr; gap: 72px; align-items: center; }
+.correction-demo { display: flex; flex-direction: column; gap: 0; align-items: stretch; }
+.corr-card { background: var(--ink-800); border: 1px solid rgba(255,255,255,0.1); border-radius: 18px; padding: 24px 28px; }
+.corr-tag { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em; color: var(--muted-dark); display: block; margin-bottom: 12px; }
+.corr-tag--ok { color: var(--read); }
+.corr-text { font-size: 19px; line-height: 1.6; color: var(--paper-50); margin: 0 0 10px; }
+.corr-wrong { background: rgba(255,106,94,0.2); color: #FF8B81; padding: 1px 5px; border-radius: 5px; text-decoration: line-through; text-decoration-color: rgba(255,106,94,0.6); }
+.corr-missing { color: var(--muted-dark); }
+.corr-right { background: rgba(199,244,91,0.16); color: var(--read); padding: 1px 5px; border-radius: 5px; }
+.corr-hint { font-size: 13px; color: var(--speak); margin: 0; }
+.corr-meta { font-size: 12px; font-family: var(--font-mono); color: var(--muted-dark); margin: 0; }
+.corr-arrow { text-align: center; font-family: var(--font-mono); font-size: 12px; color: var(--flash); padding: 14px 0; letter-spacing: 0.08em; }
+
+@media (max-width: 900px) {
+  .correction-container { grid-template-columns: 1fr; gap: 40px; }
+  .correction-section { padding: 80px 24px; }
+}

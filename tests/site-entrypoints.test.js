@@ -23,6 +23,10 @@ assert.match(landing, /family=Be\+Vietnam\+Pro/);
 assert.match(landing, /family=Bricolage\+Grotesque/);
 assert.match(landing, /family=IBM\+Plex\+Mono/);
 assert.doesNotMatch(landing, /<script type="module">\s*import \{ createClient \}/);
+// Regression: CSP script-src 'self' blocks every inline <script>. Landing
+// interactivity must live in an external file, or it silently dies on prod.
+assert.doesNotMatch(landing, /<script>\s/);
+assert.match(landing, /<script src="\/landing\.js" defer><\/script>/);
 
 assert.match(app, /href="\.\.\/styles\.css"/);
 assert.match(app, /src="\.\.\/main\.js"/);
@@ -42,4 +46,4 @@ assert.match(productBootstrap, /flashday:had-session/);
 assert.match(productBootstrap, /\/login\/\?session=lost#signin/);
 assert.match(productBootstrap, /\/login\/#signin/);
 
-console.log('FlashDay entrypoint contract: 33 checks passed');
+console.log('FlashDay entrypoint contract: 36 checks passed');
