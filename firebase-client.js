@@ -22,7 +22,7 @@ import {
   confirmPasswordReset,
   applyActionCode,
   updatePassword,
-  signOut as firebaseSignOut
+  signOut as firebaseSignOut,
 } from 'firebase/auth';
 import {
   isIgnorableResetError,
@@ -30,7 +30,7 @@ import {
   matchRows,
   paginateRows,
   rowDocId,
-  sortRows
+  sortRows,
 } from './cloud-compat.mjs';
 
 // Postgres `on delete cascade` for decks -> child tables is emulated here:
@@ -40,10 +40,19 @@ const DECK_CHILD_TABLES = [
   'cards',
   'source_captures',
   'review_events',
-  'learning_progress'
+  'learning_progress',
 ];
 
 const FIRESTORE_BATCH_LIMIT = 450;
+
+// Resending verification on every failed sign-in spams the mailbox and trips
+// Firebase's email rate limits — throttle to once per page session.
+const VERIFICATION_RESEND_COOLDOWN_MS = 60_000;
+let lastVerificationResend = 0;
+
+// Breadcrumb for the signInWithRedirect round-trip: the returning /login/
+// uses it to render a handoff state instead of flashing the login form.
+const OAUTH_PENDING_KEY = 'flashday:oauth-pending';
 
 export function createClient(config) {
   const app = initializeApp(config);
@@ -57,7 +66,7 @@ export function createClient(config) {
     if (!firestorePromise) {
       firestorePromise = import('firebase/firestore').then((fs) => ({
         ...fs,
-        db: fs.getFirestore(app)
+        db: fs.getFirestore(app),
       }));
     }
     return firestorePromise;
@@ -82,7 +91,7 @@ export function createClient(config) {
     return {
       access_token: token,
       token_type: 'bearer',
-      user: { id: user.uid, email: user.email || '' }
+      user: { id: user.uid, email: user.email || '' },
     };
   }
 
@@ -100,29 +109,43 @@ export function createClient(config) {
   // Verification/reset links get a continue URL back to the app. Without it,
   // Firebase's hosted action page strands the learner on *.firebaseapp.com.
   function actionCodeSettings(explicitUrl) {
-    const url = explicitUrl
-      || (typeof window !== 'undefined' ? `${window.location.origin}/login/` : null);
+    const url =
+      explicitUrl ||
+      (typeof window !== 'undefined'
+        ? `${window.location.origin}/login/`
+        : null);
     return url ? { url } : undefined;
   }
 
   const api = {
     signUp: async ({ email, password, options } = {}) => {
       try {
-        const credential = await createUserWithEmailAndPassword(auth, email, password);
+        const credential = await createUserWithEmailAndPassword(
+          auth,
+          email,
+          password
+        );
         // The account already exists at this point — a failed verification
         // send (rate limit, bad continue URL) must not report signup failure,
         // or retrying hits "email already in use" and the learner is stuck.
         let verificationError = null;
         try {
-          await sendEmailVerification(credential.user, actionCodeSettings(options?.emailRedirectTo));
+          await sendEmailVerification(
+            credential.user,
+            actionCodeSettings(options?.emailRedirectTo)
+          );
         } catch (error) {
           verificationError = error;
         }
         // Supabase's confirm-email flow returns no session until the address
         // is verified; mirror that so the UI keeps asking users to check mail.
         await firebaseSignOut(auth);
-        const data = { user: { id: credential.user.uid, email: credential.user.email }, session: null };
-        if (verificationError) data.verificationError = mapAuthError(verificationError).message;
+        const data = {
+          user: { id: credential.user.uid, email: credential.user.email },
+          session: null,
+        };
+        if (verificationError)
+          data.verificationError = mapAuthError(verificationError).message;
         return ok(data);
       } catch (error) {
         return fail(error);
@@ -131,22 +154,43 @@ export function createClient(config) {
 
     signInWithPassword: async ({ email, password }) => {
       try {
-        const credential = await signInWithEmailAndPassword(auth, email, password);
+        const credential = await signInWithEmailAndPassword(
+          auth,
+          email,
+          password
+        );
         if (!credential.user.emailVerified) {
           // A lost verification email must not become a permanent lockout —
-          // resend it on every sign-in attempt before refusing access.
-          try { await sendEmailVerification(credential.user, actionCodeSettings()); } catch (_e) { /* rate-limited resends still surface the same sign-in error */ }
+          // resend it (throttled) before refusing access.
+          if (
+            Date.now() - lastVerificationResend >
+            VERIFICATION_RESEND_COOLDOWN_MS
+          ) {
+            lastVerificationResend = Date.now();
+            try {
+              await sendEmailVerification(
+                credential.user,
+                actionCodeSettings()
+              );
+            } catch (_e) {
+              /* rate-limited resends still surface the same sign-in error */
+            }
+          }
           await firebaseSignOut(auth);
           return fail(new Error('Email not confirmed'));
         }
-        return ok({ user: credential.user, session: await sessionFor(credential.user) });
+        return ok({
+          user: credential.user,
+          session: await sessionFor(credential.user),
+        });
       } catch (error) {
         return fail(error);
       }
     },
 
     signInWithOAuth: async ({ provider }) => {
-      if (provider !== 'google') return fail(new Error('Provider is not enabled'));
+      if (provider !== 'google')
+        return fail(new Error('Provider is not enabled'));
       const googleProvider = new GoogleAuthProvider();
       try {
         // Popup-first: the credential arrives in the same call, no dependence
@@ -154,19 +198,37 @@ export function createClient(config) {
         // exactly where redirect sign-in loses its state (privacy browsers,
         // storage partitioning, cross-tab handoffs).
         const credential = await signInWithPopup(auth, googleProvider);
-        return ok({ user: credential.user, session: await sessionFor(credential.user) });
+        return ok({
+          user: credential.user,
+          session: await sessionFor(credential.user),
+        });
       } catch (error) {
         const code = String(error?.code || '');
-        if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+        if (
+          code === 'auth/popup-closed-by-user' ||
+          code === 'auth/cancelled-popup-request'
+        ) {
           // Ambiguous: the learner may have closed the popup on purpose, OR
           // the popup completed Google sign-in but the auth-domain iframe
           // could not deliver the event back (tracker-blockers, strict ETP).
           // Flag it so the UI can warn instead of dying silently.
           return ok({ cancelled: true });
         }
-        if (code === 'auth/popup-blocked' || code === 'auth/operation-not-supported-in-this-environment') {
+        if (
+          code === 'auth/popup-blocked' ||
+          code === 'auth/operation-not-supported-in-this-environment'
+        ) {
+          // If the round-trip survives, the marker lets /login/ skip the form
+          // flash; if storage is blocked it just never appears — no harm.
+          try {
+            sessionStorage.setItem(OAUTH_PENDING_KEY, '1');
+          } catch (_e) {
+            /* storage-blocked browsers lose the marker, same as the state */
+          }
           await signInWithRedirect(auth, googleProvider);
-          return ok();
+          // The page is already navigating away; flag it so the UI can show
+          // a handoff message in the remaining moments.
+          return ok({ redirecting: true });
         }
         return fail(error);
       }
@@ -174,7 +236,11 @@ export function createClient(config) {
 
     resetPasswordForEmail: async (email, { redirectTo } = {}) => {
       try {
-        await sendPasswordResetEmail(auth, email, actionCodeSettings(redirectTo));
+        await sendPasswordResetEmail(
+          auth,
+          email,
+          actionCodeSettings(redirectTo)
+        );
         return ok();
       } catch (error) {
         // "No such user" must look exactly like success so this endpoint
@@ -189,7 +255,25 @@ export function createClient(config) {
     applyActionCode: async (oobCode) => {
       try {
         await applyActionCode(auth, oobCode);
+        // A signed-in user's cached token still carries the pre-action claims
+        // (e.g. email_verified=false) — force-refresh so Rules and the UI see
+        // the new state immediately instead of failing for up to an hour.
+        if (auth.currentUser) {
+          await auth.currentUser.reload();
+          await auth.currentUser.getIdToken(true);
+        }
         return ok();
+      } catch (error) {
+        return fail(error);
+      }
+    },
+
+    // Pre-validates a reset link before the form renders, so expired/used
+    // codes fail fast ("send a new link") instead of after the learner has
+    // already typed and confirmed a new password.
+    checkPasswordResetCode: async (oobCode) => {
+      try {
+        return ok({ email: await verifyPasswordResetCode(auth, oobCode) });
       } catch (error) {
         return fail(error);
       }
@@ -201,8 +285,22 @@ export function createClient(config) {
       try {
         const email = await verifyPasswordResetCode(auth, oobCode);
         await confirmPasswordReset(auth, oobCode, newPassword);
-        const credential = await signInWithEmailAndPassword(auth, email, newPassword);
-        return ok({ user: credential.user, session: await sessionFor(credential.user) });
+        try {
+          const credential = await signInWithEmailAndPassword(
+            auth,
+            email,
+            newPassword
+          );
+          return ok({
+            user: credential.user,
+            session: await sessionFor(credential.user),
+          });
+        } catch (_reloginError) {
+          // The password already changed — only the automatic re-login failed
+          // (rate limit, network). Reporting a reset failure here would tell
+          // the learner to retry a link that no longer exists.
+          return ok({ passwordChanged: true, email });
+        }
       } catch (error) {
         return fail(error);
       }
@@ -235,7 +333,11 @@ export function createClient(config) {
       let initial = true;
       const unsubscribe = onAuthStateChanged(auth, async (user) => {
         const session = await sessionFor(user);
-        const event = initial ? 'INITIAL_SESSION' : user ? 'SIGNED_IN' : 'SIGNED_OUT';
+        const event = initial
+          ? 'INITIAL_SESSION'
+          : user
+            ? 'SIGNED_IN'
+            : 'SIGNED_OUT';
         initial = false;
         callback(event, session);
       });
@@ -249,7 +351,7 @@ export function createClient(config) {
       } catch (error) {
         return fail(error);
       }
-    }
+    },
   };
 
   async function userCollection(table) {
@@ -337,7 +439,9 @@ export function createClient(config) {
     async _select() {
       const scoped = await userCollection(this._table);
       if (scoped.error) return fail(scoped.error);
-      const snapshot = await scoped.fs.getDocs(scoped.fs.query(scoped.ref, ...this._wheres(scoped.fs)));
+      const snapshot = await scoped.fs.getDocs(
+        scoped.fs.query(scoped.ref, ...this._wheres(scoped.fs))
+      );
       let rows = snapshot.docs.map((entry) => entry.data());
       rows = sortRows(matchRows(rows, this._filters), this._orders);
       rows = paginateRows(rows, this._range, this._limit);
@@ -346,7 +450,10 @@ export function createClient(config) {
         return ok(rows[0]);
       }
       if (this._maybeSingle) {
-        if (rows.length > 1) return fail(new Error('JSON object requested, multiple rows returned'));
+        if (rows.length > 1)
+          return fail(
+            new Error('JSON object requested, multiple rows returned')
+          );
         return ok(rows[0] || null);
       }
       return ok(rows);
@@ -365,10 +472,12 @@ export function createClient(config) {
         const existing = merge ? await fs.getDoc(target) : null;
         if (merge && this._ignoreDuplicates && existing?.exists()) continue;
         const record = {
-          created_at: existing?.exists() ? existing.data().created_at : new Date().toISOString(),
+          created_at: existing?.exists()
+            ? existing.data().created_at
+            : new Date().toISOString(),
           ...row,
           id,
-          owner_id: scoped.user.uid
+          owner_id: scoped.user.uid,
         };
         await fs.setDoc(target, record, merge ? { merge: true } : undefined);
         written.push(record);
@@ -380,9 +489,12 @@ export function createClient(config) {
     async _delete() {
       const scoped = await userCollection(this._table);
       if (scoped.error) return fail(scoped.error);
-      if (!this._filters.length) return fail(new Error('Delete requires at least one filter'));
+      if (!this._filters.length)
+        return fail(new Error('Delete requires at least one filter'));
       const fs = scoped.fs;
-      const snapshot = await fs.getDocs(fs.query(scoped.ref, ...this._wheres(fs)));
+      const snapshot = await fs.getDocs(
+        fs.query(scoped.ref, ...this._wheres(fs))
+      );
       const targets = matchRows(
         snapshot.docs.map((entry) => entry.data()),
         this._filters
@@ -441,6 +553,6 @@ export function createClient(config) {
 
   return {
     auth: api,
-    from: (table) => new Builder(table)
+    from: (table) => new Builder(table),
   };
 }

@@ -23,7 +23,7 @@ if (!config?.apiKey || !config?.projectId || !config?.appId) {
       return;
     }
     if (event === 'SIGNED_OUT' && initialSessionResolved && window.location.pathname.includes('/app/')) {
-      window.location.replace('/');
+      window.location.replace('/login/?signedOut=1#signin');
     }
   });
 

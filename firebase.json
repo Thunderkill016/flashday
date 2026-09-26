@@ -6,7 +6,8 @@
         "oAuthBrandDisplayName": "FlashDay",
         "supportEmail": "thunderkill016@gmail.com",
         "authorizedRedirectUris": [
-          "https://flashday-22ae1.firebaseapp.com/__/auth/handler"
+          "https://flashday-22ae1.firebaseapp.com/__/auth/handler",
+          "https://flashdayvn.vercel.app/__/auth/handler"
         ]
       }
     }

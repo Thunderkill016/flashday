@@ -41,8 +41,12 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    // email_verified lives in the auth token, not the request body — a caller
+    // cannot claim it. The UI signs unverified users out, but that's UX;
+    // this is the enforcement: an unverified session cannot touch user data.
     function isOwner(uid) {
-      return isAuthenticated() && request.auth.uid == uid;
+      return isAuthenticated() && request.auth.uid == uid
+        && request.auth.token.email_verified == true;
     }
 
     // The document's owner_id field must always pin to the path owner —
