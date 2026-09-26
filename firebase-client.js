@@ -157,8 +157,11 @@ export function createClient(config) {
       } catch (error) {
         const code = String(error?.code || '');
         if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
-          // The learner closed the popup on purpose — not an error state.
-          return ok();
+          // Ambiguous: the learner may have closed the popup on purpose, OR
+          // the popup completed Google sign-in but the auth-domain iframe
+          // could not deliver the event back (tracker-blockers, strict ETP).
+          // Flag it so the UI can warn instead of dying silently.
+          return ok({ cancelled: true });
         }
         if (code === 'auth/popup-blocked' || code === 'auth/operation-not-supported-in-this-environment') {
           await signInWithRedirect(auth, googleProvider);

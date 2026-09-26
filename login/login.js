@@ -195,7 +195,22 @@ async function submitGoogle() {
     options: { redirectTo: appUrl() }
   });
   if (error) throw error;
-  if (data?.session) openAuthenticatedApp(data.session);
+  if (data?.session) {
+    openAuthenticatedApp(data.session);
+    return;
+  }
+  if (data?.cancelled) {
+    // The popup closed without producing a session. popup-closed-by-user is
+    // also Firebase's verdict when the helper iframe is blocked and the
+    // completed auth event never reaches this page — so name both causes.
+    const storage = await detectStorageBlocking();
+    showStatus(
+      storage.blocked
+        ? 'Cửa sổ Google đã đóng nhưng phiên không về được — trình duyệt đang chặn lưu trữ/iframe của Firebase. Tắt extension chặn tracker (uBlock, Privacy Badger…) cho trang này, hoặc đăng nhập bằng email/mật khẩu.'
+        : 'Cửa sổ đăng nhập Google đã đóng trước khi hoàn tất. Nếu bạn đã đăng nhập xong mà vẫn kẹt ở đây, một extension đang chặn Firebase — thử tắt nó hoặc dùng email/mật khẩu.',
+      'error'
+    );
+  }
 }
 
 tabs.forEach((tab) => tab.addEventListener('click', () => setMode(tab.dataset.tab)));
