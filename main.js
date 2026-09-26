@@ -7,6 +7,7 @@ import './flashday-data.js';
 import './flashday-store.js';
 import './learning-entry.js';
 import './word-lookup.js';
+import './starter-catalog.js';
 import './bespoke-engine.js';
 import './bespoke-card-index.js';
 import './source-capture.js';

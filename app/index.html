@@ -60,19 +60,20 @@
 
         <section class="learning-panel" aria-labelledby="personalTitle">
           <div class="learning-panel-head">
-            <div><span class="eyebrow">IMMERSION · MY CONTENT</span><h3 id="personalTitle">Nội dung của bạn</h3><p>Transcript YouTube (Show transcript → copy → dán), file JSON/SRT, hoặc text bất kỳ. URL được giữ làm provenance; FlashDay không giả vờ tự lấy transcript.</p></div>
+            <div><span class="eyebrow">IMMERSION · MY CONTENT</span><h3 id="personalTitle">Nội dung của bạn</h3><p>Dán link YouTube để tự lấy transcript (khi video có phụ đề), dán text, hoặc thêm từ thư viện gợi ý. URL được giữ làm provenance.</p></div>
           </div>
 
           <div id="sourceRecommendations" class="source-recs" aria-live="polite"></div>
           <div id="sourceReader" class="source-reader hidden"></div>
+          <div id="starterCatalog" class="starter-catalog" aria-live="polite"></div>
 
           <details id="importShell" class="import-shell">
             <summary><span class="import-shell-plus">＋</span> Thêm nội dung mới <span class="import-shell-hint">dán transcript · file · URL</span></summary>
             <div class="capture-form import-form">
-              <div class="field"><label for="importPasteInput">Dán transcript / text</label><textarea id="importPasteInput" rows="4" placeholder="Mở video → Show transcript → copy → dán vào đây. Hỗ trợ cả dạng có timestamp (0:05) lẫn text thường."></textarea><small class="field-note">Nhanh nhất: dán thẳng, không cần file. Timestamp YouTube tự được nhận diện.</small></div>
+              <div class="field"><label for="importUrlInput">YouTube URL</label><div class="url-fetch-row"><input id="importUrlInput" type="url" placeholder="https://youtube.com/watch?v=..."><button id="ytFetchBtn" class="ghost-btn" type="button" disabled>Lấy transcript</button></div><small class="field-note">Có phụ đề → tự kéo transcript về ô dưới để bạn kiểm tra trước khi phân tích.</small></div>
+              <div class="field"><label for="importPasteInput">Dán transcript / text</label><textarea id="importPasteInput" rows="4" placeholder="Transcript tự đổ về đây khi lấy từ URL — hoặc dán tay. Hỗ trợ cả dạng có timestamp (0:05) lẫn text thường."></textarea><small class="field-note">Timestamp YouTube tự được nhận diện — dùng để mở audio thật khi đọc.</small></div>
               <div class="field file-field"><label for="transcriptFileInput">…hoặc file transcript JSON / SRT</label><input id="transcriptFileInput" type="file" accept=".json,.srt,application/json,text/plain"></div>
               <div class="field"><label for="importSourceTitle">Tên video / nguồn</label><input id="importSourceTitle" placeholder="Ví dụ: MKBHD — phone review"></div>
-              <div class="field"><label for="importUrlInput">YouTube URL</label><input id="importUrlInput" type="url" placeholder="https://youtube.com/watch?v=..."></div>
               <div class="field"><label for="importSourceLevel">Level ước lượng của nguồn</label><select id="importSourceLevel"><option value="">Chưa biết</option><option>A1</option><option>A2</option><option>B1</option><option>B2</option><option>C1</option><option>C2</option></select><small class="field-note">Metadata đầu vào để Bridge lọc độ khó; chưa có auto CEFR classifier.</small></div>
               <details class="capture-details">
                 <summary>Media nâng cao <span>(tùy chọn)</span></summary>

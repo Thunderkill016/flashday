@@ -802,6 +802,22 @@ mark.token-new { border-bottom: 2px solid var(--memory-new); padding: 0 1px; }
 .reader-player { margin: 0 0 10px; }
 .reader-player iframe, .reader-player #readerPlayerEl { display: block; width: 100%; max-width: 560px; aspect-ratio: 16 / 9; margin: 0 auto; border: 0; border-radius: var(--fd-radius-md); background: #000; }
 
+/* Starter catalog — bundled sources; one tap adds to the library. */
+.starter-catalog { margin-top: 14px; }
+.starter-catalog-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+.starter-catalog-head .eyebrow { margin: 0; }
+.starter-catalog-head span:last-child { font-size: 12px; color: var(--fd-text-tertiary); }
+.starter-catalog-row { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+.catalog-card { flex: 0 0 auto; width: 210px; text-align: left; padding: 10px 12px; border: 1px solid var(--fd-border); border-radius: var(--fd-radius-md); background: var(--fd-surface); cursor: pointer; display: flex; flex-direction: column; gap: 6px; }
+.catalog-card:hover { border-color: var(--fd-accent); }
+.catalog-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.catalog-card-top b { font-size: 13.5px; line-height: 1.35; }
+.level-pill { flex-shrink: 0; padding: 2px 8px; border-radius: var(--radius-pill); border: 1px solid var(--fd-accent); color: var(--fd-accent); font-size: 11px; font-weight: 600; }
+.catalog-card-meta { font-size: 12px; color: var(--fd-text-tertiary); }
+.url-fetch-row { display: flex; gap: 8px; }
+.url-fetch-row input { flex: 1; }
+.url-fetch-row .ghost-btn { flex-shrink: 0; }
+
 /* ============================================================
    MODE IDENTITY — 4 kỹ năng mang màu riêng (tokens.css)
    ============================================================ */

@@ -7,6 +7,7 @@
   const TI=window.FlashDayTranscriptImport;
   const IM=window.FlashDayImmersion;
   const WLK=window.FlashDayLookup;
+  const CAT=window.FlashDayCatalog;
   const KEY='flashday-memory-engine-repo-driven';
   const PROFILE_TABLE='learner_profiles';
   const $=(id)=>document.getElementById(id);
@@ -277,6 +278,42 @@
     for(const button of root.querySelectorAll('.source-rec')){
       button.onclick=()=>openSource(button.dataset.sourceKey);
     }
+  }
+
+  // Bundled starter catalog — content exists before the learner has imported
+  // anything (the "library is never empty" layer: LingQ mini-stories, DS
+  // catalog). Items the learner already added are hidden, not greyed out.
+  function renderStarterCatalog(){
+    const root=$('starterCatalog');if(!root)return;
+    if(!CAT?.ITEMS){root.innerHTML='';return;}
+    const db=store.refresh();
+    const importedTitles=new Set((db.captures||[]).map(c=>String(c.sourceTitle||'')));
+    const remaining=CAT.ITEMS.filter(item=>!importedTitles.has(item.title));
+    if(!remaining.length){root.innerHTML='';return;}
+    root.innerHTML=`<div class="starter-catalog-head"><span class="eyebrow">THƯ VIỆN GỢI Ý</span><span>Bundle sẵn — thêm vào là đọc ngay, không cần tải về hay chuẩn bị.</span></div>
+      <div class="starter-catalog-row">${remaining.map(item=>`
+        <button type="button" class="catalog-card" data-catalog-id="${esc(item.id)}">
+          <span class="catalog-card-top"><b>${esc(item.title)}</b><span class="level-pill">${esc(item.level)}</span></span>
+          <span class="catalog-card-meta">~${item.minutes} phút · ${item.lines.length} câu · ${esc(item.source.name)}</span>
+        </button>`).join('')}</div>`;
+    for(const card of root.querySelectorAll('.catalog-card')){
+      card.onclick=()=>{
+        const item=CAT.ITEMS.find(i=>i.id===card.dataset.catalogId);
+        if(item)installCatalogItem(item);
+      };
+    }
+  }
+
+  function installCatalogItem(item){
+    const segments=item.lines.map(([text,translation],index)=>({
+      start:index*4,end:index*4+3.2,index,text,translation
+    }));
+    store.transact((db)=>TI.importIntoDb(db,segments,{
+      sourceId:item.id,sourceKind:'transcript',sourceTitle:item.title,
+      estimatedLevel:item.level,subtitleFileName:item.id,url:item.source.url||'',
+      resolveUnitIds:(sentence)=>L.matchUnitsInText(db.items||[],sentence).map(match=>match.unitId)
+    }));
+    reloadHub({message:`Đã thêm “${item.title}” từ thư viện gợi ý — đọc và bấm từ để lưu Unit.`,openSource:item.title});
   }
 
   let readerSourceKey=null;
@@ -714,7 +751,36 @@
   renderGuidedModules();
   renderTransferMissions();
   renderSources();
+  renderStarterCatalog();
   if($('importTranscriptBtn'))$('importTranscriptBtn').onclick=importPersonalTranscript;
+  // YouTube transcript auto-fetch — closes the "bring content with little
+  // preparation" gap. The fetched text lands in the paste box so the learner
+  // reviews/edits before it becomes captures.
+  const urlInput=$('importUrlInput'),fetchBtn=$('ytFetchBtn');
+  if(urlInput&&fetchBtn&&WLK){
+    urlInput.addEventListener('input',()=>{fetchBtn.disabled=!WLK.youtubeVideoId(urlInput.value);});
+    fetchBtn.onclick=async()=>{
+      const videoId=WLK.youtubeVideoId(urlInput.value);
+      if(!videoId)return;
+      fetchBtn.disabled=true;fetchBtn.textContent='Đang lấy…';
+      try{
+        const {title,segments}=await WLK.fetchYouTubeTranscript(videoId);
+        const paste=$('importPasteInput');
+        if(paste)paste.value=segments.map(s=>{
+          const t=Math.floor(s.start);
+          return `[${Math.floor(t/60)}:${String(t%60).padStart(2,'0')}] ${s.text}`;
+        }).join('\n');
+        const titleField=$('importSourceTitle');
+        if(titleField&&!titleField.value.trim()&&title)titleField.value=title;
+        showInlineMessage(`Đã lấy ${segments.length} câu từ video — kiểm tra rồi bấm “Phân tích & mở để đọc”.`);
+      }catch(error){
+        showInlineMessage(`${error.message||'Không lấy được transcript'} — mở video → Show transcript → copy → dán tay vẫn được.`,true);
+      }finally{
+        fetchBtn.textContent='Lấy transcript';
+        fetchBtn.disabled=!WLK.youtubeVideoId(urlInput.value);
+      }
+    };
+  }
   restoreUi();
   window.addEventListener('flashday:supabase-ready',(event)=>connectProfileCloud(event.detail));
 })();
