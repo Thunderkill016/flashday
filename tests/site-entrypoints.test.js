@@ -12,9 +12,8 @@ const productBootstrap = readFileSync(join(root, 'product-bootstrap.js'), 'utf8'
 assert.match(landing, /href="landing\.css"/);
 assert.match(landing, /href="\/login\/#signin">Log in/);
 assert.match(landing, /href="\/login\/#signup" class="btn-start">START/);
-assert.match(landing, /class="btn-flash mt-8" href="\/login\/#signup">/);
-assert.match(landing, /class="text-link-flash mt-4" href="\/login\/#signup">/);
-assert.match(landing, /href="\/login\/#signup" class="btn-flash-large"/);
+assert.match(landing, /class="btn-flash" href="\/login\/#signup">/);
+assert.match(landing, /class="btn-flash btn-flash--large" href="\/login\/#signup">/);
 assert.doesNotMatch(landing, /auth-trigger|landing-auth\.mjs|id="auth-form"/);
 assert.doesNotMatch(landing, /cdn\.tailwindcss\.com/);
 // The Recall Observatory landing intentionally uses its selected display/body/mono
@@ -26,6 +25,9 @@ assert.doesNotMatch(landing, /<script type="module">\s*import \{ createClient \}
 // Regression: CSP script-src 'self' blocks every inline <script>. Landing
 // interactivity must live in an external file, or it silently dies on prod.
 assert.doesNotMatch(landing, /<script>\s/);
+// Inline event handlers are inline script — CSP script-src 'self' blocks
+// them too, silently killing the control (the old audio button shipped dead).
+assert.doesNotMatch(landing, /\son(click|input|change|submit)=/);
 assert.match(landing, /<script src="\/landing\.js" defer><\/script>/);
 
 assert.match(app, /href="\.\.\/styles\.css"/);
@@ -77,4 +79,4 @@ const learningHub = readFileSync(join(root, 'learning-hub.js'), 'utf8');
 assert.match(learningHub, /data-rtheme/);
 assert.match(learningHub, /flashday:reader-prefs/);
 
-console.log(`FlashDay entrypoint contract: 51 checks passed`);
+console.log(`FlashDay entrypoint contract: 52 checks passed`);

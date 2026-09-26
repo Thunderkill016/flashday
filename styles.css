@@ -255,6 +255,13 @@ svg { display: block; }
 .guided-module p { margin: 6px 0 14px; color: var(--fd-text-secondary); font-size: 14px; }
 .guided-module-meta { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; color: var(--fd-text-secondary); font-size: 12px; font-weight: 700; }
 .module-action { min-height: 42px; padding: 0 16px; border: 1px solid var(--fd-border-interactive); border-radius: 999px; background: var(--fd-primary); color: var(--fd-primary-text); font-weight: 700; cursor: pointer; }
+.profile-save { margin-top: 14px; justify-self: start; }
+.field input[type="file"]::file-selector-button {
+  min-height: 36px; padding: 0 14px; margin-right: 12px;
+  border: 1px solid var(--fd-border-interactive); border-radius: var(--radius-sm);
+  background: var(--fd-surface-2); color: var(--fd-text-primary);
+  font: inherit; font-weight: 600; cursor: pointer;
+}
 .module-action[disabled] { background: var(--fd-surface-disabled); color: var(--fd-text-disabled); cursor: default; }
 .import-form { box-shadow: none; padding: 20px; background: var(--fd-canvas); }
 .suitability { margin-top: 14px; padding: 14px 16px; border-radius: var(--fd-radius-md); border: 1px solid var(--fd-border); background: var(--fd-surface); }
