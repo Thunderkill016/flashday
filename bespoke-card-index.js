@@ -10,11 +10,14 @@
  * FlashDay import helpers are clearly separated below; they are NOT upstream Bespoke code.
  */
 (function(root,factory){
-  if(typeof window==='undefined'&&typeof module==='object'&&module.exports) module.exports=factory(require('./bespoke-engine.js'));
-  else root.BespokeCardIndex=factory(root.BespokeSrs);
-})(typeof globalThis!=='undefined'?globalThis:this,function(B){
+  if(typeof window==='undefined'&&typeof module==='object'&&module.exports) module.exports=factory(require('./bespoke-engine.js'),require('./flashday-product.js'));
+  // Browser bundle imports card-index before flashday-product, so the product
+  // module is resolved lazily at call time rather than captured at load time.
+  else root.BespokeCardIndex=factory(root.BespokeSrs,function(){return root.FlashDayProduct;});
+})(typeof globalThis!=='undefined'?globalThis:this,function(B,P){
   'use strict';
   if(!B)throw new Error('BespokeSrs is required');
+  const product=()=>typeof P==='function'?P():P;
 
   class CardIndex{
     constructor(cards=[]){
@@ -60,18 +63,25 @@
     if(!card||!card.id||typeof card.sentence!=='string')throw new Error('Invalid Bespoke card');
     let sentenceIndex=0;
     for(const tag of card.unit_tags||[]){
-      const start=card.sentence.indexOf(tag.occurance,sentenceIndex);
+      const start=tagIndex(card.sentence,tag,sentenceIndex);
       if(start<0)throw new Error(`Tag occurance '${tag.occurance}' not found in sentence after index ${sentenceIndex}`);
       sentenceIndex=start+tag.occurance.length;
     }
     return true;
   }
 
+  // A tag that carries its own char offset (fresh tags do) is authoritative;
+  // legacy tags without it still resolve by indexOf as before.
+  function tagIndex(sentence,tag,fromIndex){
+    if(Number.isInteger(tag.index)&&sentence.slice(tag.index,tag.index+tag.occurance.length)===tag.occurance)return tag.index;
+    return sentence.indexOf(tag.occurance,fromIndex);
+  }
+
   function splitIntoParts(card){
     validateCard(card);
     const parts=[];let sentenceIndex=0;
     for(const tag of card.unit_tags||[]){
-      const start=card.sentence.indexOf(tag.occurance,sentenceIndex);
+      const start=tagIndex(card.sentence,tag,sentenceIndex);
       if(start>sentenceIndex)parts.push({occurance:card.sentence.slice(sentenceIndex,start),unit_id:''});
       parts.push({...tag});sentenceIndex=start+tag.occurance.length;
     }
@@ -101,12 +111,41 @@
   // grader data and is intentionally NOT used to define unit identity/cards.
   // ---------------------------------------------------------------------------
 
+  // Occurrences are matched on canonical token sequences, not raw substrings:
+  // word boundaries are inherent ("art" never tags inside "start"), sentence
+  // punctuation stored inside a form can't block a match ("I am on my way."
+  // still matches "I am on my way to work."), and contractions compare under
+  // the same expansion the attempt diff uses ("I'm" ≡ "i am"). The returned
+  // occurance is always an exact slice of the original sentence so card
+  // splitting/annotation keep working on real characters.
+  function sentenceTokens(sentence){
+    const P=product();
+    const tokens=[];const re=/[\p{L}\p{N}'’]+/gu;let match;
+    while((match=re.exec(String(sentence)))){
+      const canon=P?.canonicalTokens?P.canonicalTokens(match[0]):[match[0].toLowerCase()];
+      for(const part of canon)tokens.push({canon:part,start:match.index,end:match.index+match[0].length});
+    }
+    return tokens;
+  }
+
+  function formTokens(form){
+    const P=product();
+    const text=String(form);
+    return P?.canonicalTokens?P.canonicalTokens(text):text.toLowerCase().split(/\s+/).filter(Boolean);
+  }
+
   function findOccurrence(sentence,forms,fromIndex=0){
-    const lower=sentence.toLowerCase();let best=null;
+    const tokens=sentenceTokens(sentence);let best=null;
     for(const form of forms.filter(Boolean)){
-      const raw=String(form);const idx=lower.indexOf(raw.toLowerCase(),fromIndex);
-      if(idx>=0&&(best==null||idx<best.index||(idx===best.index&&raw.length>best.length))){
-        best={index:idx,length:raw.length,occurance:sentence.slice(idx,idx+raw.length)};
+      const wanted=formTokens(form);
+      if(!wanted.length||wanted.length>tokens.length)continue;
+      for(let i=0;i+wanted.length<=tokens.length;i++){
+        if(tokens[i].start<fromIndex)continue;
+        if(!wanted.every((w,offset)=>tokens[i+offset].canon===w))continue;
+        const start=tokens[i].start,end=tokens[i+wanted.length-1].end;
+        const hit={index:start,length:end-start,occurance:String(sentence).slice(start,end)};
+        if(best==null||hit.index<best.index||(hit.index===best.index&&hit.length>best.length))best=hit;
+        break;
       }
     }
     return best;
@@ -126,7 +165,7 @@
     const tags=[];let cursor=0;
     for(const hit of candidates){
       if(hit.index<cursor)continue;
-      tags.push({occurance:hit.occurance,unit_id:hit.unit_id});cursor=hit.index+hit.length;
+      tags.push({occurance:hit.occurance,unit_id:hit.unit_id,index:hit.index});cursor=hit.index+hit.length;
     }
     return tags;
   }

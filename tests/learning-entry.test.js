@@ -33,6 +33,11 @@ const C=require('../flashday-cloud.js');
   ];
   assert.deepEqual(L.matchUnitsInText(items,'Could you repeat that?'),[], 'accepted synonyms must not define Unit identity');
   assert.deepEqual(L.matchUnitsInText(items,'I am on my way.').map(x=>x.unitId),['u2'], 'explicit forms must match the same Unit');
+  // Canonical matching: contraction target ≡ expanded sentence, punctuation
+  // inside a stored form cannot block a mid-sentence match, and word
+  // boundaries are inherent (no 'art' inside 'started').
+  assert.deepEqual(L.matchUnitsInText(items,"Wait, I am on my way to work.").map(x=>x.unitId),['u2'], 'contraction target must match expanded surface form mid-sentence');
+  assert.deepEqual(L.matchUnitsInText([{id:'a',target:'art',forms:[],accepted:[]}],'She started the cart race.'),[], 'word boundary must block partial-token matches');
 }
 
 {

@@ -153,6 +153,26 @@
     return clone(remoteAt >= localAt ? remoteProfile : localProfile);
   }
 
+  // Encounter ids are deterministic per unit+capture+day, so the same line
+  // re-met on two devices is ONE record — the merge must union interaction
+  // kinds rather than let either side's provenance overwrite the other's.
+  function mergeEncounters(remoteValues, localValues) {
+    const merged = new Map();
+    const put = (value) => {
+      if (value?.id == null) return;
+      const key = String(value.id);
+      const prev = merged.get(key);
+      if (!prev) { merged.set(key, clone(value)); return; }
+      const kinds = [...(prev.kinds || [prev.kind]), ...(value.kinds || [value.kind])].filter(Boolean);
+      const at = Math.min(Number(prev.at) || Infinity, Number(value.at) || Infinity);
+      merged.set(key, { ...clone(value), at: Number.isFinite(at) ? at : Date.now(), kinds: [...new Set(kinds)] });
+      if (!merged.get(key).kind) merged.get(key).kind = merged.get(key).kinds[0];
+    };
+    for (const value of Array.isArray(localValues) ? localValues : []) put(value);
+    for (const value of Array.isArray(remoteValues) ? remoteValues : []) put(value);
+    return Array.from(merged.values());
+  }
+
   function mergeLearnerDb(localDb = {}, remote = {}, progressPayload = {}) {
     const remoteItems = (remote.units || []).map(itemFromRow);
     const remoteCards = (remote.cards || []).map((row) => row?.payload).filter(Boolean);
@@ -166,7 +186,7 @@
       .sort((a, b) => Number(a.submittedAt || 0) - Number(b.submittedAt || 0));
     // Reader encounters are immersion observations, not reviews — they ride
     // the learning_progress payload like transferAttempts, never FSRS state.
-    const encounters = mergeById(progressPayload.encounters || [], localDb.encounters || [])
+    const encounters = mergeEncounters(progressPayload.encounters || [], localDb.encounters || [])
       .sort((a, b) => Number(a.at || 0) - Number(b.at || 0));
 
     return {

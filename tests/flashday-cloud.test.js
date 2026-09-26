@@ -65,13 +65,26 @@ const C = require('../flashday-cloud.js');
     cards: [], captures: [],
     events: [{ id: 'remote-event', answered_at: new Date(1000).toISOString(), mode: 'read', card_id: 'c1', unit_ids: [], ratings: {}, response: {}, stimulus: {}, is_reported: false }]
   };
-  const merged = C.mergeLearnerDb(local, remote, { transferAttempts: [{ id: 'remote-transfer', missionId: 'mission', submittedAt: 1000 }] });
+  local.encounters = [
+    { id: 'enc-u-l-2025-01-01', unitId: 'u', captureId: 'l', at: 1500, kind: 'word-tapped', kinds: ['word-tapped'] }
+  ];
+  const merged = C.mergeLearnerDb(local, remote, {
+    transferAttempts: [{ id: 'remote-transfer', missionId: 'mission', submittedAt: 1000 }],
+    encounters: [
+      { id: 'enc-u-l-2025-01-01', unitId: 'u', captureId: 'l', at: 1400, kind: 'line-viewed', kinds: ['line-viewed'] },
+      { id: 'enc-u-m-2025-01-01', unitId: 'u', captureId: 'm', at: 1600, kind: 'line-played', kinds: ['line-played'] }
+    ]
+  });
   assert.strictEqual(merged.items.length, 2, 'remote and local-only unit should both survive');
   assert.strictEqual(merged.items.find((item) => item.id === 'same').target, 'remote canonical', 'remote must win same-id collision');
   assert(merged.items.some((item) => item.id === 'local-only'), 'offline local-only unit must survive');
   assert.deepStrictEqual(merged.events.map((event) => event.id), ['remote-event', 'local-event'], 'event union must be time ordered');
   assert.strictEqual(merged.bespokeProgress, null, 'merged history invalidates scheduler cache');
   assert.deepStrictEqual(merged.transferAttempts.map((attempt) => attempt.id), ['remote-transfer', 'local-transfer'], 'transfer attempts must survive device merge in chronological order');
+  const mergedEncounter = merged.encounters.find((entry) => entry.id === 'enc-u-l-2025-01-01');
+  assert.deepStrictEqual(mergedEncounter.kinds.sort(), ['line-viewed', 'word-tapped'], 'same-day same-line encounters across devices must union interaction kinds');
+  assert.strictEqual(mergedEncounter.at, 1400, 'merge keeps the earliest observed timestamp');
+  assert.strictEqual(merged.encounters.length, 2, 'distinct lines keep distinct encounter rows');
 }
 
 {

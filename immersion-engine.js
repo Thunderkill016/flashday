@@ -164,16 +164,23 @@
     return out;
   }
 
-  // Return-to-source: every deck unit surfaced inside a source the learner
-  // actually opens is an immersion encounter — the loop closing back from
-  // RETRIEVE into IMMERSION. Dedupe is per unit+capture+day: rereading the
-  // same line today doesn't inflate the count, meeting it again tomorrow
-  // (or inside a different line) is a real new encounter.
+  // Return-to-source: a deck unit the learner meets inside a REAL source line
+  // is an immersion encounter — the loop closing back from RETRIEVE into
+  // IMMERSION. Encounters are recorded per line on actual interaction
+  // (line scrolled into view / played / word tapped), never in bulk at
+  // source open — opening a 20-line transcript is not evidence the learner
+  // met all 20 lines. Dedupe is per unit+capture+day: rereading the same
+  // line today doesn't inflate the count, meeting it again tomorrow (or
+  // inside a different line) is a real new encounter. One row keeps every
+  // interaction kind observed that day (`kinds`) — provenance, not a count.
   function encounterDay(nowMs){
     return new Date(nowMs).toISOString().slice(0,10);
   }
-  function collectEncounters(db,captures,{nowMs=Date.now()}={}){
+  const ENCOUNTER_KINDS=Object.freeze(['line-viewed','line-played','word-tapped']);
+  const ENCOUNTER_KIND_SET=new Set(ENCOUNTER_KINDS);
+  function collectEncounters(db,captures,{nowMs=Date.now(),kind='line-viewed'}={}){
     const day=encounterDay(nowMs);
+    const safeKind=ENCOUNTER_KIND_SET.has(kind)?kind:'line-viewed';
     const seen=new Set((db.encounters||[]).map(e=>`${e.unitId}|${e.captureId}|${encounterDay(Number(e.at)||0)}`));
     const out=[];
     for(const c of captures||[]){
@@ -181,7 +188,7 @@
         const key=`${tag.unit_id}|${c.id}|${day}`;
         if(seen.has(key))continue;
         seen.add(key);
-        out.push({id:`enc-${tag.unit_id}-${c.id}-${day}`,unitId:tag.unit_id,captureId:c.id,at:nowMs});
+        out.push({id:`enc-${tag.unit_id}-${c.id}-${day}`,unitId:tag.unit_id,captureId:c.id,at:nowMs,kind:safeKind,kinds:[safeKind]});
       }
     }
     return out;
@@ -211,5 +218,5 @@
     return parts;
   }
 
-  return {sourceKey,unitKnowledge,assessCapture,assessSource,assessSources,annotatedParts,meaningfulChars,collectEncounters,encounterCount};
+  return {sourceKey,unitKnowledge,assessCapture,assessSource,assessSources,annotatedParts,meaningfulChars,collectEncounters,encounterCount,encounterDay,ENCOUNTER_KINDS};
 });

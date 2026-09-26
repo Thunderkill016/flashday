@@ -262,6 +262,62 @@
 
   let readerSourceKey=null;
   let readerCaptures=[];
+  // Per-line encounter tracking — the learner "meets" a deck unit again only
+  // when they actually reach its line: scrolled into view, played aloud, or
+  // tapped to mine. Opening a source alone records nothing.
+  let lineObserver=null;
+  let encounterFlushTimer=null;
+  const pendingEncounters=new Map(); // captureId -> Set of encounter kinds seen
+  function queueEncounter(captureId,kind){
+    if(!captureId)return;
+    const key=String(captureId);
+    let kinds=pendingEncounters.get(key);
+    if(!kinds){kinds=new Set();pendingEncounters.set(key,kinds);}
+    kinds.add(kind);
+    window.clearTimeout(encounterFlushTimer);
+    encounterFlushTimer=window.setTimeout(flushEncounters,400);
+  }
+  function flushEncounters(){
+    window.clearTimeout(encounterFlushTimer);
+    if(!pendingEncounters.size)return;
+    const pending=[...pendingEncounters.entries()];
+    pendingEncounters.clear();
+    const today=IM.encounterDay(Date.now());
+    const {result:changed}=store.transact(d=>{
+      d.encounters=d.encounters||[];
+      let added=0;
+      for(const [captureId,kinds] of pending){
+        const capture=readerCaptures.find(c=>String(c.id)===captureId);
+        if(!capture)continue;
+        for(const kind of kinds){
+          // collectEncounters dedupes unit+capture+day against d.encounters as
+          // it grows, so a second kind on the same line merges kinds into the
+          // existing row instead of writing a duplicate.
+          const created=IM.collectEncounters(d,[capture],{kind});
+          d.encounters.push(...created);
+          added+=created.length;
+        }
+        // Union every observed kind into today's rows for this line — whether
+        // they were just created or recorded earlier in the session.
+        for(const e of d.encounters){
+          if(String(e.captureId)!==captureId||IM.encounterDay(Number(e.at)||0)!==today)continue;
+          const list=Array.isArray(e.kinds)?e.kinds:(e.kinds=[e.kind].filter(Boolean));
+          for(const kind of kinds)if(!list.includes(kind))list.push(kind);
+          if(!e.kind)e.kind=list[0];
+        }
+      }
+      return {result:added};
+    });
+    if(changed)window.dispatchEvent(new CustomEvent('flashday:learning-state-changed'));
+  }
+  function closeReader(){
+    const panel=$('sourceReader');
+    flushEncounters();
+    lineObserver?.disconnect();lineObserver=null;
+    readerSourceKey=null;
+    readerCaptures=[];
+    if(panel){panel.classList.add('hidden');panel.innerHTML='';}
+  }
   const READER_THEMES=['dark','light','warm'];
   const READER_SIZES=['normal','large'];
   function readerPrefs(){
@@ -342,25 +398,24 @@
   // moment, not just decoration.
   function openSource(key){
     const panel=$('sourceReader');if(!panel||!IM)return;
-    if(readerSourceKey===key){readerSourceKey=null;panel.classList.add('hidden');panel.innerHTML='';return;}
+    if(readerSourceKey===key){closeReader();return;}
+    // Switching sources flushes the old source's queued encounters while its
+    // capture list is still loaded — otherwise a quick A→B switch would drop
+    // the last line the learner touched in A.
+    flushEncounters();
+    lineObserver?.disconnect();lineObserver=null;
     readerSourceKey=key;
     const db=store.refresh();
     readerCaptures=(db.captures||[]).filter(c=>IM.sourceKey(c)===key)
       .sort((a,b)=>(Number(a.subtitle?.index)||0)-(Number(b.subtitle?.index)||0)||(Number(a.mediaTimestamp)||0)-(Number(b.mediaTimestamp)||0));
     const summary=IM.assessSource(db,key,readerCaptures);
-    // The reader IS the immersion encounter — opening a source records every
-    // deck unit it contains so "your words reappear here" becomes real data.
-    const newEncounters=IM.collectEncounters(db,readerCaptures);
-    if(newEncounters.length){
-      store.transact(d=>{d.encounters=[...(d.encounters||[]),...newEncounters];});
-      window.dispatchEvent(new CustomEvent('flashday:learning-state-changed'));
-    }
     const prefs=readerPrefs();
     panel.dataset.theme=prefs.theme;
     panel.dataset.size=prefs.size;
     panel.innerHTML=`<div class="source-reader-head">
         <div><strong>${esc(summary.title)}</strong><span>${summary.segments} câu · ~${summary.minutes} phút · deck phủ ${Math.round(summary.coverage*100)}%</span></div>
         <div class="reader-controls">
+          <button type="button" class="reader-ctl hidden" id="readerJumpStudy" title="Tới dòng có unit đang học">↳ unit đang học</button>
           <button type="button" class="reader-ctl" id="readerSizeToggle" title="Đổi cỡ chữ">A${prefs.size==='large'?'−':'+'}</button>
           ${READER_THEMES.map(t=>`<button type="button" class="reader-ctl${t===prefs.theme?' active':''}" data-rtheme="${t}">${{dark:'Tối',light:'Sáng',warm:'Ấm'}[t]}</button>`).join('')}
           <button type="button" class="ghost-btn" id="closeSourceReader">Đóng</button>
@@ -371,7 +426,7 @@
         const marked=parts.map(part=>part.unitId
           ?`<mark class="token-${part.knowledge}" title="${esc((db.items||[]).find(i=>i.id===part.unitId)?.meaning||'')}">${esc(part.text)}</mark>`
           :wordSpans(part.text)).join('');
-        return `<div class="reader-line">
+        return `<div class="reader-line" data-capture="${esc(c.id)}">
           <button type="button" class="reader-play" data-say="${esc(c.sentence||'')}" title="Nghe câu này">▶</button>
           <div class="reader-text"><p data-line="${lineIndex}">${marked||esc(c.sentence||'')}</p>${c.nativeSentence?`<small>${esc(c.nativeSentence)}</small>`:''}</div>
         </div>`;
@@ -379,7 +434,7 @@
       <div id="wordCapturePanel" class="hidden"></div>
       <p class="footer-note">Chữ trơn = đã thuộc hoặc ngoài deck · <mark class="token-learning">đang học</mark> <mark class="token-new">mới vào deck</mark>. <b>Bấm từ bất kỳ để lưu thành Unit.</b></p>`;
     panel.classList.remove('hidden');
-    $('closeSourceReader').onclick=()=>{readerSourceKey=null;panel.classList.add('hidden');panel.innerHTML='';};
+    $('closeSourceReader').onclick=closeReader;
     const rerender=()=>{openSource(key);openSource(key);};
     $('readerSizeToggle').onclick=()=>{
       const current=readerPrefs();
@@ -392,16 +447,39 @@
         rerender();
       };
     }
+    // Lines become encounters on real contact: scrolled into view (60%+ of
+    // the line visible inside the reader), played aloud, or tapped to mine.
+    if('IntersectionObserver' in window){
+      lineObserver?.disconnect();
+      const body=panel.querySelector('.source-reader-body');
+      lineObserver=new IntersectionObserver((entries)=>{
+        for(const entry of entries)if(entry.isIntersecting)queueEncounter(entry.target.dataset.capture,'line-viewed');
+      },{root:body,threshold:0.6});
+      for(const line of panel.querySelectorAll('.reader-line'))lineObserver.observe(line);
+    }
     for(const button of panel.querySelectorAll('.reader-play')){
-      button.onclick=()=>speakSentence(button.dataset.say||'');
+      button.onclick=()=>{
+        speakSentence(button.dataset.say||'');
+        queueEncounter(button.closest('.reader-line')?.dataset.capture,'line-played');
+      };
     }
     for(const word of panel.querySelectorAll('.tok-word')){
       word.onclick=()=>{
-        const line=word.closest('.reader-line')?.querySelector('[data-line]');
-        const capture=line?readerCaptures[Number(line.dataset.line)]:null;
+        const line=word.closest('.reader-line');
+        const lineIdx=line?.querySelector('[data-line]');
+        const capture=lineIdx?readerCaptures[Number(lineIdx.dataset.line)]:null;
+        queueEncounter(line?.dataset.capture,'word-tapped');
         openWordCapture(word.dataset.word,capture);
       };
       word.onkeydown=(event)=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();word.click();}};
+    }
+    // Return-to-source lands on the first line that still contains a unit
+    // being acquired — the line worth re-reading, not the document top.
+    const studyLine=panel.querySelector('.reader-line mark.token-learning, .reader-line mark.token-new')?.closest('.reader-line');
+    const jumpBtn=$('readerJumpStudy');
+    if(studyLine&&jumpBtn){
+      jumpBtn.classList.remove('hidden');
+      jumpBtn.onclick=()=>studyLine.scrollIntoView({block:'center',behavior:'smooth'});
     }
   }
 

@@ -63,6 +63,25 @@ function ok(){checks++;}
 }
 
 {
+  // Canonical token matching: a contraction target ≡ its expanded surface
+  // form, sentence punctuation stored inside a form cannot block a match,
+  // word boundaries are inherent, and tags carry their real char offset.
+  const items=[
+    {id:'on-way',target:"I'm on my way.",forms:['I am on my way.'],meaning:'đang tới'},
+    {id:'art',target:'art',meaning:'nghệ thuật'}
+  ];
+  const tags=CI.tagKnownUnits('Wait, I am on my way to work.',items);
+  assert.deepStrictEqual(tags.map(t=>t.unit_id),['on-way']);
+  assert.strictEqual(tags[0].occurance,'I am on my way');
+  assert.strictEqual(tags[0].index,6,'tag must carry its real char offset');
+  assert.strictEqual(tags[0].occurance,'Wait, I am on my way to work.'.slice(6,6+tags[0].occurance.length));
+  assert.deepStrictEqual(CI.tagKnownUnits('She started the cart race.',items),[], "'art' must not tag inside 'started'/'cart'");
+  const contract=CI.tagKnownUnits("I'm on my way to work.",[{id:'x',target:'I am on my way',forms:[],meaning:'x'}]);
+  assert.strictEqual(contract[0].occurance,"I'm on my way",'expanded form must match contracted surface');
+  ok();
+}
+
+{
   // Real sentence card replaces the bare fallback for that unit.
   const items=[{id:'pickup',target:'pick up an order',meaning:'nhận một đơn hàng'}];
   const real=CI.cardFromSentence('I need to pick up an order before six.','Tôi cần nhận một đơn trước sáu giờ.',items,{id:'real-pickup'});

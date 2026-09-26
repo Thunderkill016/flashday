@@ -9,10 +9,13 @@
  *   compatibility and must not silently merge synonym expressions.
  */
 (function(root,factory){
-  if(typeof window==='undefined'&&typeof module==='object'&&module.exports) module.exports=factory();
-  else root.FlashDayLearningEntry=factory();
-})(typeof globalThis!=='undefined'?globalThis:this,function(){
+  if(typeof window==='undefined'&&typeof module==='object'&&module.exports) module.exports=factory(require('./flashday-product.js'));
+  // Resolved lazily: the bundler may evaluate this module before the product
+  // module assigns its global.
+  else root.FlashDayLearningEntry=factory(function(){return root.FlashDayProduct;});
+})(typeof globalThis!=='undefined'?globalThis:this,function(P){
   'use strict';
+  const product=()=>typeof P==='function'?P():P;
 
   const PROFILE_VERSION=1;
   const CEFR_LEVELS=Object.freeze(['A1','A2','B1','B2','C1','C2']);
@@ -194,10 +197,24 @@
       .map(normalizePhrase).filter(Boolean);
   }
 
+  function canonTokens(text){
+    const canon=product()?.canonicalTokens;
+    if(canon)return canon(String(text??''));
+    const normalized=normalizePhrase(text);
+    return normalized?normalized.split(' '):[];
+  }
+
+  // Unit identity matching shares the diff's canonicalization: word boundaries
+  // are inherent, punctuation inside a stored form cannot block a match, and
+  // contractions expand ("I'm" ≡ "i am") — one definition of "present" across
+  // import linking, reader tagging and attempt grading.
   function phraseAppears(text,phrase){
-    const haystack=normalizePhrase(text),needle=normalizePhrase(phrase);
-    if(!haystack||!needle)return false;
-    return (` ${haystack} `).includes(` ${needle} `);
+    const haystack=canonTokens(text),needle=canonTokens(phrase);
+    if(!haystack.length||!needle.length||needle.length>haystack.length)return false;
+    for(let start=0;start+needle.length<=haystack.length;start++){
+      if(needle.every((token,offset)=>haystack[start+offset]===token))return true;
+    }
+    return false;
   }
 
   function matchUnitsInText(items,text){

@@ -95,6 +95,13 @@ const mixed = (unitId) => (unitId === 'u1' ? 'known' : 'learning');
     cap('a2', 'Sure, on my way already.', 'video-a', 4, 7)
   ];
   const now = Date.now();
+  // Per-line granularity: only the lines the learner actually touched get
+  // encounters — viewing line a1 must not also record line a2.
+  const touchedOnly = IM.collectEncounters(db, [db.captures[0]], { nowMs: now });
+  assert.strictEqual(touchedOnly.length, 1);
+  assert.strictEqual(touchedOnly[0].captureId, 'a1');
+  assert.strictEqual(touchedOnly[0].kind, 'line-viewed', 'default kind is an honest line view');
+  assert.deepStrictEqual(touchedOnly[0].kinds, ['line-viewed'], 'record keeps the full kind list as provenance');
   // First open records one encounter per unit×capture — two lines, two rows.
   const first = IM.collectEncounters(db, db.captures, { nowMs: now });
   assert.strictEqual(first.length, 2);
@@ -114,4 +121,15 @@ const mixed = (unitId) => (unitId === 'u1' ? 'known' : 'learning');
   assert(neverMet.fitScore > met.fitScore, 'unmet learning units must rank a source higher');
 }
 
-console.log('FlashDay immersion engine: 7 checks passed');
+{
+  // Encounter kind is provenance metadata — tapped/played keep a distinct
+  // label, junk values fall back to 'line-viewed'.
+  const db = dbFixture();
+  const caps = [cap('a1', "I'm on my way.", 'video-a', 0, 4)];
+  const tapped = IM.collectEncounters(db, caps, { nowMs: 1000, kind: 'word-tapped' });
+  assert.strictEqual(tapped[0].kind, 'word-tapped');
+  const junk = IM.collectEncounters({ ...db, encounters: [] }, caps, { nowMs: 2000, kind: 'hacked' });
+  assert.strictEqual(junk[0].kind, 'line-viewed', 'unknown encounter kinds must not enter the log');
+}
+
+console.log('FlashDay immersion engine: 9 checks passed');
