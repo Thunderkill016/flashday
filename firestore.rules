@@ -153,7 +153,7 @@ service cloud.firestore {
       return hasOnly(['id', 'owner_id', 'deck_id', 'unit_ids', 'card_id', 'mode',
                       'ratings', 'response', 'stimulus', 'is_reported',
                       'answered_at', 'created_at',
-                      'sentence', 'native_sentence', 'capture_id', 'source',
+                      'sentence', 'native_sentence', 'capture_id', 'rotation', 'source',
                       'scheduler', 'memory_scheduler', 'language_policy',
                       'fsrs_grades', 'telemetry', 'memory'])
         && idMatchesPath(docId)
@@ -165,6 +165,7 @@ service cloud.firestore {
         && validString(d.sentence, 0, 1200)
         && validString(d.native_sentence, 0, 1200)
         && validString(d.capture_id, 0, 200)
+        && (!('rotation' in d) || d.rotation in ['', 'first', 'rotated', 'repeated'])
         && isSmallMap(d.source)
         && validString(d.scheduler, 0, 200)
         && validString(d.memory_scheduler, 0, 200)

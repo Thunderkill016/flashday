@@ -20,7 +20,7 @@ const C = require('../flashday-cloud.js');
     id: 'review-1', mode: 'listen', cardId: 'card-1', unitIds: ['unit-1'], ratings: { 'unit-1': 3 },
     response: { text: 'hello', spoke: false, recordedLocally: false },
     stimulus: { audioKind: 'source-audio' }, isReported: false, answeredAt: 1000,
-    sentence: "I'm on my way.", nativeSentence: 'Tôi đang trên đường.', captureId: 'cap-1',
+    sentence: "I'm on my way.", nativeSentence: 'Tôi đang trên đường.', captureId: 'cap-1', rotation: 'rotated',
     source: { label: 'video.srt', mediaTimestamp: 12.4 },
     scheduler: 'bespoke-language-policy+fsrs6', memoryScheduler: 'ts', languagePolicy: 'bespoke',
     fsrsGrades: { 'unit-1': 3 },
@@ -34,6 +34,7 @@ const C = require('../flashday-cloud.js');
   assert.strictEqual(event.sentence, "I'm on my way.");
   assert.strictEqual(event.nativeSentence, 'Tôi đang trên đường.');
   assert.strictEqual(event.captureId, 'cap-1');
+  assert.strictEqual(event.rotation, 'rotated', 'context-rotation marker must survive cloud round-trip');
   assert.strictEqual(event.source.mediaTimestamp, 12.4);
   assert.strictEqual(event.fsrsGrades['unit-1'], 3);
   assert.strictEqual(event.telemetry.recallLatencyMs, 400, 'cloud sync must not drop recall latency');

@@ -84,4 +84,48 @@ function dbFixture() {
   assert(result.event.memory && typeof result.event.memory === 'object', 'event must carry per-unit memory snapshots');
 }
 
-console.log('FlashDay Bespoke adapter P0: 6 checks passed');
+{
+  // Context rotation: while a unit has several context cards, consecutive
+  // draws for the same unit+mode must not repeat the last-served card.
+  const db = dbFixture();
+  db.bespokeCards = [
+    { id: 'ctx_a', sentence: "I'm on my way to work.", native_sentence: 'Tôi đang đi làm.', audio_filename: '', slow_audio_filename: '', native_audio_filename: '', phonetic: null, unit_tags: [{ occurance: "I'm on my way", unit_id: 'u1' }], notes: [], source: null },
+    { id: 'ctx_b', sentence: 'Hang on — I\'m on my way, give me a minute.', native_sentence: 'Khoan — tôi đang tới.', audio_filename: '', slow_audio_filename: '', native_audio_filename: '', phonetic: null, unit_tags: [{ occurance: "I'm on my way", unit_id: 'u1' }], notes: [], source: null }
+  ];
+  const engine = A.buildEngine(db);
+
+  const first = A.pickCardForTask(db, engine, 'u1', 'read', 1000);
+  assert.strictEqual(first.rotation, 'first', 'no prior read event means first encounter');
+
+  db.events.push({ id: 'e1', mode: 'read', cardId: first.card.id, unitIds: ['u1'], answeredAt: 900 });
+  const second = A.pickCardForTask(db, engine, 'u1', 'read', 2000);
+  assert.notStrictEqual(second.card.id, first.card.id, 'a different context must be served');
+  assert.strictEqual(second.rotation, 'rotated');
+
+  db.events.push({ id: 'e2', mode: 'read', cardId: second.card.id, unitIds: ['u1'], answeredAt: 1500 });
+  const third = A.pickCardForTask(db, engine, 'u1', 'read', 3000);
+  assert.strictEqual(third.card.id, first.card.id, 'rotation cycles back once alternatives run out');
+  assert.strictEqual(third.rotation, 'rotated');
+
+  // A prior event in a different mode must not constrain this mode's rotation.
+  const writePick = A.pickCardForTask(db, engine, 'u1', 'write', 4000);
+  assert.strictEqual(writePick.rotation, 'first', 'write has no history yet');
+  assert.strictEqual(A.seenContextCount(db, 'u1'), 2, 'events prove two distinct contexts were served');
+}
+
+{
+  // With only one context card the same card is served again — the event must
+  // honestly say 'repeated' rather than claim rotation happened.
+  const db = dbFixture();
+  const engine = A.buildEngine(db);
+  const first = A.pickCardForTask(db, engine, 'u1', 'read', 1000);
+  db.events.push({ id: 'e1', mode: 'read', cardId: first.card.id, unitIds: ['u1'], answeredAt: 900 });
+  const second = A.pickCardForTask(db, engine, 'u1', 'read', 2000);
+  assert.strictEqual(second.card.id, first.card.id);
+  assert.strictEqual(second.rotation, 'repeated');
+
+  const result = A.finalizeCard(db, { ...first, mode: 'read', unitId: 'u1', selectionReason: 'test' }, A.allSuccess(first.card), { nowMs: 3000 });
+  assert.strictEqual(result.event.rotation, 'first', 'rotation must be recorded on the review event');
+}
+
+console.log('FlashDay Bespoke adapter P0: 9 checks passed');

@@ -7,6 +7,8 @@ const learningEntry = fs.readFileSync(path.join(__dirname, '..', 'learning-entry
 const learningHub = fs.readFileSync(path.join(__dirname, '..', 'learning-hub.js'), 'utf8');
 const adapter = fs.readFileSync(path.join(__dirname, '..', 'bespoke-adapter.js'), 'utf8');
 const firebaseJson = fs.readFileSync(path.join(__dirname, '..', 'firebase.json'), 'utf8');
+const firestoreRules = fs.readFileSync(path.join(__dirname, '..', 'firestore.rules'), 'utf8');
+const cloud = fs.readFileSync(path.join(__dirname, '..', 'flashday-cloud.js'), 'utf8');
 const appHtml = fs.readFileSync(path.join(__dirname, '..', 'app', 'index.html'), 'utf8');
 
 assert(source.includes('persistIncrementalDb'), 'runtime must use incremental cloud writes');
@@ -44,4 +46,16 @@ assert(firebaseJson.includes('max-age=31536000, immutable'), 'hashed assets must
 // app-bespoke silently overwrote the richer one (or lost, depending on order).
 assert(!source.includes("$('importTranscriptBtn').onclick"), 'app-bespoke must not register a duplicate import handler');
 
-console.log('FlashDay app P0 contract: 21 checks passed');
+// Context Rotation: a unit's context cards must rotate across reviews —
+// lastTaskEvent + pickCardForTask guarantee the same card is not served twice
+// in a row for a unit+mode while alternatives exist, and the durable event
+// records which rotation happened so the log stays replayable.
+assert(adapter.includes('function pickCardForTask'), 'context rotation picker must exist');
+assert(adapter.includes('function lastTaskEvent'), 'rotation must read the last served card from durable events');
+assert(adapter.includes("rotation=!last?'first'"), 'first-encounter rotation must be detectable');
+// The cloud write path and the rules allowlist must stay in lockstep — the
+// isIsoDateString incident proved a schema/rules drift denies every write.
+assert(cloud.includes('rotation: optStr(event.rotation)'), 'review events must persist the rotation marker');
+assert(firestoreRules.includes("'rotation'"), 'rules allowlist must accept the rotation field');
+
+console.log('FlashDay app P0 contract: 26 checks passed');

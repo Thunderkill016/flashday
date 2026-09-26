@@ -144,15 +144,49 @@
     return score;
   }
 
-  function chooseBestCard(engine,unitId,mode,nowMs){
-    const cards=engine.getCardsForUnit(unitId,1000);
-    if(!cards.length)throw new Error(`Unit ${unitId} chưa có card hợp lệ.`);
+  function scoreCards(engine,cards,mode,nowMs){
     let best=cards[0],bestScore=hybridCardScore(engine,best,mode,nowMs);
     for(let i=1;i<cards.length;i++){
       const score=hybridCardScore(engine,cards[i],mode,nowMs);
       if(score>bestScore){best=cards[i];bestScore=score;}
     }
     return best;
+  }
+
+  function chooseBestCard(engine,unitId,mode,nowMs){
+    const cards=engine.getCardsForUnit(unitId,1000);
+    if(!cards.length)throw new Error(`Unit ${unitId} chưa có card hợp lệ.`);
+    return scoreCards(engine,cards,mode,nowMs);
+  }
+
+  // Durable per-(unit,mode) review history is what makes context rotation
+  // replayable — the last card served for this task is read back from events,
+  // never from a volatile cache.
+  function lastTaskEvent(db,unitId,mode){
+    const events=Array.isArray(db?.events)?db.events:[];
+    for(let i=events.length-1;i>=0;i--){
+      const event=events[i];
+      if(event&&event.mode===mode&&Array.isArray(event.unitIds)&&event.unitIds.includes(unitId))return event;
+    }
+    return null;
+  }
+
+  // Context rotation: when a unit has several cards (one per source capture),
+  // never serve the same card twice in a row for the same unit+mode while a
+  // different context exists. Retrieval under varying context is what turns
+  // card-memorization into transferable knowledge.
+  function pickCardForTask(db,engine,unitId,mode,nowMs){
+    let cards=engine.getCardsForUnit(unitId,1000);
+    if(!cards.length)throw new Error(`Unit ${unitId} chưa có card hợp lệ.`);
+    const last=lastTaskEvent(db,unitId,mode);
+    const lastCardId=last?.cardId?String(last.cardId):null;
+    if(lastCardId&&cards.length>1){
+      const rest=cards.filter(card=>String(card.id)!==lastCardId);
+      if(rest.length)cards=rest;
+    }
+    const card=scoreCards(engine,cards,mode,nowMs);
+    const rotation=!last?'first':(String(card.id)!==lastCardId?'rotated':'repeated');
+    return {card,rotation};
   }
 
   // Cross-skill knowledge is allowed to influence WHAT to introduce next, but
@@ -200,11 +234,14 @@
     const engine=buildEngine(db);
     if(F){
       const picked=chooseHybridTask(db,engine,nowMs);
-      const card=chooseBestCard(engine,picked.unitId,picked.mode,nowMs);
-      return {mode:picked.mode,unitId:picked.unitId,card,engine,memory:picked.memory,selectionReason:picked.reason};
+      const {card,rotation}=pickCardForTask(db,engine,picked.unitId,picked.mode,nowMs);
+      return {mode:picked.mode,unitId:picked.unitId,card,engine,memory:picked.memory,selectionReason:picked.reason,rotation};
     }
     const picked=engine.draw(nowMs/1000);
-    return {mode:picked.mode,unitId:picked.unitId,card:picked.card,engine,selectionReason:'bespoke-only'};
+    // Even without FSRS, upstream's internal card choice is replaced by
+    // pickCardForTask so the no-repeat-context guarantee applies in both paths.
+    const {card,rotation}=pickCardForTask(db,engine,picked.unitId,picked.mode,nowMs);
+    return {mode:picked.mode,unitId:picked.unitId,card,engine,selectionReason:'bespoke-only',rotation};
   }
 
   function initialRatings(card){return Object.fromEntries(B.unitIds(card).map(id=>[id,0]));}
@@ -270,6 +307,9 @@
       mode:selection.mode,cardId:selection.card.id,unitIds,ratings:applied,
       sentence:selection.card.sentence,nativeSentence:selection.card.native_sentence,
       captureId:selection.card.capture_id||null,source:selection.card.source||null,
+      // 'first' = never reviewed in this mode · 'rotated' = a different context
+      // was deliberately served · 'repeated' = only one context exists for it.
+      rotation:['first','rotated','repeated'].includes(selection.rotation)?selection.rotation:'first',
       isReported,response:{
         text:String(response?.text||'').trim().slice(0,1200),
         spoke:Boolean(response?.spoke),
@@ -325,5 +365,15 @@
   function cardParts(card){return CI.splitIntoParts(card);}
   function cardCountForUnit(db,unitId,engine=null){return (engine||buildEngine(db)).cardIndex.size(unitId);}
 
-  return {ACTIVE_MODES,MODE_META,normalizedDifficulty,normalizeStimulus,normalizeTelemetry,buildEngine,saveEngine,rebuildProgressFromEvents,selectNext,initialRatings,cycleRating,allSuccess,hasCompleteRatings,finalizeCard,itemStatus,deckStats,cardParts,cardCountForUnit,datasetCards,taskPairs,chooseHybridTask,chooseIntroductionTask,hybridCardScore,introductionGuardMs,bespokeScore,HYBRID_SCHEDULER,BESPOKE_SOURCE,hasFsrs:Boolean(F)};
+  // How many distinct contexts (cards) this unit has actually been reviewed
+  // in — the visible payoff of context rotation, derived from durable events.
+  function seenContextCount(db,unitId){
+    const seen=new Set();
+    for(const event of Array.isArray(db?.events)?db.events:[]){
+      if(event?.cardId&&Array.isArray(event.unitIds)&&event.unitIds.includes(unitId))seen.add(String(event.cardId));
+    }
+    return seen.size;
+  }
+
+  return {ACTIVE_MODES,MODE_META,normalizedDifficulty,normalizeStimulus,normalizeTelemetry,buildEngine,saveEngine,rebuildProgressFromEvents,selectNext,initialRatings,cycleRating,allSuccess,hasCompleteRatings,finalizeCard,itemStatus,deckStats,cardParts,cardCountForUnit,datasetCards,taskPairs,chooseHybridTask,chooseIntroductionTask,hybridCardScore,introductionGuardMs,bespokeScore,lastTaskEvent,pickCardForTask,seenContextCount,HYBRID_SCHEDULER,BESPOKE_SOURCE,hasFsrs:Boolean(F)};
 });
