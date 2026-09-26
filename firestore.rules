@@ -24,10 +24,11 @@ rules_version = '2';
 //   cards also carry unit_ids: list
 //
 // users/{uid}/review_events/{id}
-//   id, owner_id, deck_id, card_id: string, unit_ids: list
+//   id, owner_id, deck_id, card_id, capture_id: string, unit_ids: list
 //   mode: 'listen'|'speak'|'read'|'write'
-//   ratings/response/stimulus: map, is_reported: bool
-//   answered_at, created_at: ISO string
+//   sentence, native_sentence, scheduler, memory_scheduler, language_policy: string
+//   ratings/response/stimulus/source/fsrs_grades/telemetry/memory: map
+//   is_reported: bool, answered_at, created_at: ISO string
 //
 // users/{uid}/learning_progress/{uid}, users/{uid}/learner_profiles/{uid}
 //   owner-keyed singletons: owner_id == uid, payload: map, updated_at
@@ -144,13 +145,24 @@ service cloud.firestore {
       let d = request.resource.data;
       return hasOnly(['id', 'owner_id', 'deck_id', 'unit_ids', 'card_id', 'mode',
                       'ratings', 'response', 'stimulus', 'is_reported',
-                      'answered_at', 'created_at'])
+                      'answered_at', 'created_at',
+                      'sentence', 'native_sentence', 'capture_id', 'source',
+                      'scheduler', 'memory_scheduler', 'language_policy',
+                      'fsrs_grades', 'telemetry', 'memory'])
         && idMatchesPath(docId)
         && validString(d.deck_id, 1, 200)
         && validString(d.card_id, 1, 200)
         && isSmallList(d.unit_ids)
         && d.mode in ['listen', 'speak', 'read', 'write']
         && isSmallMap(d.ratings) && isSmallMap(d.response) && isSmallMap(d.stimulus)
+        && validString(d.sentence, 0, 1200)
+        && validString(d.native_sentence, 0, 1200)
+        && validString(d.capture_id, 0, 200)
+        && isSmallMap(d.source)
+        && validString(d.scheduler, 0, 200)
+        && validString(d.memory_scheduler, 0, 200)
+        && validString(d.language_policy, 0, 200)
+        && isSmallMap(d.fsrs_grades) && isSmallMap(d.telemetry) && isSmallMap(d.memory)
         && d.is_reported is bool
         && isIsoDateString(d.answered_at)
         && isIsoDateString(d.created_at);

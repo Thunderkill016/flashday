@@ -95,4 +95,28 @@ assert.equal(A.bespokeScore(4), 3, 'future FSRS Easy must remain a Bespoke succe
   }
 }
 
+{
+  const db = fixture();
+  const first = A.selectNext(db, 1_000_000);
+  const firstResult = A.finalizeCard(db, first, A.allSuccess(first.card), {
+    telemetry: { presentedAt: 900_000, firstAttemptAt: 940_000, revealedAt: 980_000, sourceViewedPreReveal: false, audioPlays: 3 },
+    nowMs: 1_000_000
+  });
+  for (const unitId of firstResult.event.unitIds) {
+    const memory = firstResult.event.memory[unitId];
+    assert(memory, 'every rated unit must appear in the event memory map');
+    assert.equal(memory.grade, F.Rating.Good);
+    assert.equal(memory.before, null, 'first-ever review has no prior FSRS state');
+    assert(memory.after && Number.isFinite(memory.after.stability) && Number.isFinite(memory.after.difficulty),
+      'event memory must carry post-review FSRS difficulty/stability');
+    assert(Number.isFinite(memory.after.scheduled_days));
+  }
+
+  const due = A.selectNext(db, F.taskState(db, first.unitId, first.mode, 1_000_000).dueAt);
+  const secondResult = A.finalizeCard(db, due, A.allSuccess(due.card), { nowMs: F.taskState(db, first.unitId, first.mode, 1_000_000).dueAt });
+  const memory = secondResult.event.memory[due.unitId];
+  assert(memory?.before, 'a scheduled review must preserve the pre-review FSRS state');
+  assert(memory.before.due, 'pre-review snapshot must include the due date that triggered this review');
+}
+
 console.log('FlashDay hybrid policy: corrected Bespoke + FSRS boundary checks passed');

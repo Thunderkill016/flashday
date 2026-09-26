@@ -56,4 +56,32 @@ function dbFixture() {
   assert.strictEqual(db.events.length, 1501);
 }
 
-console.log('FlashDay Bespoke adapter P0: 4 checks passed');
+{
+  const telemetry = A.normalizeTelemetry(
+    { presentedAt: 1000, firstAttemptAt: 1400, revealedAt: 3000, sourceViewedPreReveal: true, audioPlays: 2 },
+    3500
+  );
+  assert.strictEqual(telemetry.recallLatencyMs, 2000);
+  assert.strictEqual(telemetry.attemptLatencyMs, 400);
+  assert.strictEqual(telemetry.gradingMs, 500);
+  assert.strictEqual(telemetry.sourceViewedPreReveal, true);
+  assert.strictEqual(telemetry.audioPlays, 2);
+
+  const empty = A.normalizeTelemetry({}, 1000);
+  assert.strictEqual(empty.recallLatencyMs, null, 'missing timestamps must stay null, not fabricate 0ms recall');
+  assert.strictEqual(empty.audioPlays, 0);
+}
+
+{
+  const db = dbFixture();
+  const selection = A.selectNext(db, 1000);
+  const result = A.finalizeCard(db, selection, A.allSuccess(selection.card), {
+    telemetry: { presentedAt: 500, firstAttemptAt: 800, revealedAt: 900, audioPlays: 1 },
+    nowMs: 1500
+  });
+  assert.strictEqual(result.event.telemetry.recallLatencyMs, 400);
+  assert.strictEqual(result.event.telemetry.attemptLatencyMs, 300);
+  assert(result.event.memory && typeof result.event.memory === 'object', 'event must carry per-unit memory snapshots');
+}
+
+console.log('FlashDay Bespoke adapter P0: 6 checks passed');

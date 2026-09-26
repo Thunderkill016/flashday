@@ -19,12 +19,26 @@ const C = require('../flashday-cloud.js');
   const event = C.eventFromRow(C.reviewRow({
     id: 'review-1', mode: 'listen', cardId: 'card-1', unitIds: ['unit-1'], ratings: { 'unit-1': 3 },
     response: { text: 'hello', spoke: false, recordedLocally: false },
-    stimulus: { audioKind: 'source-audio' }, isReported: false, answeredAt: 1000
+    stimulus: { audioKind: 'source-audio' }, isReported: false, answeredAt: 1000,
+    sentence: "I'm on my way.", nativeSentence: 'Tôi đang trên đường.', captureId: 'cap-1',
+    source: { label: 'video.srt', mediaTimestamp: 12.4 },
+    scheduler: 'bespoke-language-policy+fsrs6', memoryScheduler: 'ts', languagePolicy: 'bespoke',
+    fsrsGrades: { 'unit-1': 3 },
+    telemetry: { presentedAt: 500, firstAttemptAt: 700, revealedAt: 900, recallLatencyMs: 400, sourceViewedPreReveal: false, audioPlays: 2 },
+    memory: { 'unit-1': { grade: 3, before: null, after: { stability: 2.5, difficulty: 5.1, scheduled_days: 2 } } }
   }, 'deck-1'));
   assert.strictEqual(event.mode, 'listen');
   assert.strictEqual(event.response.text, 'hello');
   assert.strictEqual(event.stimulus.audioKind, 'source-audio');
   assert.strictEqual(event.answeredAt, 1000);
+  assert.strictEqual(event.sentence, "I'm on my way.");
+  assert.strictEqual(event.nativeSentence, 'Tôi đang trên đường.');
+  assert.strictEqual(event.captureId, 'cap-1');
+  assert.strictEqual(event.source.mediaTimestamp, 12.4);
+  assert.strictEqual(event.fsrsGrades['unit-1'], 3);
+  assert.strictEqual(event.telemetry.recallLatencyMs, 400, 'cloud sync must not drop recall latency');
+  assert.strictEqual(event.telemetry.audioPlays, 2);
+  assert.strictEqual(event.memory['unit-1'].after.stability, 2.5, 'cloud sync must preserve FSRS memory snapshots');
 }
 
 {

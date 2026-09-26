@@ -224,18 +224,50 @@
     return `review_${nowMs}_${Math.random().toString(36).slice(2,12)}`;
   }
 
-  function finalizeCard(db,selection,ratings,{isReported=false,response={},stimulus={},nowMs=Date.now()}={}){
+  // Learning telemetry: raw UI timestamps in, derived latencies out. The event
+  // log must let us tell "recalled in 900ms, unaided" apart from "needed the
+  // source panel and 40s" — a binary remembered flag cannot capture that.
+  function normalizeTelemetry(raw={},nowMs){
+    const at=(value)=>{const n=Number(value);return Number.isFinite(n)&&n>0?Math.round(n):null;};
+    const presentedAt=at(raw.presentedAt);
+    const firstAttemptAt=at(raw.firstAttemptAt);
+    const revealedAt=at(raw.revealedAt);
+    const answeredAt=at(nowMs);
+    return {
+      presentedAt,
+      firstAttemptAt,
+      revealedAt,
+      recallLatencyMs:presentedAt!=null&&revealedAt!=null?Math.max(0,revealedAt-presentedAt):null,
+      attemptLatencyMs:presentedAt!=null&&firstAttemptAt!=null?Math.max(0,firstAttemptAt-presentedAt):null,
+      gradingMs:revealedAt!=null&&answeredAt!=null?Math.max(0,answeredAt-revealedAt):null,
+      sourceViewedPreReveal:Boolean(raw.sourceViewedPreReveal),
+      audioPlays:Math.max(0,Math.min(99,Math.round(Number(raw.audioPlays)||0)))
+    };
+  }
+
+  function finalizeCard(db,selection,ratings,{isReported=false,response={},stimulus={},telemetry={},nowMs=Date.now()}={}){
     const engine=selection.engine||buildEngine(db);const applied={};
-    for(const unitId of B.unitIds(selection.card)){
+    const unitIds=B.unitIds(selection.card);
+    // Snapshot each Unit x Mode FSRS state before the rating lands so the event
+    // preserves difficulty/stability movement, not just the grade.
+    const memory={};
+    if(F){
+      for(const unitId of unitIds){
+        const before=F.storedCard(db,unitId,selection.mode);
+        memory[unitId]={grade:F.ratingFromBespokeScore(Number(ratings?.[unitId]??0)),before:before?F.serializeCard(before):null,after:null};
+      }
+    }
+    for(const unitId of unitIds){
       const score=Number(ratings?.[unitId]??0);
       const unit=engine.unitLookup[unitId]||{id:unitId,name:unitId,definition:unitId,difficulty:B.Difficulty.A1};
       engine.rate(unit,selection.mode,bespokeScore(score),nowMs/1000);applied[unitId]=score;
     }
     engine.logUsage(selection.card.id,isReported,nowMs/1000);saveEngine(db,engine);
     const fsrsUpdates=F?F.applyRatings(db,selection.mode,applied,nowMs):[];
+    for(const update of fsrsUpdates)if(memory[update.unitId])memory[update.unitId].after=update.card;
     const event={
       id:reviewEventId(nowMs),
-      mode:selection.mode,cardId:selection.card.id,unitIds:B.unitIds(selection.card),ratings:applied,
+      mode:selection.mode,cardId:selection.card.id,unitIds,ratings:applied,
       sentence:selection.card.sentence,nativeSentence:selection.card.native_sentence,
       captureId:selection.card.capture_id||null,source:selection.card.source||null,
       isReported,response:{
@@ -244,6 +276,8 @@
         recordedLocally:Boolean(response?.recordedLocally)
       },
       stimulus:normalizeStimulus(stimulus),
+      telemetry:normalizeTelemetry(telemetry,nowMs),
+      memory,
       answeredAt:nowMs,
       scheduler:F?HYBRID_SCHEDULER:'google-bespoke-port',
       memoryScheduler:F?F.FSRS_SOURCE:null,
@@ -289,5 +323,5 @@
   function cardParts(card){return CI.splitIntoParts(card);}
   function cardCountForUnit(db,unitId){return buildEngine(db).cardIndex.size(unitId);}
 
-  return {ACTIVE_MODES,MODE_META,normalizedDifficulty,normalizeStimulus,buildEngine,saveEngine,rebuildProgressFromEvents,selectNext,initialRatings,cycleRating,allSuccess,hasCompleteRatings,finalizeCard,itemStatus,deckStats,cardParts,cardCountForUnit,datasetCards,taskPairs,chooseHybridTask,chooseIntroductionTask,hybridCardScore,introductionGuardMs,bespokeScore,HYBRID_SCHEDULER,BESPOKE_SOURCE,hasFsrs:Boolean(F)};
+  return {ACTIVE_MODES,MODE_META,normalizedDifficulty,normalizeStimulus,normalizeTelemetry,buildEngine,saveEngine,rebuildProgressFromEvents,selectNext,initialRatings,cycleRating,allSuccess,hasCompleteRatings,finalizeCard,itemStatus,deckStats,cardParts,cardCountForUnit,datasetCards,taskPairs,chooseHybridTask,chooseIntroductionTask,hybridCardScore,introductionGuardMs,bespokeScore,HYBRID_SCHEDULER,BESPOKE_SOURCE,hasFsrs:Boolean(F)};
 });

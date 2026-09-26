@@ -63,14 +63,29 @@
     );
   }
 
+  function plainObject(value) {
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  }
+
   function reviewPayload(event, response) {
     return {
       id: clean(event?.id, 200),
       mode: clean(event?.mode, 20),
       cardId: clean(event?.cardId, 200),
       unitIds: Array.isArray(event?.unitIds) ? event.unitIds.map((id) => clean(id, 160)).filter(Boolean) : [],
-      ratings: event?.ratings && typeof event.ratings === 'object' ? event.ratings : {},
+      ratings: plainObject(event?.ratings),
       response: responseForMode(event?.mode, response),
+      sentence: clean(event?.sentence, 1200),
+      nativeSentence: clean(event?.nativeSentence, 1200),
+      captureId: clean(event?.captureId, 200),
+      source: plainObject(event?.source),
+      stimulus: plainObject(event?.stimulus),
+      telemetry: plainObject(event?.telemetry),
+      memory: plainObject(event?.memory),
+      scheduler: clean(event?.scheduler, 200),
+      memoryScheduler: clean(event?.memoryScheduler, 200),
+      languagePolicy: clean(event?.languagePolicy, 200),
+      fsrsGrades: plainObject(event?.fsrsGrades),
       isReported: Boolean(event?.isReported),
       answeredAt: Number(event?.answeredAt) || Date.now()
     };

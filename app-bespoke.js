@@ -34,9 +34,26 @@
   let syncChain = Promise.resolve();
   let isHydrating = false;
   let authMode = 'signin';
+  let cardTelemetry = blankCardTelemetry();
 
   function blankAttempt() {
     return { text: '', spoke: false, recordedLocally: false };
+  }
+
+  // Per-card learning telemetry. Written into the review event at finalize so
+  // recall latency and aid-usage stay measurable after cloud sync.
+  function blankCardTelemetry() {
+    return {
+      presentedAt: 0,
+      firstAttemptAt: 0,
+      revealedAt: 0,
+      sourceViewedPreReveal: false,
+      audioPlays: 0
+    };
+  }
+
+  function markFirstAttempt() {
+    if (!cardTelemetry.firstAttemptAt) cardTelemetry.firstAttemptAt = Date.now();
   }
 
   function loadDb() {
@@ -139,6 +156,8 @@
       current = A.selectNext(db, Date.now());
       ratings = A.initialRatings(current.card);
       attempt = blankAttempt();
+      cardTelemetry = blankCardTelemetry();
+      cardTelemetry.presentedAt = Date.now();
       isBack = false;
       isReported = false;
       $('studyCard').classList.remove('is-revealed');
@@ -244,6 +263,7 @@
         <button id="flipBtn" class="primary-btn" type="button" ${canReveal ? '' : 'disabled'}>Xem đáp án</button>`;
       $('saidBtn').onclick = () => {
         attempt.spoke = true;
+        markFirstAttempt();
         renderAttemptArea();
       };
       $('recordBtn').onclick = () => (isRecording ? stopSpeechRecording() : startSpeechRecording());
@@ -257,6 +277,7 @@
         <button id="flipBtn" class="primary-btn" type="button" ${canReveal ? '' : 'disabled'}>Xem đáp án</button>`;
       $('attemptText').value = attempt.text;
       $('attemptText').oninput = (event) => {
+        if (event.target.value.trim()) markFirstAttempt();
         attempt.text = event.target.value.slice(0, 1200);
         $('flipBtn').disabled = !P.hasObservableAttempt(current.mode, attempt);
       };
@@ -294,6 +315,7 @@
         renderAttemptArea();
       };
       mediaRecorder.start();
+      markFirstAttempt();
       renderAttemptArea();
     } catch (_error) {
       releaseRecording();
@@ -319,6 +341,7 @@
       return;
     }
     isBack = true;
+    cardTelemetry.revealedAt = Date.now();
     renderBack();
     window.requestAnimationFrame(() => $('ratingParts')?.querySelector('[data-unit]')?.focus());
     if (current.mode !== B.Mode.LISTEN) window.setTimeout(speakTarget, 120);
@@ -402,6 +425,7 @@
       isReported,
       response: P.responseForMode(current.mode, attempt),
       stimulus: { audioKind: current.mode === B.Mode.LISTEN ? stimulusAudioKind : 'none' },
+      telemetry: cardTelemetry,
       nowMs: Date.now()
     });
     save();
@@ -428,6 +452,8 @@
     const before = (source.surroundingSubtitles || []).filter((subtitle) => subtitle.end <= Number(source.mediaTimestamp || 0)).slice(-1)[0];
     const after = (source.surroundingSubtitles || []).filter((subtitle) => subtitle.start >= Number(source.mediaTimestamp || 0)).slice(0, 1)[0];
     panel.innerHTML = `<div class="source-panel-head"><small>${esc(source.label || source.type || 'Nguồn')}${meta.length ? ` · ${esc(meta.join(' · '))}` : ''}</small><button id="closeSourceBtn" class="source-close" type="button" aria-label="Đóng nguồn">×</button></div>${before ? `<p class="source-context">${esc(before.text)}</p>` : ''}<p>${esc(source.sentence || current.card.sentence || '')}</p>${source.native_sentence ? `<p><em>${esc(source.native_sentence)}</em></p>` : ''}${after ? `<p class="source-context">${esc(after.text)}</p>` : ''}`;
+    // Viewing the source before revealing counts as aid, not unaided recall.
+    if (!isBack) cardTelemetry.sourceViewedPreReveal = true;
     panel.classList.remove('hidden');
     $('sourceChip').setAttribute('aria-expanded', 'true');
     $('closeSourceBtn').onclick = () => {
@@ -443,6 +469,7 @@
 
   function speakTarget() {
     if (!current) return;
+    if (!isBack) cardTelemetry.audioPlays += 1;
     stopAudio();
     const ref = current.card.audio?.ref || current.card.audio_filename || '';
     if (ref) {

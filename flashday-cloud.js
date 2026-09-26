@@ -67,6 +67,14 @@
     return { id: String(capture.id), deck_id: deckId, payload: capture };
   }
 
+  function optMap(value) {
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  }
+
+  function optStr(value) {
+    return value == null ? '' : String(value);
+  }
+
   function reviewRow(event, deckId) {
     return {
       id: String(event.id),
@@ -74,9 +82,19 @@
       unit_ids: Array.isArray(event.unitIds) ? event.unitIds : [],
       card_id: String(event.cardId || ''),
       mode: String(event.mode || ''),
-      ratings: event.ratings && typeof event.ratings === 'object' ? event.ratings : {},
-      response: event.response && typeof event.response === 'object' ? event.response : {},
-      stimulus: event.stimulus && typeof event.stimulus === 'object' ? event.stimulus : {},
+      ratings: optMap(event.ratings),
+      response: optMap(event.response),
+      stimulus: optMap(event.stimulus),
+      sentence: optStr(event.sentence),
+      native_sentence: optStr(event.nativeSentence),
+      capture_id: optStr(event.captureId),
+      source: optMap(event.source),
+      scheduler: optStr(event.scheduler),
+      memory_scheduler: optStr(event.memoryScheduler),
+      language_policy: optStr(event.languagePolicy),
+      fsrs_grades: optMap(event.fsrsGrades),
+      telemetry: optMap(event.telemetry),
+      memory: optMap(event.memory),
       is_reported: Boolean(event.isReported),
       answered_at: new Date(Number(event.answeredAt) || Date.now()).toISOString()
     };
@@ -88,9 +106,19 @@
       mode: String(row.mode),
       cardId: String(row.card_id),
       unitIds: Array.isArray(row.unit_ids) ? row.unit_ids : [],
-      ratings: row.ratings && typeof row.ratings === 'object' ? row.ratings : {},
-      response: row.response && typeof row.response === 'object' ? row.response : {},
-      stimulus: row.stimulus && typeof row.stimulus === 'object' ? row.stimulus : {},
+      ratings: optMap(row.ratings),
+      response: optMap(row.response),
+      stimulus: optMap(row.stimulus),
+      sentence: optStr(row.sentence),
+      nativeSentence: optStr(row.native_sentence),
+      captureId: optStr(row.capture_id) || null,
+      source: optMap(row.source),
+      scheduler: optStr(row.scheduler),
+      memoryScheduler: optStr(row.memory_scheduler),
+      languagePolicy: optStr(row.language_policy),
+      fsrsGrades: optMap(row.fsrs_grades),
+      telemetry: optMap(row.telemetry),
+      memory: optMap(row.memory),
       isReported: Boolean(row.is_reported),
       answeredAt: Date.parse(row.answered_at) || Date.now()
     };
