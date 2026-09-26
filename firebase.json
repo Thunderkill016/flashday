@@ -6,8 +6,9 @@
         "oAuthBrandDisplayName": "FlashDay",
         "supportEmail": "thunderkill016@gmail.com",
         "authorizedRedirectUris": [
-          "https://flashday-22ae1.firebaseapp.com/__/auth/handler",
-          "https://flashdayvn.vercel.app/__/auth/handler"
+          "https://flashday.web.app/__/auth/handler",
+          "https://flashday.firebaseapp.com/__/auth/handler",
+          "https://flashday-22ae1.firebaseapp.com/__/auth/handler"
         ]
       }
     }
@@ -16,49 +17,214 @@
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"
   },
-  "hosting": {
-    "public": "dist",
-    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
-    "headers": [
-      {
-        "source": "**",
-        "headers": [
-          { "key": "X-Content-Type-Options", "value": "nosniff" },
-          { "key": "X-Frame-Options", "value": "DENY" },
-          {
-            "key": "Referrer-Policy",
-            "value": "strict-origin-when-cross-origin"
-          },
-          {
-            "key": "Permissions-Policy",
-            "value": "camera=(), geolocation=(), microphone=(self)"
-          }
-        ]
-      },
-      {
-        "source": "/login",
-        "headers": [{ "key": "Content-Security-Policy", "value": "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseapp.com https://*.firebaseio.com wss://*.firebaseio.com https://apis.google.com; frame-src 'self' https://*.firebaseapp.com https://accounts.google.com https://apis.google.com; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" }]
-      },
-      {
-        "source": "/login/**",
-        "headers": [{ "key": "Content-Security-Policy", "value": "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseapp.com https://*.firebaseio.com wss://*.firebaseio.com https://apis.google.com; frame-src 'self' https://*.firebaseapp.com https://accounts.google.com https://apis.google.com; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" }]
-      },
-      {
-        "source": "/app",
-        "headers": [{ "key": "Content-Security-Policy", "value": "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseapp.com https://*.firebaseio.com wss://*.firebaseio.com https://apis.google.com; frame-src 'self' https://*.firebaseapp.com https://accounts.google.com https://apis.google.com; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" }]
-      },
-      {
-        "source": "/app/**",
-        "headers": [{ "key": "Content-Security-Policy", "value": "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseapp.com https://*.firebaseio.com wss://*.firebaseio.com https://apis.google.com; frame-src 'self' https://*.firebaseapp.com https://accounts.google.com https://apis.google.com; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" }]
-      },
-      {
-        "source": "/auth",
-        "headers": [{ "key": "Content-Security-Policy", "value": "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseapp.com https://*.firebaseio.com wss://*.firebaseio.com https://apis.google.com; frame-src 'self' https://*.firebaseapp.com https://accounts.google.com https://apis.google.com; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" }]
-      },
-      {
-        "source": "/auth/**",
-        "headers": [{ "key": "Content-Security-Policy", "value": "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseapp.com https://*.firebaseio.com wss://*.firebaseio.com https://apis.google.com; frame-src 'self' https://*.firebaseapp.com https://accounts.google.com https://apis.google.com; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" }]
-      }
-    ]
-  }
+  "hosting": [
+    {
+      "site": "flashday",
+      "public": "dist",
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ],
+      "headers": [
+        {
+          "source": "**",
+          "headers": [
+            {
+              "key": "X-Content-Type-Options",
+              "value": "nosniff"
+            },
+            {
+              "key": "X-Frame-Options",
+              "value": "DENY"
+            },
+            {
+              "key": "Referrer-Policy",
+              "value": "strict-origin-when-cross-origin"
+            },
+            {
+              "key": "Permissions-Policy",
+              "value": "camera=(), geolocation=(), microphone=(self)"
+            }
+          ]
+        },
+        {
+          "source": "/canonical.js",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "no-cache"
+            }
+          ]
+        },
+        {
+          "source": "/login",
+          "headers": [
+            {
+              "key": "Content-Security-Policy",
+              "value": "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseapp.com https://*.firebaseio.com wss://*.firebaseio.com https://apis.google.com; frame-src 'self' https://*.firebaseapp.com https://*.web.app https://accounts.google.com https://apis.google.com; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+            }
+          ]
+        },
+        {
+          "source": "/login/**",
+          "headers": [
+            {
+              "key": "Content-Security-Policy",
+              "value": "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseapp.com https://*.firebaseio.com wss://*.firebaseio.com https://apis.google.com; frame-src 'self' https://*.firebaseapp.com https://*.web.app https://accounts.google.com https://apis.google.com; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+            }
+          ]
+        },
+        {
+          "source": "/app",
+          "headers": [
+            {
+              "key": "Content-Security-Policy",
+              "value": "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseapp.com https://*.firebaseio.com wss://*.firebaseio.com https://apis.google.com; frame-src 'self' https://*.firebaseapp.com https://*.web.app https://accounts.google.com https://apis.google.com; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+            }
+          ]
+        },
+        {
+          "source": "/app/**",
+          "headers": [
+            {
+              "key": "Content-Security-Policy",
+              "value": "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseapp.com https://*.firebaseio.com wss://*.firebaseio.com https://apis.google.com; frame-src 'self' https://*.firebaseapp.com https://*.web.app https://accounts.google.com https://apis.google.com; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+            }
+          ]
+        },
+        {
+          "source": "/auth",
+          "headers": [
+            {
+              "key": "Content-Security-Policy",
+              "value": "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseapp.com https://*.firebaseio.com wss://*.firebaseio.com https://apis.google.com; frame-src 'self' https://*.firebaseapp.com https://*.web.app https://accounts.google.com https://apis.google.com; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+            }
+          ]
+        },
+        {
+          "source": "/auth/**",
+          "headers": [
+            {
+              "key": "Content-Security-Policy",
+              "value": "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseapp.com https://*.firebaseio.com wss://*.firebaseio.com https://apis.google.com; frame-src 'self' https://*.firebaseapp.com https://*.web.app https://accounts.google.com https://apis.google.com; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+            }
+          ]
+        },
+        {
+          "source": "/",
+          "headers": [
+            {
+              "key": "Content-Security-Policy",
+              "value": "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseapp.com https://*.firebaseio.com wss://*.firebaseio.com https://apis.google.com; frame-src 'self' https://*.firebaseapp.com https://*.web.app https://accounts.google.com https://apis.google.com; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "site": "flashday-22ae1",
+      "public": "dist",
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ],
+      "headers": [
+        {
+          "source": "**",
+          "headers": [
+            {
+              "key": "X-Content-Type-Options",
+              "value": "nosniff"
+            },
+            {
+              "key": "X-Frame-Options",
+              "value": "DENY"
+            },
+            {
+              "key": "Referrer-Policy",
+              "value": "strict-origin-when-cross-origin"
+            },
+            {
+              "key": "Permissions-Policy",
+              "value": "camera=(), geolocation=(), microphone=(self)"
+            }
+          ]
+        },
+        {
+          "source": "/canonical.js",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "no-cache"
+            }
+          ]
+        },
+        {
+          "source": "/login",
+          "headers": [
+            {
+              "key": "Content-Security-Policy",
+              "value": "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseapp.com https://*.firebaseio.com wss://*.firebaseio.com https://apis.google.com; frame-src 'self' https://*.firebaseapp.com https://*.web.app https://accounts.google.com https://apis.google.com; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+            }
+          ]
+        },
+        {
+          "source": "/login/**",
+          "headers": [
+            {
+              "key": "Content-Security-Policy",
+              "value": "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseapp.com https://*.firebaseio.com wss://*.firebaseio.com https://apis.google.com; frame-src 'self' https://*.firebaseapp.com https://*.web.app https://accounts.google.com https://apis.google.com; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+            }
+          ]
+        },
+        {
+          "source": "/app",
+          "headers": [
+            {
+              "key": "Content-Security-Policy",
+              "value": "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseapp.com https://*.firebaseio.com wss://*.firebaseio.com https://apis.google.com; frame-src 'self' https://*.firebaseapp.com https://*.web.app https://accounts.google.com https://apis.google.com; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+            }
+          ]
+        },
+        {
+          "source": "/app/**",
+          "headers": [
+            {
+              "key": "Content-Security-Policy",
+              "value": "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseapp.com https://*.firebaseio.com wss://*.firebaseio.com https://apis.google.com; frame-src 'self' https://*.firebaseapp.com https://*.web.app https://accounts.google.com https://apis.google.com; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+            }
+          ]
+        },
+        {
+          "source": "/auth",
+          "headers": [
+            {
+              "key": "Content-Security-Policy",
+              "value": "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseapp.com https://*.firebaseio.com wss://*.firebaseio.com https://apis.google.com; frame-src 'self' https://*.firebaseapp.com https://*.web.app https://accounts.google.com https://apis.google.com; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+            }
+          ]
+        },
+        {
+          "source": "/auth/**",
+          "headers": [
+            {
+              "key": "Content-Security-Policy",
+              "value": "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseapp.com https://*.firebaseio.com wss://*.firebaseio.com https://apis.google.com; frame-src 'self' https://*.firebaseapp.com https://*.web.app https://accounts.google.com https://apis.google.com; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+            }
+          ]
+        },
+        {
+          "source": "/",
+          "headers": [
+            {
+              "key": "Content-Security-Policy",
+              "value": "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseapp.com https://*.firebaseio.com wss://*.firebaseio.com https://apis.google.com; frame-src 'self' https://*.firebaseapp.com https://*.web.app https://accounts.google.com https://apis.google.com; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+            }
+          ]
+        }
+      ]
+    }
+  ]
 }

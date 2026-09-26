@@ -1,10 +1,17 @@
-// FlashDay is served from both default Firebase domains; auth is configured
-// against firebaseapp.com (authDomain). Loading the app on web.app would put
-// the auth helper iframe on a different origin — third-party storage rules
-// could then break sign-in. Canonicalise before anything else runs.
-if (window.location.hostname === 'flashday-22ae1.web.app') {
+// Canonical host for FlashDay. authDomain is flashday.web.app — the auth
+// helper iframe is first-party only when the app runs on that origin, so any
+// other serving host (flashday.firebaseapp.com, the legacy flashday-22ae1
+// domains) must hand off before Firebase initialises. localhost and Hosting
+// preview channels (`--channel`) are exempt so local dev and previews work.
+const flashdayHost = window.location.hostname;
+const flashdayAllowed =
+  flashdayHost === 'flashday.web.app' ||
+  flashdayHost === 'localhost' ||
+  flashdayHost === '127.0.0.1' ||
+  flashdayHost.includes('--');
+if (!flashdayAllowed) {
   window.location.replace(
-    'https://flashday-22ae1.firebaseapp.com' +
+    'https://flashday.web.app' +
       window.location.pathname +
       window.location.search +
       window.location.hash
