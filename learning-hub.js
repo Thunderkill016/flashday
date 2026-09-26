@@ -134,7 +134,19 @@
   function renderTransferMissions(){
     const root=$('transferMissions');if(!root)return;
     const db=store.refresh();
-    root.innerHTML=L.TRANSFER_MISSIONS.map(mission=>{
+    // Per-unit delayed transfer: derived from the first unassisted successful
+    // Write event, due the next day. Learner produces a NEW sentence in a new
+    // situation BEFORE seeing the model/example — honest "đã tự đối chiếu".
+    const due=L.dueUnitTransfer(db);
+    const unitHtml=due?`<article class="transfer-mission" data-unit-transfer="${esc(due.unitId)}">
+      <div class="transfer-heading"><div><span class="eyebrow">TRANSFER · NGÀY HÔM SAU</span><h4>${esc(due.item.target||due.unitId)}</h4><p>${esc(due.item.intent||due.item.canDo||due.item.meaning||'')}</p></div><span class="transfer-status">Đến hạn</span></div>
+      <p class="mission-setup">Tình huống mới: ${esc(due.item.contexts?.[0]||due.item.meaning||'dùng cụm này trong một câu của riêng bạn.')}</p>
+      <p class="mission-instructions">Viết MỘT câu tiếng Anh mới dùng “${esc(due.item.target||'')}” — không chép lại câu đã học.</p>
+      <label class="field transfer-field" for="unitTransferResponse">Câu của bạn<textarea id="unitTransferResponse" maxlength="1600" placeholder="Write one new sentence in English…"></textarea></label>
+      <button class="module-action transfer-reveal" type="button" data-unit-reveal disabled>Xem câu mẫu sau khi đã thử</button>
+      <div class="transfer-model hidden" id="unitTransferModel"><strong>Mẫu từ câu đã học — chỉ để đối chiếu</strong>${due.item.exampleSentence?`<p>${esc(due.item.exampleSentence)}</p>`:''}${due.item.exampleTranslation?`<p><em>${esc(due.item.exampleTranslation)}</em></p>`:''}<ul><li>Câu mới có dùng đúng cụm không?</li><li>Ngữ cảnh có khác câu gốc không?</li></ul><label class="transfer-check"><input type="checkbox" data-unit-self-review> Tôi đã so sánh câu của mình với mẫu</label><button class="primary-btn transfer-save" type="button" data-unit-save>Lưu — đã tự đối chiếu</button></div>
+    </article>`:'';
+    root.innerHTML=unitHtml+L.TRANSFER_MISSIONS.map(mission=>{
       const cluster=L.clusterById(mission.clusterId);
       const clusterState=L.clusterState(db,mission.clusterId);
       const state=L.missionState(db,mission.id);
@@ -145,6 +157,33 @@
       </article>`;
     }).join('');
     root.querySelectorAll('[data-transfer-mission]').forEach(card=>bindTransferMission(card));
+    const unitCard=root.querySelector('[data-unit-transfer]');
+    if(unitCard)bindUnitTransfer(unitCard,due);
+  }
+
+  function bindUnitTransfer(card,due){
+    const response=card.querySelector('#unitTransferResponse');
+    const reveal=card.querySelector('[data-unit-reveal]');
+    response.oninput=()=>{reveal.disabled=!response.value.trim();};
+    reveal.onclick=()=>{
+      card.querySelector('[data-unit-save]')?.focus();
+      card.querySelector('#unitTransferModel')?.classList.remove('hidden');
+      reveal.classList.add('hidden');
+    };
+    card.querySelector('[data-unit-save]')?.addEventListener('click',()=>{
+      try{
+        const {result:attempt}=store.transact((db)=>L.submitUnitTransferAttempt(db,{
+          unitId:due.unitId,sourceEventId:due.sourceEventId,
+          responseText:response.value,
+          selfReviewed:Boolean(card.querySelector('[data-unit-self-review]')?.checked)
+        }));
+        window.dispatchEvent(new CustomEvent('flashday:learning-state-changed'));
+        renderTransferMissions();
+        showInlineMessage(attempt.selfReviewed?'Đã lưu — bạn đã tự đối chiếu câu mới với mẫu.':'Đã lưu lần thử. Bạn có thể quay lại đối chiếu sau.',false);
+      }catch(error){
+        showInlineMessage(error.message,true);
+      }
+    });
   }
 
   function bindTransferMission(card){
@@ -249,11 +288,16 @@
   function openWordCapture(word,capture){
     const box=$('wordCapturePanel');if(!box)return;
     box.classList.remove('hidden');
+    // A mined sentence only becomes a real review card once the capture has a
+    // full-sentence translation — otherwise the unit falls back to a bare
+    // phrase card. Ask for the translation up front; never fabricate it.
+    const needsSentenceTranslation=Boolean(capture?.sentence)&&!capture?.nativeSentence;
     box.innerHTML=`<div class="word-capture">
       <p class="field-note" style="margin:0">Lưu từ/cụm này thành Unit — câu nguồn đi kèm tự động.</p>
       <div class="field"><label for="wcTarget">Từ / cụm tiếng Anh</label><input id="wcTarget" value="${esc(word)}"></div>
       <div class="field"><label for="wcMeaning">Nghĩa tiếng Việt</label><input id="wcMeaning" placeholder="ví dụ: đang trên đường tới"></div>
-      <p class="wc-sentence">${esc(capture?.sentence||'')}</p>
+      ${capture?.sentence?`<p class="wc-sentence">${esc(capture.sentence)}</p>`:''}
+      ${needsSentenceTranslation?`<div class="field"><label for="wcSentenceTranslation">Dịch cả câu trên (để tạo card có ngữ cảnh)</label><input id="wcSentenceTranslation" placeholder="ví dụ: Tôi đang trên đường tới."></div><p class="field-note" style="margin:0">Không có bản dịch câu → unit chỉ có card cụm từ, chưa ôn trong ngữ cảnh.</p>`:''}
       <div class="secondary-actions"><button id="wcSave" class="primary-btn" type="button">Lưu unit</button><button id="wcCancel" class="ghost-btn" type="button">Huỷ</button></div>
     </div>`;
     $('wcMeaning').focus();
@@ -262,17 +306,32 @@
       try{
         const target=$('wcTarget').value.trim();
         const meaning=$('wcMeaning').value.trim();
+        const sentenceTranslation=$('wcSentenceTranslation')?.value.trim()||'';
         if(!meaning){$('wcMeaning').focus();return;}
-        store.transact((db)=>{D.addItem(db,{
-          target,meaning,
-          type:target.includes(' ')?'chunk':'word_sense',
-          origin:'source-captured',
-          exampleSentence:capture?.sentence||'',
-          exampleTranslation:capture?.nativeSentence||'',
-          contexts:capture?.sourceTitle?[capture.sourceTitle]:[]
-        });return {result:true};});
+        store.transact((db)=>{
+          D.addItem(db,{
+            target,meaning,
+            type:target.includes(' ')?'chunk':'word_sense',
+            origin:'source-captured',
+            exampleSentence:capture?.sentence||'',
+            exampleTranslation:sentenceTranslation||capture?.nativeSentence||'',
+            contexts:capture?.sourceTitle?[capture.sourceTitle]:[]
+          });
+          // Attaching the translation to the capture row is what turns this
+          // sentence into a real card via cardsFromCaptures on next rebuild.
+          if(capture&&sentenceTranslation){
+            const row=(db.captures||[]).find(c=>String(c.id)===String(capture.id));
+            if(row&&!row.nativeSentence)row.nativeSentence=sentenceTranslation;
+          }
+          return {result:true};
+        });
         box.classList.add('hidden');box.innerHTML='';
-        showInlineMessage(`Đã lưu “${target}” — sẽ xuất hiện trong lượt ôn.`);
+        // The review/memory views hold their own db copy — notify them the
+        // learner state changed so the mined unit appears without a reload.
+        window.dispatchEvent(new CustomEvent('flashday:learning-state-changed'));
+        showInlineMessage(sentenceTranslation||capture?.nativeSentence
+          ?`Đã lưu “${target}” — câu nguồn có bản dịch, sẽ ôn trong ngữ cảnh.`
+          :`Đã lưu “${target}” — chưa có dịch câu nên tạm thời chỉ ôn dạng cụm từ.`);
         openSource(readerSourceKey);
       }catch(error){showInlineMessage(error.message,true);}
     };

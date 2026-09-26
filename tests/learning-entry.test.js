@@ -123,4 +123,78 @@ const C=require('../flashday-cloud.js');
   assert.equal(migrated.learningProfile.overallLevel,'A1');
 }
 
-console.log('FlashDay learning entry: 33 guided/personal/transfer checks passed');
+{
+  // Delayed per-unit transfer: derives ONE task per unit from its first
+  // UNASSISTED successful Write event, due the next day — never sooner.
+  const DAY=24*60*60*1000;
+  const T0=1_700_000_000_000;
+  const db=D.createInitialDb([],1000);
+  const item=D.addItem(db,{target:'on my way',meaning:'đang trên đường'});
+  assert.equal(L.dueUnitTransfer(db,T0+2*DAY),null,'no write event → no transfer task');
+  db.events=[{id:'e1',mode:'write',cardId:'c1',unitIds:[item.id],ratings:{[item.id]:3},answeredAt:T0}];
+  assert.equal(L.dueUnitTransfer(db,T0+3600000),null,'transfer must not be available before the delay');
+  assert.equal(L.dueUnitTransfer(db,T0+DAY-1),null);
+  const due=L.dueUnitTransfer(db,T0+DAY);
+  assert.equal(due.unitId,item.id);
+  assert.equal(due.sourceEventId,'e1');
+  assert.equal(due.dueAt,T0+DAY);
+  const attempt=L.submitUnitTransferAttempt(db,{unitId:item.id,sourceEventId:'e1',responseText:'I was on my way home when it rained.',selfReviewed:true},T0+DAY+1000);
+  assert.equal(attempt.kind,'unit');
+  assert.equal(attempt.unitId,item.id);
+  assert.equal(attempt.sourceEventId,'e1');
+  assert.equal(L.dueUnitTransfer(db,T0+DAY+1000),null,'a submitted unit transfer must not reappear');
+  assert.throws(()=>L.submitUnitTransferAttempt(db,{unitId:item.id,responseText:'again.'},T0+DAY+2000),/đã được lưu/);
+}
+
+{
+  // Assisted production must NOT trigger transfer: unit missed in the diff,
+  // or learner peeked at the source before revealing.
+  const DAY=24*60*60*1000;
+  const T0=1_700_000_000_000;
+  const db=D.createInitialDb([],1000);
+  const item=D.addItem(db,{target:'on my way',meaning:'đang trên đường'});
+  db.events=[{id:'e1',mode:'write',cardId:'c1',unitIds:[item.id],ratings:{[item.id]:2},answeredAt:T0,error:{stage:'miss',missedUnits:[item.id],finalMissing:[],corrected:true,retryCount:1}}];
+  assert.equal(L.dueUnitTransfer(db,T0+2*DAY),null,'unit corrected via retry is aided recall — no transfer');
+  const db2=D.createInitialDb([],1000);
+  const item2=D.addItem(db2,{target:'on my way',meaning:'đang trên đường'});
+  db2.events=[{id:'e1',mode:'write',cardId:'c1',unitIds:[item2.id],ratings:{[item2.id]:3},answeredAt:T0,telemetry:{sourceViewedPreReveal:true}}];
+  assert.equal(L.dueUnitTransfer(db2,T0+2*DAY),null,'peeking at the source pre-reveal is aided — no transfer');
+  // A failed write does not count either
+  const db3=D.createInitialDb([],1000);
+  const item3=D.addItem(db3,{target:'on my way',meaning:'đang trên đường'});
+  db3.events=[{id:'e1',mode:'write',cardId:'c1',unitIds:[item3.id],ratings:{[item3.id]:1},answeredAt:T0}];
+  assert.equal(L.dueUnitTransfer(db3,T0+2*DAY),null,'a failed write rating must not trigger transfer');
+}
+
+{
+  // A unit assisted on a card where ANOTHER unit was missed stays eligible:
+  // assistance is tracked per unit, not per event.
+  const DAY=24*60*60*1000;
+  const T0=1_700_000_000_000;
+  const db=D.createInitialDb([],1000);
+  const a=D.addItem(db,{target:'on my way',meaning:'đang trên đường'});
+  const b=D.addItem(db,{target:'running late',meaning:'sắp trễ'});
+  db.events=[{id:'e1',mode:'write',cardId:'c1',unitIds:[a.id,b.id],ratings:{[a.id]:3,[b.id]:2},answeredAt:T0,error:{stage:'miss',missedUnits:[b.id],finalMissing:[],corrected:true,retryCount:1}}];
+  const due=L.dueUnitTransfer(db,T0+2*DAY);
+  assert.equal(due.unitId,a.id,'clean unit on a partially-assisted card must still transfer');
+  // earliest due wins when several units qualify
+  db.events.push({id:'e2',mode:'write',cardId:'c2',unitIds:[b.id],ratings:{[b.id]:3},answeredAt:T0-DAY});
+  assert.equal(L.dueUnitTransfer(db,T0+2*DAY).unitId,b.id,'earliest due unit must be selected first');
+}
+
+{
+  // Regression: a mined sentence + its translation becomes a REAL review card
+  // tagged to the mined unit — not just the bare-phrase fallback.
+  const db=D.createInitialDb([],1000);
+  const item=D.addItem(db,{target:'on my way',meaning:'đang trên đường'});
+  SC.addCapture(db,{sentence:'I am on my way home.',nativeSentence:'Tôi đang về nhà.',mediaTimestamp:1});
+  const cards=SC.cardsFromCaptures(db.captures,db.items);
+  assert.equal(cards.length,1,'a translated capture must produce a sentence card');
+  assert.equal(cards[0].unit_tags.some((tag)=>tag.unit_id===item.id),true,'the card must be tagged to the mined unit');
+  const noTranslation=D.createInitialDb([],1000);
+  D.addItem(noTranslation,{target:'on my way',meaning:'đang trên đường'});
+  SC.addCapture(noTranslation,{sentence:'I am on my way home.',mediaTimestamp:1});
+  assert.equal(SC.cardsFromCaptures(noTranslation.captures,noTranslation.items).length,0,'no translation → no fabricated card');
+}
+
+console.log('FlashDay learning entry: 50 guided/personal/transfer checks passed');

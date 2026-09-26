@@ -319,10 +319,12 @@
     const src=(raw&&typeof raw==='object')?raw:{};
     const types=(Array.isArray(src.types)?src.types:[]).map((t)=>String(t||'').slice(0,40)).filter((t)=>ERROR_TYPE_SET.has(t)).slice(0,8);
     const missedUnits=(Array.isArray(src.missedUnits)?src.missedUnits:[]).map((id)=>String(id||'').slice(0,160)).filter(Boolean).slice(0,24);
+    const finalMissing=(Array.isArray(src.finalMissing)?src.finalMissing:[]).map((id)=>String(id||'').slice(0,160)).filter(Boolean).slice(0,24);
     return {
       stage:ERROR_STAGES.has(src.stage)?src.stage:'',
       types,
       missedUnits,
+      finalMissing,
       firstAttempt:String(src.firstAttempt||'').slice(0,1200),
       finalAttempt:String(src.finalAttempt||'').slice(0,1200),
       corrected:Boolean(src.corrected),
@@ -364,8 +366,18 @@
         memory[unitId]={grade:F.ratingFromBespokeScore(Number(ratings?.[unitId]??0)),before:before?F.serializeCard(before):null,after:null};
       }
     }
+    // Aided-recall guard: the word diff is objective evidence, self-report
+    // cannot override it. A unit the attempt ever missed can never receive
+    // unaided 'Good' credit — still absent in the final attempt means the
+    // recall failed ('Again'); produced only after seeing the correction is
+    // aided recall ('Hard' at best). The corrected attempt still lives in
+    // the event as practice evidence.
+    const missedUnits=new Set(Array.isArray(error?.missedUnits)?error.missedUnits.map(String):[]);
+    const finalMissing=new Set(Array.isArray(error?.finalMissing)?error.finalMissing.map(String):[]);
     for(const unitId of unitIds){
-      const score=Number(ratings?.[unitId]??0);
+      let score=Number(ratings?.[unitId]??0);
+      if(finalMissing.has(unitId))score=Math.min(score,1);
+      else if(missedUnits.has(unitId))score=Math.min(score,2);
       const unit=engine.unitLookup[unitId]||{id:unitId,name:unitId,definition:unitId,difficulty:B.Difficulty.A1};
       engine.rate(unit,selection.mode,bespokeScore(score),nowMs/1000);applied[unitId]=score;
     }
@@ -383,7 +395,8 @@
       isReported,response:{
         text:String(response?.text||'').trim().slice(0,1200),
         spoke:Boolean(response?.spoke),
-        recordedLocally:Boolean(response?.recordedLocally)
+        recordedLocally:Boolean(response?.recordedLocally),
+        asrConfirmed:Boolean(response?.asrConfirmed)
       },
       stimulus:normalizeStimulus(stimulus),
       telemetry:normalizeTelemetry(telemetry,nowMs),

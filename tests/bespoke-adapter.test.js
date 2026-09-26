@@ -128,4 +128,31 @@ function dbFixture() {
   assert.strictEqual(result.event.rotation, 'first', 'rotation must be recorded on the review event');
 }
 
-console.log('FlashDay Bespoke adapter P0: 9 checks passed');
+{
+  // Aided-recall guard: the word diff is objective evidence and must override
+  // a 'Nhớ' chip for units it proved missing.
+  const db = dbFixture();
+  const selection = A.selectNext(db, 1000);
+  const stillMissing = A.finalizeCard(db, selection, { u1: 3 }, {
+    response: { text: 'I am coming.' },
+    error: { stage: 'miss', types: ['missing-target'], missedUnits: ['u1'], finalMissing: ['u1'], firstAttempt: 'I am coming.', finalAttempt: 'I am coming.', corrected: false, retryCount: 0 },
+    nowMs: 2000
+  });
+  assert.strictEqual(stillMissing.event.ratings.u1, 1, 'unit still missing in the final attempt must clamp to Again, not Good');
+
+  const db2 = dbFixture();
+  const selection2 = A.selectNext(db2, 1000);
+  const corrected = A.finalizeCard(db2, selection2, { u1: 3 }, {
+    response: { text: "I'm on my way." },
+    error: { stage: 'exact', types: [], missedUnits: ['u1'], finalMissing: [], firstAttempt: 'I am coming.', finalAttempt: "I'm on my way.", corrected: true, retryCount: 1 },
+    nowMs: 2000
+  });
+  assert.strictEqual(corrected.event.ratings.u1, 2, 'unit produced only after correction is aided recall — Hard at best');
+
+  const db3 = dbFixture();
+  const selection3 = A.selectNext(db3, 1000);
+  const clean = A.finalizeCard(db3, selection3, { u1: 3 }, { response: { text: "I'm on my way." }, nowMs: 2000 });
+  assert.strictEqual(clean.event.ratings.u1, 3, 'unaided successful recall keeps Good credit');
+}
+
+console.log('FlashDay Bespoke adapter P0: 12 checks passed');

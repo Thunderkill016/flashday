@@ -46,7 +46,10 @@
     return {
       text: clean(raw.text, 1200),
       spoke: Boolean(raw.spoke),
-      recordedLocally: Boolean(raw.recordedLocally)
+      recordedLocally: Boolean(raw.recordedLocally),
+      // ASR self-report is metadata, never a pronunciation score — it records
+      // only whether the learner confirmed the machine heard their wording.
+      asrConfirmed: Boolean(raw.asrConfirmed)
     };
   }
 

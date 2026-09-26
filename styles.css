@@ -851,6 +851,13 @@ mark.token-new { border-bottom: 2px solid var(--memory-new); padding: 0 1px; }
 /* Speak-mode extras */
 .attempt-actions { margin-top: 14px; }
 .asr-transcript { color: var(--brand-line) !important; font-weight: 600; }
+.asr-live { color: var(--fd-text-tertiary); font-style: italic; }
+/* ASR confirm gate — the machine transcript must be verified by the learner
+   before it can become diff evidence. */
+.asr-confirm { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; padding: 10px 12px; border: 1px dashed var(--fd-border-interactive); border-radius: var(--fd-radius-sm); background: var(--fd-surface-2); }
+.asr-confirm span { font-size: 13px; color: var(--fd-text-secondary); }
+.asr-confirm button { padding: 6px 14px; border-radius: 999px; border: 1px solid var(--fd-border-interactive); background: transparent; color: var(--fd-text-primary); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+.asr-confirm button:hover { border-color: var(--brand-line); color: var(--brand-line); }
 .local-recording { width: 100%; margin-top: 12px; height: 40px; border-radius: var(--fd-radius-sm); }
 
 /* Memory list */

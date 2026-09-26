@@ -332,6 +332,63 @@
     return attempt;
   }
 
+  // ── Delayed per-unit transfer ─────────────────────────────────────────
+  // One transfer task per Unit, derived from its FIRST unassisted successful
+  // Write event and due the next day. Transfer deliberately lives outside
+  // FSRS — it is evidence that a memory can be used in a new situation, not
+  // another recognition review.
+  const UNIT_TRANSFER_DELAY_MS=24*60*60*1000; // first production → next-day transfer
+
+  function firstUnassistedWriteEvent(db,unitId){
+    const events=Array.isArray(db?.events)?db.events:[];
+    return events.find(event=>{
+      if(String(event?.mode)!=='write')return false;
+      if(!Array.isArray(event?.unitIds)||!event.unitIds.includes(unitId))return false;
+      if(Number(event?.ratings?.[unitId])<2)return false; // FSRS success = Hard or better
+      // Per-unit assistance: error.missedUnits is the union of first/final
+      // diff misses and self-rated misses — if this unit is in it, its recall
+      // was aided regardless of what happened to other units on the card.
+      if(Array.isArray(event?.error?.missedUnits)&&event.error.missedUnits.includes(unitId))return false;
+      if(event?.telemetry?.sourceViewedPreReveal)return false; // peeked at source = aided
+      return true;
+    })||null;
+  }
+
+  function dueUnitTransfer(db,now=Date.now()){
+    const items=Array.isArray(db?.items)?db.items:[];
+    const attempts=Array.isArray(db?.transferAttempts)?db.transferAttempts:[];
+    const done=new Set(attempts.filter(a=>a&&a.kind==='unit').map(a=>String(a.unitId)));
+    let best=null;
+    for(const item of items){
+      const unitId=String(item?.id||'');
+      if(!unitId||done.has(unitId))continue;
+      const event=firstUnassistedWriteEvent(db,unitId);
+      if(!event)continue;
+      const dueAt=Number(event.answeredAt)+UNIT_TRANSFER_DELAY_MS;
+      if(!Number.isFinite(dueAt)||dueAt>now)continue;
+      if(!best||dueAt<best.dueAt)best={unitId,item,dueAt,sourceEventId:String(event.id||'')||null};
+    }
+    return best;
+  }
+
+  function submitUnitTransferAttempt(db,raw={},now=Date.now()){
+    if(!db||typeof db!=='object')throw new Error('FlashDay DB is required');
+    const unitId=cleanMissionValue(raw.unitId,160);
+    if(!unitId||!(Array.isArray(db.items)&&db.items.some(item=>String(item?.id)===unitId)))throw new Error('Unit transfer không hợp lệ.');
+    const responseText=cleanMissionValue(raw.responseText,1600);
+    if(!responseText)throw new Error('Hãy viết câu mới trước khi lưu.');
+    db.transferAttempts=Array.isArray(db.transferAttempts)?db.transferAttempts:[];
+    if(db.transferAttempts.some(a=>a&&a.kind==='unit'&&String(a.unitId)===unitId))throw new Error('Transfer cho Unit này đã được lưu.');
+    const submittedAt=Number.isFinite(Number(raw.submittedAt))?Number(raw.submittedAt):Number(now);
+    const attempt={
+      id:cleanMissionValue(raw.id,200)||`unit-transfer_${submittedAt}_${Math.random().toString(36).slice(2,10)}`,
+      kind:'unit',unitId,sourceEventId:cleanMissionValue(raw.sourceEventId,160)||null,
+      responseText,selfReviewed:Boolean(raw.selfReviewed),submittedAt
+    };
+    db.transferAttempts.push(attempt);
+    return attempt;
+  }
+
   function missionState(db,missionId){
     const mission=missionById(missionId);
     if(!mission)throw new Error(`Unknown transfer mission: ${missionId}`);
@@ -347,6 +404,7 @@
     normalizeLevel,normalizeProfile,ensureProfile,setSkillLevel,setOverallLevel,effectiveLevel,
     assessContent,normalizePhrase,identityForms,phraseAppears,matchUnitsInText,normalizeSourceKind,
     moduleById,clusterById,missionById,modulesForCluster,moduleState,clusterState,installGuidedModule,installGuidedCluster,
-    normalizeTransferAttempt,submitTransferAttempt,missionState
+    normalizeTransferAttempt,submitTransferAttempt,missionState,
+    UNIT_TRANSFER_DELAY_MS,dueUnitTransfer,submitUnitTransferAttempt
   };
 });

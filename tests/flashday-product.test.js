@@ -14,7 +14,7 @@ const P=require('../flashday-product.js');
 {
   assert.throws(()=>P.normalizeUnitDraft({target:'',meaning:'x'}),/bắt buộc/i);
   const response=P.responseForMode('write',{text:'  I am on my way.  ',spoke:true});
-  assert.deepStrictEqual(response,{text:'I am on my way.',spoke:true,recordedLocally:false});
+  assert.deepStrictEqual(response,{text:'I am on my way.',spoke:true,recordedLocally:false,asrConfirmed:false});
 }
 
 {

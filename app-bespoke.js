@@ -37,14 +37,14 @@
   let errorLoop = blankErrorLoop();
 
   function blankAttempt() {
-    return { text: '', spoke: false, recordedLocally: false };
+    return { text: '', spoke: false, recordedLocally: false, asrPending: false, asrConfirmed: false };
   }
 
   // Speak-style retry loop state: the FIRST wrong attempt is kept so the
   // review event can tell "needed a correction pass" from "clean recall".
   const MAX_RETRIES = 2;
   function blankErrorLoop() {
-    return { retryCount: 0, firstAttempt: '', firstStage: '', lastClassification: null, inRetry: false };
+    return { retryCount: 0, firstAttempt: '', firstStage: '', firstMissed: [], lastClassification: null, inRetry: false };
   }
 
   // Per-card learning telemetry. Written into the review event at finalize so
@@ -295,11 +295,29 @@
             ${asrOk ? `<button id="asrBtn" type="button">${isListening ? 'Đang nghe… (bấm để dừng)' : 'Nói → máy nghe thử'}</button>` : ''}
             <button id="recordBtn" type="button">${isRecording ? 'Dừng ghi âm' : 'Ghi âm trên máy'}</button>
           </div>
+          ${isListening ? `<p class="attempt-state asr-live" id="asrLive">Đang nghe…</p>` : ''}
           ${attempt.text ? `<p class="attempt-state asr-transcript">Máy nghe được: “${esc(attempt.text)}”</p>` : ''}
-          <p class="attempt-state" id="attemptState">${isListening ? 'Đang nghe — nói câu tiếng Anh…' : isRecording ? 'Đang ghi âm…' : attempt.recordedLocally ? 'Audio chỉ ở tab này, không được tải lên hay đồng bộ.' : attempt.spoke ? 'Bạn đã tự xác nhận đã nói.' : 'Chưa có lần nói được ghi nhận.'}</p>
+          ${attempt.asrPending && !attempt.asrConfirmed ? `<div class="asr-confirm"><span>Máy nghe đúng lời bạn nói?</span><button id="asrYes" type="button">Đúng</button><button id="asrNo" type="button">Nghe sai</button></div>` : ''}
+          <p class="attempt-state" id="attemptState">${isListening ? 'Đang nghe — nói câu tiếng Anh…' : isRecording ? 'Đang ghi âm…' : attempt.asrConfirmed ? 'Đã xác nhận máy nghe đúng — có thể xem đáp án.' : attempt.asrPending ? 'Xác nhận transcript trước khi so sánh.' : attempt.recordedLocally ? 'Audio chỉ ở tab này, không được tải lên hay đồng bộ.' : attempt.spoke ? 'Bạn đã tự xác nhận đã nói.' : 'Chưa có lần nói được ghi nhận.'}</p>
           ${recordingUrl ? `<audio class="local-recording" controls src="${esc(recordingUrl)}"></audio>` : ''}
         </div>
         <button id="flipBtn" class="primary-btn" type="button" ${canReveal ? '' : 'disabled'}>Xem đáp án</button>`;
+      // ASR transcript only becomes diff-able evidence after the learner
+      // confirms the machine heard them right — ASR smoothing can silently
+      // "fix" learner speech, so an unconfirmed transcript is not an error.
+      $('asrYes')?.addEventListener('click', () => {
+        attempt.asrConfirmed = true;
+        attempt.asrPending = false;
+        renderAttemptArea();
+      });
+      $('asrNo')?.addEventListener('click', () => {
+        attempt.text = '';
+        attempt.asrPending = false;
+        attempt.asrConfirmed = false;
+        attempt.spoke = true;
+        renderAttemptArea();
+        toast('Đã bỏ transcript — nói lại hoặc tự xác nhận rồi xem đáp án.');
+      });
       $('saidBtn').onclick = () => {
         attempt.spoke = true;
         markFirstAttempt();
@@ -353,18 +371,25 @@
           if (event.results[i].isFinal) finalText += `${transcript} `;
           else interim += transcript;
         }
-        attempt.text = `${finalText}${interim}`.trim().slice(0, 1200);
-        attempt.spoke = true;
-        markFirstAttempt();
-        const line = $('answerArea')?.querySelector('.asr-transcript');
-        if (line) line.textContent = `Máy nghe được: “${attempt.text}”`;
-        else if (attempt.text) renderAttemptArea();
-        const flip = $('flipBtn');
-        if (flip) flip.disabled = false;
+        // Interim results are a live preview only — they must never become
+        // attempt evidence. Only a final result counts as "the machine heard".
+        const heard = `${finalText}${interim}`.trim().slice(0, 1200);
+        if (heard) {
+          attempt.spoke = true;
+          markFirstAttempt();
+          const live = $('asrLive');
+          if (live) live.textContent = `Máy đang nghe: “${heard}”`;
+          else renderAttemptArea();
+        }
       };
       recognizer.onend = () => {
         recognizer = null;
-        attempt.text = finalText.trim() || attempt.text;
+        // Only a FINAL transcript becomes the attempt. Interim-only speech
+        // means the machine heard something but never committed — that is
+        // not evidence of what the learner said, so it stays self-check.
+        attempt.text = finalText.trim().slice(0, 1200);
+        attempt.asrPending = Boolean(attempt.text);
+        attempt.asrConfirmed = false;
         renderAttemptArea();
       };
       recognizer.onerror = (event) => {
@@ -517,13 +542,18 @@
     $('audioPrimary').classList.remove('hidden');
     $('feedback').className = 'feedback';
     let correctionHtml = '';
-    // Write attempts and ASR-heard speak attempts share the same word diff —
-    // self-confirmed speech (no transcript) skips it honestly.
-    if (attempt.text.trim() && (current.mode === B.Mode.WRITE || current.mode === B.Mode.SPEAK)) {
+    // Write attempts and CONFIRMED ASR speak attempts share the word diff.
+    // An unconfirmed transcript ("máy nghe được" but never verified) stays
+    // self-check — ASR smoothing can silently fix learner speech, so we
+    // never turn it into an error record without the learner's confirm.
+    if (attempt.text.trim() && (current.mode === B.Mode.WRITE || (current.mode === B.Mode.SPEAK && attempt.asrConfirmed))) {
       const units = attemptUnits(card);
       const cls = P.classifyAttempt(card.sentence, attempt.text, units);
       errorLoop.lastClassification = cls;
       errorLoop.inRetry = false;
+      // Snapshot the units the FIRST unaided attempt missed — even if a
+      // retry produces them later, that was aided recall, not unaided.
+      if (errorLoop.retryCount === 0) errorLoop.firstMissed = [...cls.missingUnits];
       if (cls.stage !== 'exact' && errorLoop.retryCount < MAX_RETRIES) {
         correctionHtml = errorCorrectionHtml(cls, units);
       }
@@ -602,7 +632,7 @@
     const missedUnits = A.cardParts(card)
       .filter((part) => part.unit_id && (ratings[part.unit_id] ?? 0) === 1)
       .map((part) => part.unit_id);
-    if (current.mode === B.Mode.WRITE || (current.mode === B.Mode.SPEAK && attempt.text.trim())) {
+    if (current.mode === B.Mode.WRITE || (current.mode === B.Mode.SPEAK && attempt.text.trim() && attempt.asrConfirmed)) {
       const cls = errorLoop.lastClassification
         || P.classifyAttempt(card.sentence, attempt.text, attemptUnits(card));
       const hadError = errorLoop.retryCount > 0 || cls.stage === 'miss' || missedUnits.length;
@@ -610,7 +640,10 @@
       return {
         stage: cls.stage,
         types: cls.errorTypes,
-        missedUnits: [...new Set([...cls.missingUnits, ...missedUnits])],
+        // Ever-missed = first attempt ∪ final attempt ∪ self-rated-wrong.
+        // finalMissing narrows it to units still absent in the last attempt.
+        missedUnits: [...new Set([...errorLoop.firstMissed, ...cls.missingUnits, ...missedUnits])],
+        finalMissing: [...cls.missingUnits],
         firstAttempt: errorLoop.firstAttempt || attempt.text,
         finalAttempt: attempt.text,
         corrected: cls.corrected,
@@ -622,6 +655,7 @@
       stage: 'self-check',
       types: ['self-check'],
       missedUnits,
+      finalMissing: [],
       firstAttempt: '',
       finalAttempt: '',
       corrected: !missedUnits.length && errorLoop.retryCount > 0,
@@ -786,7 +820,12 @@
       const cardCount = A.cardCountForUnit(db, item.id, engine);
       const seenContexts = A.seenContextCount(db, item.id);
       const encounters = window.FlashDayImmersion?.encounterCount?.(db, item.id) || 0;
-      const pill = `${cardCount} ngữ cảnh${seenContexts > 0 && cardCount > 1 ? ` · ôn ${seenContexts}` : ''}${encounters ? ` · gặp lại ${encounters} lần` : ''}`;
+      // A unit whose only card is the bare-phrase fallback has never been
+      // reviewed inside a real source sentence — label that honestly instead
+      // of letting "1 ngữ cảnh" imply a context card exists.
+      const fallbackOnly = engine.getCardsForUnit(item.id, 50).every((card) => card?.source?.type === 'fallback');
+      const contextLabel = fallbackOnly ? 'chưa có câu' : `${cardCount} ngữ cảnh`;
+      const pill = `${contextLabel}${seenContexts > 0 && cardCount > 1 ? ` · ôn ${seenContexts}` : ''}${encounters ? ` · gặp lại ${encounters} lần` : ''}`;
       const totalRatings = statuses.reduce((sum, status) => sum + status.ratings, 0);
       const dueNow = statuses.some((status) => status.dueAt != null && status.dueAt <= nowMs);
       const state = totalRatings === 0 ? 'new' : dueNow ? 'due' : 'learning';
