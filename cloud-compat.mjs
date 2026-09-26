@@ -31,7 +31,8 @@ export function mapAuthError(error) {
     'auth/expired-action-code': 'Action link expired',
     'auth/invalid-action-code': 'Action link expired',
     'auth/popup-blocked': 'Sign-in popup blocked',
-    'auth/popup-closed-by-user': 'Sign-in popup closed'
+    'auth/popup-closed-by-user': 'Sign-in popup closed',
+    'auth/web-storage-unsupported': 'Web storage unsupported'
   };
   return new Error(table[code] || String(error?.message || error || 'Authentication failed'));
 }

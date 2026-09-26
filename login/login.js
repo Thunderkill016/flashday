@@ -185,14 +185,14 @@ function validateSubmission() {
 }
 
 async function submitGoogle() {
-  // signInWithRedirect returns to this same page; a successful session then
-  // routes onward via getSession() below. The redirectTo option is a no-op
-  // kept only for parity with the old Supabase call signature.
-  const { error } = await client.auth.signInWithOAuth({
+  // Popup-first inside the shim: a resolved session opens the app directly;
+  // the redirect fallback path lands back here and routes via getSession().
+  const { data, error } = await client.auth.signInWithOAuth({
     provider: 'google',
     options: { redirectTo: appUrl() }
   });
   if (error) throw error;
+  if (data?.session) openAuthenticatedApp(data.session);
 }
 
 tabs.forEach((tab) => tab.addEventListener('click', () => setMode(tab.dataset.tab)));
@@ -208,6 +208,10 @@ $('auth-google-btn').addEventListener('click', async () => {
   setBusy(true);
   try {
     await submitGoogle();
+    // Resolving without navigation means a cancelled popup or a redirect
+    // fallback that's still completing — either way the button must be
+    // usable again for a retry.
+    setBusy(false);
   } catch (error) {
     showStatus(authErrorMessage(error), 'error');
     setBusy(false);

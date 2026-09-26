@@ -37,6 +37,8 @@ export function authErrorMessage(error) {
   if (message.includes('requires recent login')) return 'Phiên đăng nhập đã cũ. Hãy đăng nhập lại rồi thử lại.';
   if (message.includes('action link expired')) return 'Liên kết đã hết hạn hoặc đã được sử dụng. Hãy yêu cầu gửi lại.';
   if (message.includes('continue url not authorized')) return 'Liên kết xác thực chưa được cấu hình tên miền.';
+  if (message.includes('web storage unsupported')) return 'Trình duyệt đang chặn lưu trữ (cookies/storage). Tắt ẩn danh/chặn tracker rồi thử lại.';
+  if (message.includes('sign-in popup')) return 'Cửa sổ đăng nhập Google bị chặn hoặc đã đóng. Hãy thử lại.';
   if (message.includes('provider is not enabled')) return 'Đăng nhập Google chưa được cấu hình cho FlashDay.';
   if (message.includes('chưa nhận được phiên đăng nhập')) {
     return 'Đăng nhập đã hoàn tất nhưng FlashDay chưa nhận được phiên. Hãy thử lại.';

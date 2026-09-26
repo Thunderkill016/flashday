@@ -27,7 +27,9 @@ const cases = [
   ['auth/unauthorized-domain', 'provider is not enabled'],
   ['auth/unauthorized-continue-uri', 'continue url not authorized'],
   ['auth/expired-action-code', 'action link expired'],
-  ['auth/invalid-action-code', 'action link expired']
+  ['auth/invalid-action-code', 'action link expired'],
+  ['auth/web-storage-unsupported', 'web storage unsupported'],
+  ['auth/popup-closed-by-user', 'sign-in popup']
 ];
 for (const [code, expected] of cases) {
   const mapped = mapAuthError({ code, message: `Firebase: (${code}).` });

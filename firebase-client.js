@@ -13,6 +13,7 @@ import {
   getRedirectResult,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
+  signInWithPopup,
   signInWithRedirect,
   GoogleAuthProvider,
   sendPasswordResetEmail,
@@ -145,10 +146,24 @@ export function createClient(config) {
 
     signInWithOAuth: async ({ provider }) => {
       if (provider !== 'google') return fail(new Error('Provider is not enabled'));
+      const googleProvider = new GoogleAuthProvider();
       try {
-        await signInWithRedirect(auth, new GoogleAuthProvider());
-        return ok();
+        // Popup-first: the credential arrives in the same call, no dependence
+        // on sessionStorage surviving a cross-origin navigation — which is
+        // exactly where redirect sign-in loses its state (privacy browsers,
+        // storage partitioning, cross-tab handoffs).
+        const credential = await signInWithPopup(auth, googleProvider);
+        return ok({ user: credential.user, session: await sessionFor(credential.user) });
       } catch (error) {
+        const code = String(error?.code || '');
+        if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+          // The learner closed the popup on purpose — not an error state.
+          return ok();
+        }
+        if (code === 'auth/popup-blocked' || code === 'auth/operation-not-supported-in-this-environment') {
+          await signInWithRedirect(auth, googleProvider);
+          return ok();
+        }
         return fail(error);
       }
     },
