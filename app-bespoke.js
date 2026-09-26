@@ -199,6 +199,8 @@
     const hasContent = (db.items || []).length > 0;
     $('trackBadge').textContent = 'Xong';
     $('trackBadge').className = 'badge neutral';
+    delete $('studyCard').dataset.mode;
+    delete $('progressTrack').dataset.mode;
     $('sourceChip').classList.add('hidden');
     $('sourceChip').setAttribute('aria-expanded', 'false');
     if (hasContent) {
@@ -226,7 +228,9 @@
     const card = current.card;
     const meta = A.MODE_META[current.mode];
     $('trackBadge').textContent = meta.label;
-    $('trackBadge').className = 'badge';
+    $('trackBadge').className = `badge mode-${current.mode}`;
+    $('studyCard').dataset.mode = current.mode;
+    $('progressTrack').dataset.mode = current.mode;
     $('feedback').classList.add('hidden');
     $('sourcePanel').classList.add('hidden');
     $('instruction').textContent = errorLoop.inRetry
@@ -542,7 +546,7 @@
       const score = ratings[part.unit_id] ?? 0;
       const item = itemById(part.unit_id);
       const isRated = score !== 0;
-      return `<button class="word-chip rating-chip" type="button" aria-pressed="${isRated}" data-unit="${esc(part.unit_id)}" title="${esc(item?.meaning || part.unit_id)}"><b>${esc(part.occurance)}</b><small>${scoreGlyph(score)} ${scoreText(score)} · chạm để đổi</small></button>`;
+      return `<button class="word-chip rating-chip" type="button" aria-pressed="${isRated}" data-score="${score}" data-unit="${esc(part.unit_id)}" title="${esc(item?.meaning || part.unit_id)}"><b>${esc(part.occurance)}</b><small>${scoreGlyph(score)} ${scoreText(score)} · chạm để đổi</small></button>`;
     }).join('');
     const ratingStatus = ratingsComplete
       ? 'Đã chấm tất cả Unit. Bạn có thể lưu lần ôn.'
@@ -719,7 +723,7 @@
     $('capabilities').innerHTML = `<div class="cap-title"><strong>${ids.length} unit trong card</strong><span>${contextCount} ngữ cảnh cho unit đang được chọn${rotationNote}</span></div><div class="cap-grid">${ids.map((id) => {
       const item = itemById(id);
       const status = A.itemStatus(db, id, Date.now(), engine).find((entry) => entry.mode === current.mode);
-      return `<div class="cap-cell"><label><span>${esc(item?.target || id)}</span><b>${esc(status?.status || 'Mới')}</b></label><small>${esc(item?.meaning || '')}</small></div>`;
+      return `<div class="cap-cell" data-mode="${esc(current.mode)}"><label><span>${esc(item?.target || id)}</span><b>${esc(status?.status || 'Mới')}</b></label><small>${esc(item?.meaning || '')}</small></div>`;
     }).join('')}</div>`;
   }
 
@@ -775,7 +779,7 @@
       const cardCount = A.cardCountForUnit(db, item.id, engine);
       const seenContexts = A.seenContextCount(db, item.id);
       const pill = seenContexts > 0 && cardCount > 1 ? `${cardCount} ngữ cảnh · đã gặp ${seenContexts}` : `${cardCount} ngữ cảnh`;
-      return `<article class="memory-card"><div class="memory-top"><div><div class="memory-title">${esc(item.target)}</div><div class="memory-meaning">${esc(item.meaning)}</div></div><span class="type-pill">${pill}</span></div>${item.canDo ? `<p class="can-do">${esc(item.canDo)}</p>` : ''}<div class="cap-grid" style="margin-top:14px">${statuses.map((status) => `<div class="cap-cell"><label><span>${esc(status.label)}</span><b>${esc(status.status)}</b></label><small>${status.ratings} ratings</small></div>`).join('')}</div></article>`;
+      return `<article class="memory-card"><div class="memory-top"><div><div class="memory-title">${esc(item.target)}</div><div class="memory-meaning">${esc(item.meaning)}</div></div><span class="type-pill">${pill}</span></div>${item.canDo ? `<p class="can-do">${esc(item.canDo)}</p>` : ''}<div class="cap-grid" style="margin-top:14px">${statuses.map((status) => `<div class="cap-cell" data-mode="${esc(status.mode)}"><label><span>${esc(status.label)}</span><b>${esc(status.status)}</b></label><small>${status.ratings} ratings</small></div>`).join('')}</div></article>`;
     }).join('') || '<div class="empty">Chưa có unit.</div>';
   }
 

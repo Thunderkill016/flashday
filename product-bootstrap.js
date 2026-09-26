@@ -22,7 +22,11 @@ if (!config?.apiKey || !config?.projectId || !config?.appId) {
       // (blocked storage, expired token) — only send it when a session has
       // existed on this device, otherwise first-time visitors get blamed.
       if (session) markSession(true);
-      if (!session && window.location.pathname.includes('/app/')) {
+      const previewMode = new URLSearchParams(window.location.search).has('preview');
+      if (previewMode && !session) {
+        document.getElementById('previewBadge')?.classList.remove('hidden');
+      }
+      if (!session && window.location.pathname.includes('/app/') && !previewMode) {
         let hadSession = true; // blocked storage is exactly the case session=lost explains
         try { hadSession = window.localStorage.getItem(HAD_SESSION_KEY) === '1'; } catch (_e) {}
         window.location.replace(hadSession ? '/login/?session=lost#signin' : '/login/#signin');

@@ -760,3 +760,113 @@ mark.token-new { background: rgba(255,120,109,0.12); color: inherit; border-bott
 .tok-word:hover { color: var(--fd-primary); border-bottom-color: var(--fd-primary); }
 .word-capture { margin: 10px 0 0; padding: 12px 14px; border: 1px solid var(--fd-primary); border-radius: var(--fd-radius-md); background: var(--fd-surface); }
 .wc-sentence { margin: 8px 0; font-size: 13px; color: var(--fd-text-secondary); font-style: italic; }
+
+/* ============================================================
+   MODE IDENTITY — 4 kỹ năng mang màu riêng, khớp landing
+   ============================================================ */
+:root {
+  --mode-listen: #5EDBFF;
+  --mode-speak: #FF6A5E;
+  --mode-read: #C7F45B;
+  --mode-write: #A78BFA;
+}
+
+/* Study card: dải màu trên cùng theo mode đang ôn */
+.study-card { position: relative; overflow: hidden; }
+.study-card[data-mode]::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: var(--mode-c, var(--fd-border));
+  transition: background 0.3s;
+}
+.study-card[data-mode="listen"] { --mode-c: var(--mode-listen); }
+.study-card[data-mode="speak"] { --mode-c: var(--mode-speak); }
+.study-card[data-mode="read"] { --mode-c: var(--mode-read); }
+.study-card[data-mode="write"] { --mode-c: var(--mode-write); }
+
+.badge.mode-listen { color: var(--mode-listen); border-color: var(--mode-listen); background: color-mix(in srgb, var(--mode-listen) 12%, transparent); }
+.badge.mode-speak { color: var(--mode-speak); border-color: var(--mode-speak); background: color-mix(in srgb, var(--mode-speak) 12%, transparent); }
+.badge.mode-read { color: var(--mode-read); border-color: var(--mode-read); background: color-mix(in srgb, var(--mode-read) 12%, transparent); }
+.badge.mode-write { color: var(--mode-write); border-color: var(--mode-write); background: color-mix(in srgb, var(--mode-write) 12%, transparent); }
+
+/* Progress bar nhuộm theo mode đang học */
+.progress[data-mode="listen"] #progressBar { background: var(--mode-listen); }
+.progress[data-mode="speak"] #progressBar { background: var(--mode-speak); }
+.progress[data-mode="read"] #progressBar { background: var(--mode-read); }
+.progress[data-mode="write"] #progressBar { background: var(--mode-write); }
+
+/* cap-cell: dải màu trái theo kỹ năng → bản đồ 4 skills scannable */
+.cap-cell[data-mode] { border-left: 3px solid var(--mode-cell, transparent); }
+.cap-cell[data-mode="listen"] { --mode-cell: var(--mode-listen); }
+.cap-cell[data-mode="speak"] { --mode-cell: var(--mode-speak); }
+.cap-cell[data-mode="read"] { --mode-cell: var(--mode-read); }
+.cap-cell[data-mode="write"] { --mode-cell: var(--mode-write); }
+
+/* ============================================================
+   MISSING STYLES — các class render mộc từ trước
+   ============================================================ */
+
+/* Toast */
+.toast {
+  position: fixed;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(480px, calc(100vw - 32px));
+  padding: 14px 22px;
+  border-radius: var(--fd-radius-md);
+  background: var(--fd-surface-2);
+  border: 1px solid var(--fd-border-interactive);
+  color: var(--fd-text-primary);
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: var(--fd-shadow-dialog);
+  z-index: 200;
+  animation: toast-in 0.25s ease;
+}
+@keyframes toast-in { from { opacity: 0; transform: translateX(-50%) translateY(12px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+
+/* Rating intro/status */
+.rating-intro { color: var(--fd-text-secondary); font-size: 14px; margin: 0 0 8px; line-height: 1.5; }
+.rating-status { color: var(--fd-text-tertiary); font-size: 13px; margin: 0 0 14px; }
+.rating-plain { color: var(--fd-text-secondary); font-size: 15px; padding: 8px 4px; }
+.selected-definition { margin: -12px 0 16px; padding: 10px 14px; border-radius: var(--fd-radius-sm); background: var(--fd-primary-soft); color: var(--fd-primary); font-size: 14px; font-weight: 600; text-align: center; }
+.report-label { display: flex; align-items: center; gap: 8px; color: var(--fd-text-secondary); font-size: 14px; cursor: pointer; }
+.report-label input { width: 16px; height: 16px; accent-color: var(--fd-primary); }
+
+/* Answer recap + key */
+.attempt-recap { color: var(--fd-text-secondary); font-size: 14px; margin: 0 0 14px; padding: 10px 14px; border-radius: var(--fd-radius-sm); background: var(--fd-surface); border: 1px dashed var(--fd-border); }
+.answer-key { font-size: 18px; font-weight: 700; color: var(--fd-text-primary); margin: 0 0 4px; }
+.muted-copy { color: var(--fd-text-tertiary); font-weight: 400; font-size: 14px; }
+
+/* Rating chip trạng thái chấm */
+.rating-chip[data-score="3"] { background: rgba(199, 244, 91, 0.12); border-color: var(--mode-read); }
+.rating-chip[data-score="3"] small { color: var(--mode-read); opacity: 1; }
+.rating-chip[data-score="1"] { background: rgba(255, 106, 94, 0.12); border-color: var(--mode-speak); }
+.rating-chip[data-score="1"] small { color: var(--mode-speak); opacity: 1; }
+
+/* Speak-mode extras */
+.attempt-actions { margin-top: 14px; }
+.asr-transcript { color: var(--fd-primary) !important; font-weight: 600; }
+.local-recording { width: 100%; margin-top: 12px; height: 40px; border-radius: var(--fd-radius-sm); }
+
+/* Memory list */
+.memory-list { display: grid; gap: 16px; }
+.memory-card { padding: 20px 22px; border: 1px solid var(--fd-border); border-radius: var(--fd-radius-lg); background: var(--fd-surface); box-shadow: var(--fd-shadow-card); transition: border-color 0.2s; }
+.memory-card:hover { border-color: var(--fd-border-interactive); }
+.memory-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.memory-title { font-size: 20px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.25; }
+.memory-meaning { color: var(--fd-text-secondary); font-size: 14px; margin-top: 2px; }
+.type-pill { flex-shrink: 0; padding: 4px 12px; border-radius: 999px; background: var(--fd-accent-soft); color: var(--fd-accent); font-size: 11px; font-weight: 700; letter-spacing: 0.04em; white-space: nowrap; }
+.can-do { margin: 12px 0 0; padding: 10px 14px; border-left: 3px solid var(--fd-primary); border-radius: 0 var(--fd-radius-sm) var(--fd-radius-sm) 0; background: var(--fd-surface-2); color: var(--fd-text-secondary); font-size: 14px; }
+.empty { padding: 48px 24px; text-align: center; color: var(--fd-text-tertiary); border: 1px dashed var(--fd-border); border-radius: var(--fd-radius-lg); }
+
+/* Debug panel */
+.debug { margin-top: 24px; border: 1px dashed var(--fd-border); border-radius: var(--fd-radius-md); padding: 12px 16px; }
+.debug summary { cursor: pointer; color: var(--fd-text-tertiary); font-size: 12px; font-family: var(--fd-font-mono); }
+.debug pre { margin: 10px 0 0; font-size: 12px; color: var(--fd-text-secondary); white-space: pre-wrap; }
+
+/* Reveal transition nhẹ cho card */
+.study-card .feedback { transition: opacity 0.25s ease; }
