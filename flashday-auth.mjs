@@ -1,4 +1,36 @@
+import { createClient } from './firebase-client.js';
+
 export const MIN_PASSWORD_LENGTH = 8;
+
+// One place that knows how to turn the vite-injected config into a usable
+// client — every auth entrypoint (/login/, /auth/) shares this.
+export function createFlashdayClient(config) {
+  return config?.apiKey && config?.projectId ? createClient(config) : null;
+}
+
+// Every path that ends in "open the app" funnels through this so the handoff
+// always shows a success state before navigating — the browser keeps the old
+// page painted until /app/ renders, and a silent form looks like a crash.
+export function enterApp(session, statusEl, { fresh = true, replace = false } = {}) {
+  if (!session?.user?.id) {
+    throw new Error('FlashDay chưa nhận được phiên đăng nhập.');
+  }
+  if (statusEl) {
+    statusEl.textContent = fresh
+      ? 'Đăng nhập thành công. Đang mở FlashDay…'
+      : 'Đang mở FlashDay…';
+    statusEl.dataset.tone = 'success';
+    statusEl.classList.remove('hidden');
+  }
+  // replace() for transition surfaces (/auth/) so Back never lands on a dead
+  // spinner; assign() keeps /login/ reachable from history elsewhere.
+  if (replace) window.location.replace(appUrl());
+  else window.location.assign(appUrl());
+}
+
+export function appUrl() {
+  return authRedirectUrl(window.location.origin, '/app/');
+}
 
 export const AUTH_MODE = Object.freeze({
   SIGN_UP: 'signup',

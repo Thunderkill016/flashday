@@ -5,13 +5,15 @@ import {
   authErrorMessage,
   authModeCopy,
   authRedirectUrl,
+  createFlashdayClient,
+  enterApp,
   isPasswordLongEnough,
   requiresNewPasswordPolicy,
 } from '../flashday-auth.mjs';
 
 assert.equal(
-  authRedirectUrl('https://flashdayvn.vercel.app', '/app/'),
-  'https://flashdayvn.vercel.app/app/'
+  authRedirectUrl('https://flashday.web.app', '/app/'),
+  'https://flashday.web.app/app/'
 );
 assert.equal(
   authRedirectUrl('http://localhost:5173/', '/?auth=recover'),
@@ -68,4 +70,21 @@ assert.equal(
 );
 assert.equal(authModeCopy(AUTH_MODE.RECOVERY).passwordAutocomplete, null);
 
-console.log('FlashDay auth contract: 19 checks passed');
+// createFlashdayClient: the only factory entrypoints may use — a missing
+// or partial config must yield null (never a half-configured client).
+assert.equal(createFlashdayClient(undefined), null);
+assert.equal(createFlashdayClient({}), null);
+assert.equal(createFlashdayClient({ apiKey: 'k' }), null);
+assert.ok(
+  createFlashdayClient({ apiKey: 'k', projectId: 'p', appId: 'a' }),
+  'full config must yield a client'
+);
+
+// enterApp refuses to navigate without a real session — this guards the
+// redirect-result path, whose UserCredential shape (user.uid) differs from
+// a session shape (user.id).
+assert.throws(() => enterApp(null), /chưa nhận được phiên/);
+assert.throws(() => enterApp({ user: {} }), /chưa nhận được phiên/);
+assert.throws(() => enterApp({ user: { uid: 'x' } }), /chưa nhận được phiên/);
+
+console.log('FlashDay auth contract: 26 checks passed');

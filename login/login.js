@@ -1,11 +1,13 @@
-import { createClient } from '../firebase-client.js';
 import { detectStorageBlocking } from '../cloud-compat.mjs';
 import {
   AUTH_MODE,
   MIN_PASSWORD_LENGTH,
+  appUrl,
   authErrorMessage,
   authModeCopy,
   authRedirectUrl,
+  createFlashdayClient,
+  enterApp,
   isPasswordLongEnough,
   requiresNewPasswordPolicy,
 } from '../flashday-auth.mjs';
@@ -15,11 +17,7 @@ const $ = (id) => document.getElementById(id);
 const form = $('auth-form');
 const tabs = document.querySelectorAll('.auth-tab');
 
-const firebaseConfig = __FLASHDAY_FIREBASE_CONFIG__;
-const client =
-  firebaseConfig?.apiKey && firebaseConfig?.projectId
-    ? createClient(firebaseConfig)
-    : null;
+const client = createFlashdayClient(__FLASHDAY_FIREBASE_CONFIG__);
 
 // Firebase email-action links arrive as ?mode=…&oobCode=… on the
 // continueUrl: resetPassword, verifyEmail and recoverEmail.
@@ -40,26 +38,12 @@ if (actionCode) {
 const sessionLost = actionParams.get('session') === 'lost';
 // Set when a sign-out bounces back here — show a goodbye, not an error.
 const justSignedOut = actionParams.get('signedOut') === '1';
-// The redirect fallback leaves a breadcrumb so a returning /login/ renders a
-// handoff state instead of flashing the form. If sessionStorage was blocked
-// (which is what kills redirect state anyway) the referrer check covers it.
-let oauthPending = false;
-try {
-  oauthPending = sessionStorage.getItem('flashday:oauth-pending') === '1';
-  sessionStorage.removeItem('flashday:oauth-pending');
-} catch (_error) {
-  /* storage blocked — referrer heuristic still applies */
-}
 // The account a valid reset code belongs to — prefills sign-in if the
 // automatic re-login after reset fails.
 let resetEmail = null;
 
 let mode = AUTH_MODE.SIGN_IN;
 let signedInUser = null;
-
-function appUrl() {
-  return authRedirectUrl(window.location.origin, '/app/');
-}
 
 function recoveryUrl() {
   // After the hosted reset page finishes, "Continue" should land on a clean
@@ -68,16 +52,7 @@ function recoveryUrl() {
 }
 
 function openAuthenticatedApp(session, { fresh = true } = {}) {
-  if (!session?.user?.id) {
-    throw new Error('FlashDay chưa nhận được phiên đăng nhập.');
-  }
-  // "fresh" = the learner just submitted credentials; otherwise they simply
-  // revisited /login/ while still signed in.
-  showStatus(
-    fresh ? 'Đăng nhập thành công. Đang mở FlashDay…' : 'Đang mở FlashDay…',
-    'success'
-  );
-  window.location.assign(appUrl());
+  enterApp(session, $('auth-status'), { fresh });
 }
 
 function showStatus(message, tone = 'info') {
@@ -394,28 +369,22 @@ if (
 if (!client) {
   showStatus('Đăng nhập đang được cấu hình. Hãy thử lại sau.', 'error');
 } else {
-  // Surface a failed Google redirect (unauthorized domain, cancelled sign-in…)
-  // instead of silently landing back on this page logged out. On success the
-  // credential is already persisted, so skip this page's session round-trip
-  // and go straight to /app/ — its own guard waits on auth state anyway.
-  client.auth.getRedirectResult().then(({ error }) => {
+  const inRecoveryFlow = () =>
+    mode === AUTH_MODE.UPDATE_PASSWORD || mode === AUTH_MODE.RECOVERY;
+
+  // Redirect sign-in now round-trips through /auth/, never this page — but
+  // if a stale tab ever lands here mid-return, resolving the credential and
+  // entering the app is still the right move. Provider errors surface too.
+  client.auth.getRedirectResult().then(({ data, error }) => {
     if (error) {
       showStatus(authErrorMessage(error), 'error');
       return;
     }
-    if (returnedFromAuthHandler && !inRecoveryFlow()) {
+    if (data?.user && !inRecoveryFlow()) {
+      showStatus('Đang hoàn tất đăng nhập Google…', 'info');
       window.location.replace(appUrl());
     }
   });
-
-  const inRecoveryFlow = () =>
-    mode === AUTH_MODE.UPDATE_PASSWORD || mode === AUTH_MODE.RECOVERY;
-
-  const returnedFromAuthHandler =
-    oauthPending ||
-    /firebaseapp\.com|accounts\.google\.com|\/__\/auth\//.test(
-      document.referrer || ''
-    );
 
   // The auth handler navigates the popup window back to this page after
   // delivering the credential to the opener. When that happens the opener
@@ -426,12 +395,6 @@ if (!client) {
     showStatus('Đang hoàn tất đăng nhập…', 'info');
     window.close();
   } else {
-    // Returning from the auth round-trip means a session is being resolved —
-    // show progress instead of a silent form flash.
-    if (returnedFromAuthHandler && !resetCode) {
-      showStatus('Đang hoàn tất đăng nhập Google…', 'info');
-    }
-
     client.auth.getSession().then(({ data, error }) => {
       if (error) {
         showStatus(authErrorMessage(error), 'error');
@@ -439,24 +402,9 @@ if (!client) {
       }
       signedInUser = data.session?.user || null;
       if (signedInUser && !inRecoveryFlow()) {
-        // Show the success state before navigating — the browser keeps the old
-        // page visible until /app/ paints, so without this the learner stares
-        // at a dead-looking form during the load.
+        // Revisited /login/ while still signed in — go straight in.
         openAuthenticatedApp(data.session, { fresh: false });
         return;
-      }
-      // Came back from the auth handler but no session exists — the redirect
-      // state was likely lost (blocked sessionStorage, cross-tab handoff…).
-      // Give SIGNED_IN a grace window to fire before warning the learner.
-      if (returnedFromAuthHandler && !inRecoveryFlow()) {
-        window.setTimeout(() => {
-          if (!signedInUser) {
-            showStatus(
-              'Google đã trả về nhưng phiên chưa được tạo — trình duyệt có thể đang chặn lưu trữ phiên. Hãy bấm Google lần nữa hoặc dùng email/mật khẩu.',
-              'error'
-            );
-          }
-        }, 2500);
       }
     });
 

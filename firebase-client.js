@@ -50,10 +50,6 @@ const FIRESTORE_BATCH_LIMIT = 450;
 const VERIFICATION_RESEND_COOLDOWN_MS = 60_000;
 let lastVerificationResend = 0;
 
-// Breadcrumb for the signInWithRedirect round-trip: the returning /login/
-// uses it to render a handoff state instead of flashing the login form.
-const OAUTH_PENDING_KEY = 'flashday:oauth-pending';
-
 export function createClient(config) {
   const app = initializeApp(config);
   const auth = getAuth(app);
@@ -229,16 +225,13 @@ export function createClient(config) {
 
     // Starts the Google redirect flow. MUST only be called from /auth/ —
     // Firebase returns to whatever page initiated the redirect, and the
-    // transition page is the one designed to receive the credential.
+    // transition page is the one designed to receive the credential. The
+    // caller marks the URL with '#return' so a partitioned browser is still
+    // recognisable on the way back.
     startOAuthRedirect: async (provider) => {
       if (provider !== 'google')
         return fail(new Error('Provider is not enabled'));
       try {
-        try {
-          sessionStorage.setItem(OAUTH_PENDING_KEY, '1');
-        } catch (_e) {
-          /* storage-blocked browsers lose the marker, same as the state */
-        }
         await signInWithRedirect(auth, new GoogleAuthProvider());
         return ok({ redirecting: true });
       } catch (error) {

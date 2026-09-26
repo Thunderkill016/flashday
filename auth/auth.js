@@ -1,11 +1,12 @@
-import { createClient } from '../firebase-client.js';
 import { detectStorageBlocking } from '../cloud-compat.mjs';
-import { authErrorMessage } from '../flashday-auth.mjs';
+import {
+  authErrorMessage,
+  createFlashdayClient,
+  enterApp,
+} from '../flashday-auth.mjs';
 
 const $ = (id) => document.getElementById(id);
-const client = __FLASHDAY_FIREBASE_CONFIG__?.apiKey
-  ? createClient(__FLASHDAY_FIREBASE_CONFIG__)
-  : null;
+const client = createFlashdayClient(__FLASHDAY_FIREBASE_CONFIG__);
 
 // The redirect round-trip preserves the full URL — the '#return' hash is set
 // right before leaving for Google so a partitioned browser (which loses the
@@ -29,8 +30,8 @@ function fail(message) {
 }
 
 function enter(session) {
-  status('Đăng nhập thành công. Đang mở FlashDay…', 'success');
-  window.location.replace('/app/');
+  // This page is a transition surface — Back must never return to the spinner.
+  enterApp(session, $('auth-status'), { replace: true });
 }
 
 async function run() {
@@ -49,16 +50,12 @@ async function run() {
     fail(authErrorMessage(error));
     return;
   }
-  if (data?.user) {
-    enter(data);
-    return;
-  }
-
-  // A persisted session also counts — the learner may have signed in on
-  // another tab while the popup was open.
+  // A resolved redirect credential (UserCredential.user) or a session that
+  // already persisted (e.g. signed in on another tab) both count — normalise
+  // through getSession() so enterApp receives the session shape either way.
   const existing = await client.auth.getSession();
-  if (existing?.data?.session?.user) {
-    enter(existing.data.session);
+  if (data?.user || existing?.data?.session?.user) {
+    enter(existing?.data?.session || { user: { id: data.user.uid } });
     return;
   }
 
