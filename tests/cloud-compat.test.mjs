@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {
+  isIgnorableResetError,
   mapAuthError,
   matchRows,
   paginateRows,
@@ -13,10 +14,20 @@ const cases = [
   ['auth/wrong-password', 'invalid login credentials'],
   ['auth/user-not-found', 'invalid login credentials'],
   ['auth/email-already-in-use', 'user already registered'],
+  ['auth/account-exists-with-different-credential', 'user already registered'],
+  ['auth/credential-already-in-use', 'user already registered'],
+  ['auth/invalid-email', 'invalid email address'],
+  ['auth/missing-email', 'invalid email address'],
   ['auth/weak-password', 'password should be at least'],
   ['auth/too-many-requests', 'too many requests'],
+  ['auth/quota-exceeded', 'too many requests'],
+  ['auth/network-request-failed', 'network request failed'],
+  ['auth/user-disabled', 'user account disabled'],
+  ['auth/requires-recent-login', 'requires recent login'],
   ['auth/unauthorized-domain', 'provider is not enabled'],
-  ['auth/expired-action-code', 'reset link expired']
+  ['auth/unauthorized-continue-uri', 'continue url not authorized'],
+  ['auth/expired-action-code', 'action link expired'],
+  ['auth/invalid-action-code', 'action link expired']
 ];
 for (const [code, expected] of cases) {
   const mapped = mapAuthError({ code, message: `Firebase: (${code}).` });
@@ -24,6 +35,12 @@ for (const [code, expected] of cases) {
   assert.ok(mapped.message.toLowerCase().includes(expected), `${code} -> ${mapped.message}`);
 }
 assert.equal(mapAuthError(new Error('Email not confirmed')).message, 'Email not confirmed');
+
+// Reset-endpoint enumeration shield: unknown accounts must not error.
+assert.equal(isIgnorableResetError({ code: 'auth/user-not-found' }), true);
+assert.equal(isIgnorableResetError({ code: 'auth/invalid-email' }), true);
+assert.equal(isIgnorableResetError({ code: 'auth/too-many-requests' }), false);
+assert.equal(isIgnorableResetError({ code: 'auth/network-request-failed' }), false);
 
 // rowDocId: explicit id wins, owner-keyed rows collapse to owner_id.
 assert.equal(rowDocId({ id: 'a', owner_id: 'u' }), 'a');

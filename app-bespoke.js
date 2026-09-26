@@ -33,7 +33,6 @@
   let cloudKnown = C.emptyKnownIds();
   let syncChain = Promise.resolve();
   let isHydrating = false;
-  let authMode = 'signin';
   let cardTelemetry = blankCardTelemetry();
 
   function blankAttempt() {
@@ -716,51 +715,6 @@
       return;
     }
     window.location.assign('/login/#signin');
-  }
-
-  function setAuthMode(nextMode) {
-    authMode = nextMode;
-    $('signInMode').classList.toggle('active', nextMode === 'signin');
-    $('signUpMode').classList.toggle('active', nextMode === 'signup');
-    $('authSubmit').textContent = nextMode === 'signin' ? 'Đăng nhập' : 'Tạo tài khoản';
-    $('authHint').textContent = nextMode === 'signin'
-      ? 'Đăng nhập để đồng bộ bộ thẻ và lịch ôn của riêng bạn.'
-      : 'Sau khi tạo tài khoản, hãy xác nhận email trước khi đăng nhập.';
-  }
-
-  async function submitAuth(event) {
-    event.preventDefault();
-    if (!supabaseClient) return;
-    const email = $('authEmail').value.trim();
-    const password = $('authPassword').value;
-    const submit = $('authSubmit');
-    submit.disabled = true;
-    $('authError').classList.add('hidden');
-    try {
-      if (authMode === 'signup') {
-        const { data, error } = await supabaseClient.auth.signUp({
-          email,
-          password,
-          options: { emailRedirectTo: `${window.location.origin}/` }
-        });
-        if (error) throw error;
-        if (data.session) {
-          $('authDialog').close();
-          toast('Tài khoản đã được tạo và đăng nhập.');
-        } else {
-          toast('Kiểm tra email để xác nhận tài khoản, rồi quay lại đăng nhập.');
-        }
-      } else {
-        const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
-        if (error) throw error;
-        $('authDialog').close();
-      }
-    } catch (error) {
-      $('authError').textContent = error.message || 'Không thể xác thực.';
-      $('authError').classList.remove('hidden');
-    } finally {
-      submit.disabled = false;
-    }
   }
 
   async function connectCloud(detail) {

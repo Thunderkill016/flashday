@@ -27,10 +27,16 @@ export function authErrorMessage(error) {
   if (message.includes('invalid login credentials')) return 'Email hoặc mật khẩu không đúng.';
   if (message.includes('user already registered')) return 'Email này đã có tài khoản. Hãy đăng nhập, hoặc dùng “Quên mật khẩu?”.';
   if (message.includes('email not confirmed')) return 'Email chưa xác nhận — FlashDay vừa gửi lại link xác nhận. Kiểm tra cả spam.';
+  if (message.includes('invalid email address')) return 'Địa chỉ email không hợp lệ.';
   if (message.includes('password should be at least')) return `Mật khẩu cần ít nhất ${MIN_PASSWORD_LENGTH} ký tự.`;
   if (message.includes('email rate limit exceeded') || message.includes('too many requests')) {
     return 'Bạn đã thử quá nhiều lần. Hãy đợi ít phút rồi thử lại.';
   }
+  if (message.includes('network request failed')) return 'Mất kết nối mạng. Kiểm tra internet rồi thử lại.';
+  if (message.includes('user account disabled')) return 'Tài khoản này đã bị vô hiệu hoá.';
+  if (message.includes('requires recent login')) return 'Phiên đăng nhập đã cũ. Hãy đăng nhập lại rồi thử lại.';
+  if (message.includes('action link expired')) return 'Liên kết đã hết hạn hoặc đã được sử dụng. Hãy yêu cầu gửi lại.';
+  if (message.includes('continue url not authorized')) return 'Liên kết xác thực chưa được cấu hình tên miền.';
   if (message.includes('provider is not enabled')) return 'Đăng nhập Google chưa được cấu hình cho FlashDay.';
   if (message.includes('chưa nhận được phiên đăng nhập')) {
     return 'Đăng nhập đã hoàn tất nhưng FlashDay chưa nhận được phiên. Hãy thử lại.';

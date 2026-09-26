@@ -15,14 +15,16 @@ const form = $('auth-form');
 const tabs = document.querySelectorAll('.auth-tab');
 
 const firebaseConfig = __FLASHDAY_FIREBASE_CONFIG__;
-const supabase = firebaseConfig?.apiKey && firebaseConfig?.projectId
+const client = firebaseConfig?.apiKey && firebaseConfig?.projectId
   ? createClient(firebaseConfig)
   : null;
 
-// Firebase returns password-reset links as ?mode=resetPassword&oobCode=…
-// on the continueUrl; hold the code so the form can complete the reset.
-const resetParams = new URLSearchParams(window.location.search);
-const resetCode = resetParams.get('mode') === 'resetPassword' ? resetParams.get('oobCode') : null;
+// Firebase email-action links arrive as ?mode=…&oobCode=… on the
+// continueUrl: resetPassword, verifyEmail and recoverEmail.
+const actionParams = new URLSearchParams(window.location.search);
+const actionMode = actionParams.get('mode');
+const actionCode = actionParams.get('oobCode');
+const resetCode = actionMode === 'resetPassword' ? actionCode : null;
 
 let mode = AUTH_MODE.SIGN_IN;
 let signedInUser = null;
@@ -32,11 +34,13 @@ function appUrl() {
 }
 
 function recoveryUrl() {
-  return authRedirectUrl(window.location.origin, '/login/#recovery');
+  // After the hosted reset page finishes, "Continue" should land on a clean
+  // sign-in form — not back on the "send another reset email" screen.
+  return authRedirectUrl(window.location.origin, '/login/');
 }
 
 function openAuthenticatedApp(session) {
-  if (!session?.access_token || !session.user?.id) {
+  if (!session?.user?.id) {
     throw new Error('FlashDay chưa nhận được phiên đăng nhập.');
   }
   showStatus('Đăng nhập thành công. Đang mở FlashDay…', 'success');
@@ -110,7 +114,7 @@ async function submitEmailPassword() {
   const password = $('password').value;
 
   if (mode === AUTH_MODE.RECOVERY) {
-    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: recoveryUrl() });
+    const { error } = await client.auth.resetPasswordForEmail(email, { redirectTo: recoveryUrl() });
     if (error) throw error;
     showStatus('Nếu địa chỉ này có tài khoản, FlashDay đã gửi email đặt lại mật khẩu.', 'success');
     return;
@@ -130,17 +134,17 @@ async function submitEmailPassword() {
       showStatus('Liên kết đặt lại mật khẩu không hợp lệ hoặc đã hết hạn.', 'error');
       return;
     }
-    const { data, error } = await supabase.auth.completePasswordReset(resetCode, password);
+    const { data, error } = await client.auth.completePasswordReset(resetCode, password);
     if (error) throw error;
     openAuthenticatedApp(data.session);
     return;
   }
 
   if (mode === AUTH_MODE.SIGN_UP) {
-    const { data, error } = await supabase.auth.signUp({
+    const { data, error } = await client.auth.signUp({
       email,
       password,
-      options: { emailRedirectTo: appUrl() }
+      options: { emailRedirectTo: authRedirectUrl(window.location.origin, '/login/#signin') }
     });
     if (error) throw error;
     if (data.session) {
@@ -149,11 +153,16 @@ async function submitEmailPassword() {
     }
     setMode(AUTH_MODE.SIGN_IN);
     $('email').value = email;
-    showStatus('Hãy kiểm tra inbox để xác nhận email, rồi đăng nhập.', 'success');
+    showStatus(
+      data?.verificationError
+        ? 'Tài khoản đã tạo nhưng chưa gửi được email xác nhận. Đăng nhập để nhận lại link.'
+        : 'Hãy kiểm tra inbox để xác nhận email, rồi đăng nhập.',
+      data?.verificationError ? 'error' : 'success'
+    );
     return;
   }
 
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  const { data, error } = await client.auth.signInWithPassword({ email, password });
   if (error) throw error;
   openAuthenticatedApp(data.session);
 }
@@ -176,7 +185,10 @@ function validateSubmission() {
 }
 
 async function submitGoogle() {
-  const { error } = await supabase.auth.signInWithOAuth({
+  // signInWithRedirect returns to this same page; a successful session then
+  // routes onward via getSession() below. The redirectTo option is a no-op
+  // kept only for parity with the old Supabase call signature.
+  const { error } = await client.auth.signInWithOAuth({
     provider: 'google',
     options: { redirectTo: appUrl() }
   });
@@ -189,7 +201,7 @@ $('forgot-password').addEventListener('click', () => setMode(AUTH_MODE.RECOVERY)
 $('return-to-signin').addEventListener('click', () => setMode(AUTH_MODE.SIGN_IN));
 
 $('auth-google-btn').addEventListener('click', async () => {
-  if (!supabase) {
+  if (!client) {
     showStatus('Đăng nhập chưa được cấu hình. Hãy thử lại sau.', 'error');
     return;
   }
@@ -204,7 +216,7 @@ $('auth-google-btn').addEventListener('click', async () => {
 
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
-  if (!supabase) {
+  if (!client) {
     showStatus('Đăng nhập chưa được cấu hình. Hãy thử lại sau.', 'error');
     return;
   }
@@ -230,16 +242,37 @@ if (resetCode) {
   setMode(AUTH_MODE.SIGN_IN);
 }
 
-if (!supabase) {
+// Email-action links other than password reset (address verification, email
+// recovery) are applied in place — the hosted handler only runs when the
+// console keeps the default action URL.
+if (client && actionCode && (actionMode === 'verifyEmail' || actionMode === 'recoverEmail')) {
+  // Drop the one-time code from the address bar immediately; it stays valid
+  // in memory for the apply call below.
+  window.history.replaceState(null, '', window.location.pathname + window.location.hash);
+  client.auth.applyActionCode(actionCode).then(({ error }) => {
+    if (error) {
+      showStatus(authErrorMessage(error), 'error');
+    } else {
+      showStatus(
+        actionMode === 'verifyEmail'
+          ? 'Email đã xác nhận. Đăng nhập để bắt đầu ôn tập.'
+          : 'Email đã khôi phục. Đăng nhập lại và đổi mật khẩu ngay.',
+        'success'
+      );
+    }
+  });
+}
+
+if (!client) {
   showStatus('Đăng nhập đang được cấu hình. Hãy thử lại sau.', 'error');
 } else {
   // Surface a failed Google redirect (unauthorized domain, cancelled sign-in…)
   // instead of silently landing back on this page logged out.
-  supabase.auth.getRedirectResult().then(({ error }) => {
+  client.auth.getRedirectResult().then(({ error }) => {
     if (error) showStatus(authErrorMessage(error), 'error');
   });
 
-  supabase.auth.getSession().then(({ data, error }) => {
+  client.auth.getSession().then(({ data, error }) => {
     if (error) {
       showStatus(authErrorMessage(error), 'error');
       return;
@@ -251,7 +284,7 @@ if (!supabase) {
     }
   });
 
-  supabase.auth.onAuthStateChange((event, session) => {
+  client.auth.onAuthStateChange((event, session) => {
     signedInUser = session?.user || null;
   });
 }

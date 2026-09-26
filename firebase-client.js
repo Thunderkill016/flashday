@@ -19,6 +19,7 @@ import {
   sendEmailVerification,
   verifyPasswordResetCode,
   confirmPasswordReset,
+  applyActionCode,
   updatePassword,
   signOut as firebaseSignOut
 } from 'firebase/auth';
@@ -35,6 +36,7 @@ import {
   writeBatch
 } from 'firebase/firestore';
 import {
+  isIgnorableResetError,
   mapAuthError,
   matchRows,
   paginateRows,
@@ -66,8 +68,17 @@ export function createClient(config) {
 
   async function sessionFor(user) {
     if (!user) return null;
+    // A transient token-fetch failure (flaky network) must not tear down the
+    // listener chain — emit a degraded session; nothing downstream consumes
+    // access_token since Firestore calls ride the SDK's own auth.
+    let token = null;
+    try {
+      token = await user.getIdToken();
+    } catch (_error) {
+      token = null;
+    }
     return {
-      access_token: await user.getIdToken(),
+      access_token: token,
       token_type: 'bearer',
       user: { id: user.uid, email: user.email || '' }
     };
@@ -84,15 +95,33 @@ export function createClient(config) {
     return { data: null, error: mapAuthError(error) };
   }
 
+  // Verification/reset links get a continue URL back to the app. Without it,
+  // Firebase's hosted action page strands the learner on *.firebaseapp.com.
+  function actionCodeSettings(explicitUrl) {
+    const url = explicitUrl
+      || (typeof window !== 'undefined' ? `${window.location.origin}/login/` : null);
+    return url ? { url } : undefined;
+  }
+
   const api = {
-    signUp: async ({ email, password }) => {
+    signUp: async ({ email, password, options } = {}) => {
       try {
         const credential = await createUserWithEmailAndPassword(auth, email, password);
-        await sendEmailVerification(credential.user);
+        // The account already exists at this point — a failed verification
+        // send (rate limit, bad continue URL) must not report signup failure,
+        // or retrying hits "email already in use" and the learner is stuck.
+        let verificationError = null;
+        try {
+          await sendEmailVerification(credential.user, actionCodeSettings(options?.emailRedirectTo));
+        } catch (error) {
+          verificationError = error;
+        }
         // Supabase's confirm-email flow returns no session until the address
         // is verified; mirror that so the UI keeps asking users to check mail.
         await firebaseSignOut(auth);
-        return ok({ user: { id: credential.user.uid, email: credential.user.email }, session: null });
+        const data = { user: { id: credential.user.uid, email: credential.user.email }, session: null };
+        if (verificationError) data.verificationError = mapAuthError(verificationError).message;
+        return ok(data);
       } catch (error) {
         return fail(error);
       }
@@ -104,7 +133,7 @@ export function createClient(config) {
         if (!credential.user.emailVerified) {
           // A lost verification email must not become a permanent lockout —
           // resend it on every sign-in attempt before refusing access.
-          try { await sendEmailVerification(credential.user); } catch (_e) { /* rate-limited resends still surface the same sign-in error */ }
+          try { await sendEmailVerification(credential.user, actionCodeSettings()); } catch (_e) { /* rate-limited resends still surface the same sign-in error */ }
           await firebaseSignOut(auth);
           return fail(new Error('Email not confirmed'));
         }
@@ -126,7 +155,21 @@ export function createClient(config) {
 
     resetPasswordForEmail: async (email, { redirectTo } = {}) => {
       try {
-        await sendPasswordResetEmail(auth, email, { url: redirectTo || window.location.origin });
+        await sendPasswordResetEmail(auth, email, actionCodeSettings(redirectTo));
+        return ok();
+      } catch (error) {
+        // "No such user" must look exactly like success so this endpoint
+        // cannot be used to probe which emails have accounts.
+        if (isIgnorableResetError(error)) return ok();
+        return fail(error);
+      }
+    },
+
+    // Applies a Firebase email-action link (verifyEmail / recoverEmail) that
+    // lands on our own domain instead of the hosted handler page.
+    applyActionCode: async (oobCode) => {
+      try {
+        await applyActionCode(auth, oobCode);
         return ok();
       } catch (error) {
         return fail(error);

@@ -12,19 +12,36 @@ export function mapAuthError(error) {
     'auth/invalid-credential': 'Invalid login credentials',
     'auth/wrong-password': 'Invalid login credentials',
     'auth/user-not-found': 'Invalid login credentials',
-    'auth/invalid-email': 'Invalid login credentials',
+    'auth/invalid-email': 'Invalid email address',
+    'auth/missing-email': 'Invalid email address',
     'auth/email-already-in-use': 'User already registered',
+    'auth/account-exists-with-different-credential': 'User already registered',
+    'auth/credential-already-in-use': 'User already registered',
     'auth/weak-password': 'Password should be at least 6 characters',
     'auth/too-many-requests': 'Too many requests',
-    'auth/network-request-failed': 'Too many requests',
+    'auth/quota-exceeded': 'Too many requests',
+    'auth/network-request-failed': 'Network request failed',
+    'auth/user-disabled': 'User account disabled',
+    'auth/requires-recent-login': 'Requires recent login',
     'auth/operation-not-allowed': 'Provider is not enabled',
     'auth/unauthorized-domain': 'Provider is not enabled',
-    'auth/expired-action-code': 'Reset link expired',
-    'auth/invalid-action-code': 'Reset link expired',
+    'auth/invalid-continue-uri': 'Continue url not authorized',
+    'auth/unauthorized-continue-uri': 'Continue url not authorized',
+    'auth/missing-continue-uri': 'Continue url not authorized',
+    'auth/expired-action-code': 'Action link expired',
+    'auth/invalid-action-code': 'Action link expired',
     'auth/popup-blocked': 'Sign-in popup blocked',
     'auth/popup-closed-by-user': 'Sign-in popup closed'
   };
   return new Error(table[code] || String(error?.message || error || 'Authentication failed'));
+}
+
+// Password-reset requests must answer identically whether or not the email
+// exists — otherwise the form becomes an account-enumeration oracle. These
+// codes are swallowed so the UI always shows the neutral "check your inbox".
+export function isIgnorableResetError(error) {
+  const code = String(error?.code || '');
+  return code === 'auth/user-not-found' || code === 'auth/invalid-email';
 }
 
 // Deterministic document id for a stored row. Rows carrying their own id keep
