@@ -26,6 +26,7 @@
   let recordedChunks = [];
   let recordingStream = null;
   let recordingUrl = null;
+  let recognizer = null;
   let supabaseClient = null;
   let learner = null;
   let activeDeck = null;
@@ -171,6 +172,7 @@
 
   function nextCard() {
     stopAudio();
+    stopAsr();
     releaseRecording();
     clearRecordedAudio();
     stimulusAudioKind = 'none';
@@ -283,15 +285,19 @@
     const canReveal = P.hasObservableAttempt(current.mode, attempt);
     if (current.mode === B.Mode.SPEAK) {
       const isRecording = mediaRecorder && mediaRecorder.state === 'recording';
+      const isListening = Boolean(recognizer);
+      const asrOk = Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
       $('answerArea').innerHTML = `
         <div class="attempt-box">
           <label class="attempt-label">${esc(copy.label)}</label>
           <p class="attempt-help">${esc(copy.hint)}</p>
           <div class="secondary-actions attempt-actions">
             <button id="saidBtn" type="button">${attempt.spoke ? 'Đã nói xong ✓' : 'Tôi đã nói xong'}</button>
+            ${asrOk ? `<button id="asrBtn" type="button">${isListening ? 'Đang nghe… (bấm để dừng)' : 'Nói → máy nghe thử'}</button>` : ''}
             <button id="recordBtn" type="button">${isRecording ? 'Dừng ghi âm' : 'Ghi âm trên máy'}</button>
           </div>
-          <p class="attempt-state" id="attemptState">${isRecording ? 'Đang ghi âm…' : attempt.recordedLocally ? 'Audio chỉ ở tab này, không được tải lên hay đồng bộ.' : attempt.spoke ? 'Bạn đã tự xác nhận đã nói.' : 'Chưa có lần nói được ghi nhận.'}</p>
+          ${attempt.text ? `<p class="attempt-state asr-transcript">Máy nghe được: “${esc(attempt.text)}”</p>` : ''}
+          <p class="attempt-state" id="attemptState">${isListening ? 'Đang nghe — nói câu tiếng Anh…' : isRecording ? 'Đang ghi âm…' : attempt.recordedLocally ? 'Audio chỉ ở tab này, không được tải lên hay đồng bộ.' : attempt.spoke ? 'Bạn đã tự xác nhận đã nói.' : 'Chưa có lần nói được ghi nhận.'}</p>
           ${recordingUrl ? `<audio class="local-recording" controls src="${esc(recordingUrl)}"></audio>` : ''}
         </div>
         <button id="flipBtn" class="primary-btn" type="button" ${canReveal ? '' : 'disabled'}>Xem đáp án</button>`;
@@ -300,6 +306,7 @@
         markFirstAttempt();
         renderAttemptArea();
       };
+      $('asrBtn')?.addEventListener('click', () => (recognizer ? stopAsr() : startAsr()));
       $('recordBtn').onclick = () => (isRecording ? stopSpeechRecording() : startSpeechRecording());
     } else {
       $('answerArea').innerHTML = `
@@ -322,6 +329,64 @@
       };
     }
     $('flipBtn').onclick = flipCard;
+  }
+
+  // SpeechRecognition aid: the transcript is "what the machine heard" — an
+  // honest signal to diff against the answer, not a pronunciation score
+  // (ASR can smooth learner speech into clean text; we never claim more).
+  function startAsr() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
+      toast('Trình duyệt không hỗ trợ nhận diện giọng nói — tự nói rồi xác nhận như thường.');
+      return;
+    }
+    try {
+      recognizer = new SR();
+      recognizer.lang = 'en-US';
+      recognizer.interimResults = true;
+      recognizer.maxAlternatives = 1;
+      recognizer.continuous = false;
+      let finalText = '';
+      recognizer.onresult = (event) => {
+        let interim = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcript = event.results[i][0]?.transcript || '';
+          if (event.results[i].isFinal) finalText += `${transcript} `;
+          else interim += transcript;
+        }
+        attempt.text = `${finalText}${interim}`.trim().slice(0, 1200);
+        attempt.spoke = true;
+        markFirstAttempt();
+        const line = $('answerArea')?.querySelector('.asr-transcript');
+        if (line) line.textContent = `Máy nghe được: “${attempt.text}”`;
+        else if (attempt.text) renderAttemptArea();
+        const flip = $('flipBtn');
+        if (flip) flip.disabled = false;
+      };
+      recognizer.onend = () => {
+        recognizer = null;
+        attempt.text = finalText.trim() || attempt.text;
+        renderAttemptArea();
+      };
+      recognizer.onerror = (event) => {
+        recognizer = null;
+        const msg = event.error === 'not-allowed' || event.error === 'service-not-allowed'
+          ? 'Microphone bị chặn — cho phép quyền mic để dùng nhận diện.'
+          : event.error === 'no-speech' ? 'Không nghe được gì — thử nói to/rõ hơn.'
+          : `Nhận diện lỗi: ${event.error}`;
+        toast(msg);
+        renderAttemptArea();
+      };
+      recognizer.start();
+      renderAttemptArea();
+    } catch (_error) {
+      recognizer = null;
+      toast('Không mở được nhận diện giọng nói.');
+    }
+  }
+
+  function stopAsr() {
+    try { recognizer?.stop(); } catch (_error) { /* already stopped */ }
   }
 
   async function startSpeechRecording() {
@@ -363,6 +428,11 @@
 
   function flipCard() {
     if (!current) return;
+    if (current.mode === B.Mode.SPEAK && recognizer) {
+      stopAsr();
+      toast('Đã dừng nghe. Kiểm tra phần máy nghe được rồi xem đáp án.');
+      return;
+    }
     if (current.mode === B.Mode.SPEAK && mediaRecorder?.state === 'recording') {
       stopSpeechRecording();
       toast('Đã dừng ghi âm. Hãy kiểm tra rồi xem đáp án.');
@@ -383,6 +453,7 @@
 
   function responseSummary() {
     if (current.mode === B.Mode.SPEAK) {
+      if (attempt.text.trim()) return `Máy nghe được: “${esc(attempt.text.trim())}”`;
       return attempt.recordedLocally ? 'Bạn đã ghi âm cục bộ và tự xác nhận đã nói.' : 'Bạn đã tự xác nhận đã nói câu này.';
     }
     return attempt.text.trim() ? `Câu trả lời của bạn: “${esc(attempt.text.trim())}”` : 'Bạn chưa ghi câu trả lời; hãy dùng nút nghe lại hoặc thử trả lời ở card tiếp theo.';
@@ -405,12 +476,13 @@
       if (op.type === 'sub') return `<span class="diff-sub">${esc(op.expected)}</span>`;
       return '';
     }).filter(Boolean).join(' ');
+    const isSpeak = current.mode === B.Mode.SPEAK;
     return `<div class="error-panel">
       <p class="error-hint">${esc(hint || 'Câu trả lời còn khác đáp án.')}</p>
-      <div class="diff-line"><span class="diff-label">Bạn viết</span><span class="diff-text">${attemptView || '<i>(trống)</i>'}</span></div>
+      <div class="diff-line"><span class="diff-label">${isSpeak ? 'Máy nghe' : 'Bạn viết'}</span><span class="diff-text">${attemptView || '<i>(trống)</i>'}</span></div>
       <div class="diff-line"><span class="diff-label">Đáp án</span><span class="diff-text">${answerView}</span></div>
       <div class="secondary-actions error-actions">
-        <button id="retryAttempt" class="primary-btn" type="button">Viết lại lần nữa</button>
+        <button id="retryAttempt" class="primary-btn" type="button">${isSpeak ? 'Nói lại lần nữa' : 'Viết lại lần nữa'}</button>
         <button id="skipRetry" class="ghost-btn" type="button">Tiếp tục tự chấm</button>
       </div>
     </div>`;
@@ -440,7 +512,9 @@
     $('audioPrimary').classList.remove('hidden');
     $('feedback').className = 'feedback';
     let correctionHtml = '';
-    if (current.mode === B.Mode.WRITE && attempt.text.trim()) {
+    // Write attempts and ASR-heard speak attempts share the same word diff —
+    // self-confirmed speech (no transcript) skips it honestly.
+    if (attempt.text.trim() && (current.mode === B.Mode.WRITE || current.mode === B.Mode.SPEAK)) {
       const units = attemptUnits(card);
       const cls = P.classifyAttempt(card.sentence, attempt.text, units);
       errorLoop.lastClassification = cls;
@@ -517,7 +591,7 @@
     const missedUnits = A.cardParts(card)
       .filter((part) => part.unit_id && (ratings[part.unit_id] ?? 0) === 1)
       .map((part) => part.unit_id);
-    if (current.mode === B.Mode.WRITE) {
+    if (current.mode === B.Mode.WRITE || (current.mode === B.Mode.SPEAK && attempt.text.trim())) {
       const cls = errorLoop.lastClassification
         || P.classifyAttempt(card.sentence, attempt.text, attemptUnits(card));
       const hadError = errorLoop.retryCount > 0 || cls.stage === 'miss' || missedUnits.length;
