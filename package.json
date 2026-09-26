@@ -5,12 +5,12 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "typecheck": "node --check flashday-data.js && node --check flashday-store.js && node --check learning-entry.js && node --check learning-hub.js && node --check flashday-product.js && node --check flashday-cloud.js && node --check bespoke-engine.js && node --check bespoke-card-index.js && node --check source-capture.js && node --check transcript-import.js && node --check fsrs-scheduler.mjs && node --check bespoke-adapter.js && node --check app-bespoke.js && node --check product-bootstrap.js && node --check main.js && node --check vite.config.mjs && node --check flashday-auth.mjs && node --check landing-auth.mjs",
-    "test": "node tests/flashday-store.test.js && node tests/learning-entry.test.js && node tests/fsrs-scheduler.test.mjs && node tests/fsrs-hybrid.test.mjs && node tests/bespoke-engine.test.js && node tests/bespoke-card-index.test.js && node tests/bespoke-adapter.test.js && node tests/transcript-import.test.js && node tests/flashday-data.test.js && node tests/p0-data.test.js && node tests/flashday-product.test.js && node tests/flashday-cloud.test.js && node tests/flashday-auth.test.mjs && node tests/app-p0-contract.test.js && node tests/site-entrypoints.test.js && node tests/core.test.js",
+    "typecheck": "node --check flashday-data.js && node --check flashday-store.js && node --check learning-entry.js && node --check learning-hub.js && node --check flashday-product.js && node --check flashday-cloud.js && node --check bespoke-engine.js && node --check bespoke-card-index.js && node --check source-capture.js && node --check transcript-import.js && node --check fsrs-scheduler.mjs && node --check bespoke-adapter.js && node --check app-bespoke.js && node --check product-bootstrap.js && node --check main.js && node --check vite.config.mjs && node --check flashday-auth.mjs && node --check cloud-compat.mjs && node --check firebase-client.js && node --check login/login.js",
+    "test": "node tests/flashday-store.test.js && node tests/learning-entry.test.js && node tests/fsrs-scheduler.test.mjs && node tests/fsrs-hybrid.test.mjs && node tests/bespoke-engine.test.js && node tests/bespoke-card-index.test.js && node tests/bespoke-adapter.test.js && node tests/transcript-import.test.js && node tests/flashday-data.test.js && node tests/p0-data.test.js && node tests/flashday-product.test.js && node tests/flashday-cloud.test.js && node tests/flashday-auth.test.mjs && node tests/cloud-compat.test.mjs && node tests/app-p0-contract.test.js && node tests/site-entrypoints.test.js && node tests/core.test.js",
     "verify": "npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
-    "@supabase/supabase-js": "2.112.4",
+    "firebase": "^12.19.0",
     "ts-fsrs": "5.4.2"
   },
   "devDependencies": {

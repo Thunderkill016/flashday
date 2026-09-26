@@ -5,7 +5,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const landingEntry = resolve(import.meta.dirname, 'index.html');
   return {
-    base: './',
+    base: '/',
     plugins: [],
     build: {
       rolldownOptions: {
@@ -17,8 +17,14 @@ export default defineConfig(({ mode }) => {
       }
     },
     define: {
-      __FLASHDAY_SUPABASE_URL__: JSON.stringify(env.NEXT_PUBLIC_SUPABASE_URL || ''),
-      __FLASHDAY_SUPABASE_PUBLISHABLE_KEY__: JSON.stringify(env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || '')
+      __FLASHDAY_FIREBASE_CONFIG__: JSON.stringify({
+        apiKey: env.NEXT_PUBLIC_FIREBASE_API_KEY || '',
+        authDomain: env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || '',
+        projectId: env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || '',
+        appId: env.NEXT_PUBLIC_FIREBASE_APP_ID || '',
+        messagingSenderId: env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || '',
+        storageBucket: env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || ''
+      })
     }
   };
 });

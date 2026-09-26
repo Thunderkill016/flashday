@@ -41,7 +41,7 @@ export function authModeCopy(mode) {
   switch (mode) {
     case AUTH_MODE.SIGN_IN:
       return {
-        title: 'Chào mừng trở lại',
+        title: 'Chào mừng trở lại.',
         submit: 'Đăng nhập',
         passwordAutocomplete: 'current-password'
       };
@@ -59,7 +59,7 @@ export function authModeCopy(mode) {
       };
     default:
       return {
-        title: 'Tạo tài khoản',
+        title: 'Khai mở trí nhớ dài hạn.',
         submit: 'Tạo tài khoản',
         passwordAutocomplete: 'new-password'
       };

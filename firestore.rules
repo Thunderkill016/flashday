@@ -1,0 +1,236 @@
+rules_version = '2';
+
+// ===============================================================
+// Assumed Data Model — all learner data lives under users/{uid}/…
+// (Firestore equivalent of the old Supabase RLS owner policies)
+// ===============================================================
+//
+// users/{uid}/decks/{id}
+//   id: string (= doc id), owner_id: string (= uid)
+//   title: string 1..120, description: string <=500, goal: string <=500
+//   created_at: ISO-8601 string
+//
+// users/{uid}/units/{id}
+//   id, owner_id, deck_id: string
+//   target: 1..280, meaning: 1..500
+//   unit_type: 'chunk'|'collocation'|'expression'|'phrasal_verb'|'grammar_pattern'|'word_sense'
+//   intent <=280, can_do <=500, context <=1000
+//   example_sentence <=1000, example_translation <=1200
+//   forms/accepted/tags: list of strings, origin: enum, difficulty: string|null
+//   created_at: ISO string
+//
+// users/{uid}/cards/{id}, users/{uid}/source_captures/{id}
+//   id, owner_id, deck_id, payload: map, created_at
+//   cards also carry unit_ids: list
+//
+// users/{uid}/review_events/{id}
+//   id, owner_id, deck_id, card_id: string, unit_ids: list
+//   mode: 'listen'|'speak'|'read'|'write'
+//   ratings/response/stimulus: map, is_reported: bool
+//   answered_at, created_at: ISO string
+//
+// users/{uid}/learning_progress/{uid}, users/{uid}/learner_profiles/{uid}
+//   owner-keyed singletons: owner_id == uid, payload: map, updated_at
+// ===============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isAuthenticated() && request.auth.uid == uid;
+    }
+
+    // The document's owner_id field must always pin to the path owner —
+    // prevents writing a row that claims someone else owns it.
+    function ownerPinned(uid) {
+      return request.resource.data.owner_id == uid;
+    }
+
+    function validString(value, minLen, maxLen) {
+      return value is string && value.size() >= minLen && value.size() <= maxLen;
+    }
+
+    function optString(value, maxLen) {
+      return value == null || (value is string && value.size() <= maxLen);
+    }
+
+    function isIsoDateString(value) {
+      return value is string && value.size() <= 40
+        && value.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}");
+    }
+
+    function isSmallList(value) {
+      return value is list && value.size() <= 500;
+    }
+
+    function isSmallMap(value) {
+      return value is map && value.keys().size() <= 500;
+    }
+
+    function hasOnly(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    // created_at is write-once: an update may rewrite the whole document but
+    // must keep the original timestamp.
+    function createdAtUnchanged() {
+      return request.resource.data.created_at == resource.data.created_at;
+    }
+
+    function hasAll(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function idMatchesPath(docId) {
+      return request.resource.data.id == docId;
+    }
+
+    function validDeck(docId) {
+      let d = request.resource.data;
+      return hasOnly(['id', 'owner_id', 'title', 'description', 'goal', 'created_at'])
+        && idMatchesPath(docId)
+        && validString(d.title, 1, 120)
+        && validString(d.description, 0, 500)
+        && validString(d.goal, 0, 500)
+        && isIsoDateString(d.created_at);
+    }
+
+    function validUnit(docId) {
+      let d = request.resource.data;
+      return hasOnly(['id', 'owner_id', 'deck_id', 'target', 'meaning', 'unit_type',
+                      'intent', 'can_do', 'context', 'example_sentence',
+                      'example_translation', 'forms', 'accepted', 'tags',
+                      'origin', 'difficulty', 'created_at'])
+        && idMatchesPath(docId)
+        && validString(d.deck_id, 1, 200)
+        && validString(d.target, 1, 280)
+        && validString(d.meaning, 1, 500)
+        && d.unit_type in ['chunk', 'collocation', 'expression', 'phrasal_verb', 'grammar_pattern', 'word_sense']
+        && validString(d.intent, 0, 280)
+        && validString(d.can_do, 0, 500)
+        && validString(d.context, 0, 1000)
+        && validString(d.example_sentence, 0, 1000)
+        && validString(d.example_translation, 0, 1200)
+        && isSmallList(d.forms) && isSmallList(d.accepted) && isSmallList(d.tags)
+        && d.origin in ['curated', 'learner-created', 'source-captured']
+        && optString(d.difficulty, 100)
+        && isIsoDateString(d.created_at);
+    }
+
+    function validCard(docId) {
+      let d = request.resource.data;
+      return hasOnly(['id', 'owner_id', 'deck_id', 'unit_ids', 'payload', 'created_at'])
+        && idMatchesPath(docId)
+        && validString(d.deck_id, 1, 200)
+        && isSmallList(d.unit_ids)
+        && isSmallMap(d.payload)
+        && isIsoDateString(d.created_at);
+    }
+
+    function validCapture(docId) {
+      let d = request.resource.data;
+      return hasOnly(['id', 'owner_id', 'deck_id', 'payload', 'created_at'])
+        && idMatchesPath(docId)
+        && validString(d.deck_id, 1, 200)
+        && isSmallMap(d.payload)
+        && isIsoDateString(d.created_at);
+    }
+
+    function validReviewEvent(docId) {
+      let d = request.resource.data;
+      return hasOnly(['id', 'owner_id', 'deck_id', 'unit_ids', 'card_id', 'mode',
+                      'ratings', 'response', 'stimulus', 'is_reported',
+                      'answered_at', 'created_at'])
+        && idMatchesPath(docId)
+        && validString(d.deck_id, 1, 200)
+        && validString(d.card_id, 1, 200)
+        && isSmallList(d.unit_ids)
+        && d.mode in ['listen', 'speak', 'read', 'write']
+        && isSmallMap(d.ratings) && isSmallMap(d.response) && isSmallMap(d.stimulus)
+        && d.is_reported is bool
+        && isIsoDateString(d.answered_at)
+        && isIsoDateString(d.created_at);
+    }
+
+    function validProgress(docId) {
+      let d = request.resource.data;
+      return hasOnly(['id', 'owner_id', 'deck_id', 'payload', 'updated_at', 'created_at'])
+        && hasAll(['payload', 'updated_at'])
+        && idMatchesPath(docId)
+        && validString(d.deck_id, 1, 200)
+        && isSmallMap(d.payload)
+        && isIsoDateString(d.updated_at);
+    }
+
+    function validProfile(docId) {
+      let d = request.resource.data;
+      return hasOnly(['id', 'owner_id', 'payload', 'updated_at', 'created_at'])
+        && hasAll(['payload', 'updated_at'])
+        && idMatchesPath(docId)
+        && isSmallMap(d.payload)
+        && isIsoDateString(d.updated_at);
+    }
+
+    match /users/{uid}/decks/{docId} {
+      allow read: if isOwner(uid);
+      allow create: if isOwner(uid) && ownerPinned(uid) && validDeck(docId);
+      allow update: if isOwner(uid) && ownerPinned(uid) && createdAtUnchanged() && validDeck(docId);
+      allow delete: if isOwner(uid);
+    }
+
+    match /users/{uid}/units/{docId} {
+      allow read: if isOwner(uid);
+      allow create: if isOwner(uid) && ownerPinned(uid) && validUnit(docId);
+      allow update: if isOwner(uid) && ownerPinned(uid) && createdAtUnchanged() && validUnit(docId);
+      allow delete: if isOwner(uid);
+    }
+
+    match /users/{uid}/cards/{docId} {
+      allow read: if isOwner(uid);
+      allow create: if isOwner(uid) && ownerPinned(uid) && validCard(docId);
+      allow update: if isOwner(uid) && ownerPinned(uid) && createdAtUnchanged() && validCard(docId);
+      allow delete: if isOwner(uid);
+    }
+
+    match /users/{uid}/source_captures/{docId} {
+      allow read: if isOwner(uid);
+      allow create: if isOwner(uid) && ownerPinned(uid) && validCapture(docId);
+      allow update: if isOwner(uid) && ownerPinned(uid) && createdAtUnchanged() && validCapture(docId);
+      allow delete: if isOwner(uid);
+    }
+
+    match /users/{uid}/review_events/{docId} {
+      allow read: if isOwner(uid);
+      allow create: if isOwner(uid) && ownerPinned(uid) && validReviewEvent(docId);
+      allow update: if isOwner(uid) && ownerPinned(uid) && createdAtUnchanged() && validReviewEvent(docId);
+      allow delete: if isOwner(uid);
+    }
+
+    match /users/{uid}/learning_progress/{docId} {
+      allow read: if isOwner(uid);
+      allow create: if isOwner(uid) && ownerPinned(uid)
+        && validProgress(docId);
+      allow update: if isOwner(uid) && ownerPinned(uid) && createdAtUnchanged()
+        && validProgress(docId);
+      allow delete: if isOwner(uid);
+    }
+
+    match /users/{uid}/learner_profiles/{docId} {
+      allow read: if isOwner(uid);
+      allow create: if isOwner(uid) && ownerPinned(uid)
+        && validProfile(docId);
+      allow update: if isOwner(uid) && ownerPinned(uid) && createdAtUnchanged()
+        && validProfile(docId);
+      allow delete: if isOwner(uid);
+    }
+
+    // Default deny for anything else, including unknown per-user collections.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

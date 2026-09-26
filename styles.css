@@ -12,25 +12,40 @@
   
   --fd-primary: #E8FF65;
   --fd-primary-text: #090B0D;
+  --fd-primary-hover: #d4eb52;
+  --fd-primary-soft: rgba(232, 255, 101, 0.15);
   
   --fd-danger: #FF786D;
+  --fd-error: #FF786D;
   --fd-hard: #F5B85A;
   --fd-positive: #9FE39F;
+  
+  --fd-accent: #5EDBFF;
+  --fd-accent-soft: rgba(94, 219, 255, 0.15);
+  --fd-warning: #F5B85A;
+  --fd-warning-soft: rgba(245, 184, 90, 0.15);
   
   --fd-border: rgba(255, 255, 255, 0.12);
   --fd-border-interactive: rgba(255, 255, 255, 0.2);
   
   --fd-shadow-neo: 4px 4px 0 #000;
   --fd-shadow-neo-active: 1px 1px 0 #000;
+  --fd-shadow-card: 0 4px 24px rgba(0, 0, 0, 0.4);
+  --fd-shadow-dialog: 0 16px 48px rgba(0, 0, 0, 0.6);
+  
+  --fd-focus: 0 0 0 3px rgba(232, 255, 101, 0.4);
   
   --fd-radius-sm: 8px;
   --fd-radius-md: 12px;
   --fd-radius-lg: 16px;
   --fd-radius-card: 24px;
+  --fd-radius-card-mobile: 16px;
   
-  --fd-font-display: "Space Grotesk", system-ui, sans-serif;
-  --fd-font-body: "Inter", "Helvetica Neue", system-ui, sans-serif;
-  --fd-font-mono: "JetBrains Mono", "Fira Code", monospace;
+  --fd-duration-fast: 150ms;
+  
+  --fd-font-display: "Bricolage Grotesque", "Space Grotesk", system-ui, sans-serif;
+  --fd-font-body: "Inter", "Be Vietnam Pro", system-ui, sans-serif;
+  --fd-font-mono: "IBM Plex Mono", "JetBrains Mono", monospace;
 }
 
 * { box-sizing: border-box; }

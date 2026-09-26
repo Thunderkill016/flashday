@@ -1,23 +1,15 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient } from './firebase-client.js';
 
-const url = __FLASHDAY_SUPABASE_URL__;
-const publishableKey = __FLASHDAY_SUPABASE_PUBLISHABLE_KEY__;
+const config = __FLASHDAY_FIREBASE_CONFIG__;
 
-if (!url || !publishableKey) {
+if (!config?.apiKey || !config?.projectId || !config?.appId) {
   window.dispatchEvent(new CustomEvent('flashday:supabase-ready', {
-    detail: { client: null, error: 'Thiếu Supabase public configuration.' }
+    detail: { client: null, error: 'Thiếu cấu hình cloud.' }
   }));
 } else {
-  const client = createClient(url, publishableKey, {
-    auth: {
-      autoRefreshToken: true,
-      persistSession: true,
-      detectSessionInUrl: true
-    }
-  });
+  const client = createClient(config);
 
-  // Wait for Supabase to finish recovering an OAuth/email-confirmation session.
-  // Redirecting after a raw getSession() can race with detectSessionInUrl.
+  // Wait for Firebase Auth to settle before any route guard can kick in.
   let initialSessionResolved = false;
   client.auth.onAuthStateChange((event, session) => {
     if (event === 'INITIAL_SESSION') {

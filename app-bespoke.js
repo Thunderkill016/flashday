@@ -684,16 +684,11 @@
   }
 
   function openAuthDialog() {
-    if (!supabaseClient) {
-      toast('Thiếu cấu hình Supabase public. Hãy kiểm tra Vercel Environment Variables.');
-      return;
-    }
     if (learner) {
       toast(`Đang đăng nhập bằng ${learner.email || 'tài khoản này'}.`);
       return;
     }
-    $('authDialog').showModal();
-    $('authEmail').focus();
+    window.location.assign('/login/#signin');
   }
 
   function setAuthMode(nextMode) {
@@ -800,13 +795,13 @@
   $('authBtn').onclick = openAuthDialog;
   $('signOutBtn').onclick = async () => {
     if (!supabaseClient) return;
-    const { error } = await supabaseClient.auth.signOut();
-    if (error) toast(`Không đăng xuất được: ${error.message}`);
+    try {
+      const { error } = await supabaseClient.auth.signOut();
+      if (error) toast(`Không đăng xuất được: ${error.message}`);
+    } catch (err) {
+      toast(`Không đăng xuất được: ${err.message}`);
+    }
   };
-  $('closeAuthBtn').onclick = () => $('authDialog').close();
-  $('signInMode').onclick = () => setAuthMode('signin');
-  $('signUpMode').onclick = () => setAuthMode('signup');
-  $('authForm').onsubmit = submitAuth;
 
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape' || $('sourcePanel').classList.contains('hidden')) return;
@@ -900,7 +895,6 @@
     requestCloudSync('learning-state');
   });
 
-  setAuthMode('signin');
   if (debugEnabled) $('debugPanel').classList.remove('hidden');
   renderAuth();
   nextCard();

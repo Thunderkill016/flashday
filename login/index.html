@@ -2,7 +2,7 @@
 <html lang="vi">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Đăng nhập — FlashDay</title>
   <link rel="icon" href="data:,">
   
@@ -26,9 +26,9 @@
       <p class="auth-sub" id="auth-sub">Đăng nhập để đồng bộ tiến độ học tập</p>
     </div>
     
-    <div class="auth-tabs" id="auth-tabs">
-      <button class="auth-tab" type="button" data-tab="signup">Đăng ký</button>
-      <button class="auth-tab active" type="button" data-tab="signin">Đăng nhập</button>
+    <div class="auth-tabs" id="auth-tabs" role="tablist">
+      <button class="auth-tab" type="button" role="tab" aria-selected="false" data-tab="signup">Đăng ký</button>
+      <button class="auth-tab active" type="button" role="tab" aria-selected="true" data-tab="signin">Đăng nhập</button>
     </div>
 
     <div class="auth-providers" id="auth-providers">

@@ -1,0 +1,18 @@
+{
+  "auth": {
+    "providers": {
+      "emailPassword": true,
+      "googleSignIn": {
+        "oAuthBrandDisplayName": "FlashDay",
+        "supportEmail": "thunderkill016@gmail.com",
+        "authorizedRedirectUris": [
+          "https://flashday-22ae1.firebaseapp.com/__/auth/handler"
+        ]
+      }
+    }
+  },
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  }
+}

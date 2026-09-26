@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient } from '../firebase-client.js';
 import {
   AUTH_MODE,
   MIN_PASSWORD_LENGTH,
@@ -14,17 +14,15 @@ const $ = (id) => document.getElementById(id);
 const form = $('auth-form');
 const tabs = document.querySelectorAll('.auth-tab');
 
-const supabaseUrl = __FLASHDAY_SUPABASE_URL__;
-const publishableKey = __FLASHDAY_SUPABASE_PUBLISHABLE_KEY__;
-const supabase = supabaseUrl && publishableKey
-  ? createClient(supabaseUrl, publishableKey, {
-    auth: {
-      autoRefreshToken: true,
-      persistSession: true,
-      detectSessionInUrl: true
-    }
-  })
+const firebaseConfig = __FLASHDAY_FIREBASE_CONFIG__;
+const supabase = firebaseConfig?.apiKey && firebaseConfig?.projectId
+  ? createClient(firebaseConfig)
   : null;
+
+// Firebase returns password-reset links as ?mode=resetPassword&oobCode=…
+// on the continueUrl; hold the code so the form can complete the reset.
+const resetParams = new URLSearchParams(window.location.search);
+const resetCode = resetParams.get('mode') === 'resetPassword' ? resetParams.get('oobCode') : null;
 
 let mode = AUTH_MODE.SIGN_IN;
 let signedInUser = null;
@@ -128,10 +126,13 @@ async function submitEmailPassword() {
       showStatus('Hai mật khẩu mới chưa trùng nhau.', 'error');
       return;
     }
-    const { error } = await supabase.auth.updateUser({ password });
+    if (!resetCode) {
+      showStatus('Liên kết đặt lại mật khẩu không hợp lệ hoặc đã hết hạn.', 'error');
+      return;
+    }
+    const { data, error } = await supabase.auth.completePasswordReset(resetCode, password);
     if (error) throw error;
-    showStatus('Đã đổi mật khẩu. Đang vào FlashDay…', 'success');
-    window.setTimeout(() => window.location.assign(appUrl()), 550);
+    openAuthenticatedApp(data.session);
     return;
   }
 
@@ -218,9 +219,12 @@ form.addEventListener('submit', async (event) => {
   }
 });
 
-// Initialize mode from URL hash
+// Initialize mode: a Firebase oobCode reset link wins over the URL hash,
+// then fall back to ?…#signup / #signin style deep links.
 const hashMode = window.location.hash.replace('#', '');
-if (Object.values(AUTH_MODE).includes(hashMode)) {
+if (resetCode) {
+  setMode(AUTH_MODE.UPDATE_PASSWORD);
+} else if (Object.values(AUTH_MODE).includes(hashMode)) {
   setMode(hashMode);
 } else {
   setMode(AUTH_MODE.SIGN_IN);
@@ -235,14 +239,14 @@ if (!supabase) {
       return;
     }
     signedInUser = data.session?.user || null;
-    if (signedInUser && mode !== AUTH_MODE.UPDATE_PASSWORD) {
+    const isRecovering = mode === AUTH_MODE.UPDATE_PASSWORD || mode === AUTH_MODE.RECOVERY;
+    if (signedInUser && !isRecovering) {
       window.location.assign(appUrl());
     }
   });
 
   supabase.auth.onAuthStateChange((event, session) => {
     signedInUser = session?.user || null;
-    if (event === 'PASSWORD_RECOVERY') setMode(AUTH_MODE.UPDATE_PASSWORD);
   });
 }
 
