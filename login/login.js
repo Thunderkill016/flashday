@@ -324,7 +324,10 @@ if (!client) {
     }
     signedInUser = data.session?.user || null;
     if (signedInUser && !inRecoveryFlow()) {
-      window.location.assign(appUrl());
+      // Show the success state before navigating — the browser keeps the old
+      // page visible until /app/ paints, so without this the learner stares
+      // at a dead-looking form during the load.
+      openAuthenticatedApp(data.session);
       return;
     }
     // Came back from the auth handler but no session exists — the redirect
@@ -348,7 +351,7 @@ if (!client) {
     // getSession() already observed a null session. Without this branch a
     // slow Google round-trip signs the learner in but strands them here.
     if (event === 'SIGNED_IN' && signedInUser && !inRecoveryFlow()) {
-      window.location.assign(appUrl());
+      openAuthenticatedApp(session);
     }
   });
 
@@ -377,6 +380,16 @@ if (!client) {
   });
   }
 }
+
+// While the learner reads the form, warm the lazy Firestore chunk and the
+// app page so the post-sign-in navigation doesn't pay a cold fetch+parse.
+window.requestIdleCallback?.(() => {
+  import('firebase/firestore');
+  const warm = document.createElement('link');
+  warm.rel = 'prefetch';
+  warm.href = '/app/';
+  document.head.appendChild(warm);
+}, { timeout: 4000 });
 
 document.addEventListener('DOMContentLoaded', () => {
   const togglePasswordBtn = document.getElementById('toggle-password');
