@@ -58,4 +58,9 @@ assert(adapter.includes("rotation=!last?'first'"), 'first-encounter rotation mus
 assert(cloud.includes('rotation: optStr(event.rotation)'), 'review events must persist the rotation marker');
 assert(firestoreRules.includes("'rotation'"), 'rules allowlist must accept the rotation field');
 
-console.log('FlashDay app P0 contract: 26 checks passed');
+// Production ladder: unseen modes must open recognition-first. If the ladder
+// order drifts (e.g. speak before read), fresh units would demand production
+// before recognition — a silent pedagogy regression.
+assert(adapter.includes("MODE_LADDER=['read','listen','write','speak']"), 'mode ladder must order recognition before production');
+
+console.log('FlashDay app P0 contract: 27 checks passed');

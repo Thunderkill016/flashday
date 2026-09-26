@@ -189,17 +189,34 @@
     return {card,rotation};
   }
 
+  // Production ladder: retrieval modes open easy→hard so a unit is recognized
+  // (read/listen) before it must be produced (write/speak). FSRS still owns
+  // WHEN a task returns; this only orders WHICH unseen mode opens first.
+  const MODE_LADDER=['read','listen','write','speak'];
+
   // Cross-skill knowledge is allowed to influence WHAT to introduce next, but
   // never mutates another mode's FSRS memory state. Prefer finishing another
-  // skill for a Unit already encountered before opening an entirely new Unit.
+  // skill for a Unit already encountered — on the easiest remaining rung —
+  // before opening an entirely new Unit.
   function chooseIntroductionTask(db,engine,unseen,nowMs){
+    const byUnit=new Map();
+    for(const task of unseen){
+      const list=byUnit.get(task.unitId)||[];
+      list.push(task);byUnit.set(task.unitId,list);
+    }
+    for(const tasks of byUnit.values()){
+      tasks.sort((a,b)=>MODE_LADDER.indexOf(a.mode)-MODE_LADDER.indexOf(b.mode));
+    }
     for(const unit of engine.unitsWithCards){
+      const tasks=byUnit.get(unit.id);
+      if(!tasks)continue;
       const hasAnyMode=ACTIVE_MODES.some(mode=>F.hasState(db,unit.id,mode));
       if(!hasAnyMode)continue;
-      const match=unseen.find(task=>task.unitId===unit.id);
-      if(match)return {...match,reason:'cross-skill-continuity',memory:F.taskState(db,match.unitId,match.mode,nowMs)};
+      const match=tasks[0];
+      return {...match,reason:'cross-skill-continuity',memory:F.taskState(db,match.unitId,match.mode,nowMs)};
     }
-    const fallback=unseen[0];
+    const firstUnit=engine.unitsWithCards.find(unit=>byUnit.has(unit.id));
+    const fallback=firstUnit?byUnit.get(firstUnit.id)[0]:unseen[0];
     return {...fallback,reason:'ordered-introduction',memory:F.taskState(db,fallback.unitId,fallback.mode,nowMs)};
   }
 
@@ -375,5 +392,5 @@
     return seen.size;
   }
 
-  return {ACTIVE_MODES,MODE_META,normalizedDifficulty,normalizeStimulus,normalizeTelemetry,buildEngine,saveEngine,rebuildProgressFromEvents,selectNext,initialRatings,cycleRating,allSuccess,hasCompleteRatings,finalizeCard,itemStatus,deckStats,cardParts,cardCountForUnit,datasetCards,taskPairs,chooseHybridTask,chooseIntroductionTask,hybridCardScore,introductionGuardMs,bespokeScore,lastTaskEvent,pickCardForTask,seenContextCount,HYBRID_SCHEDULER,BESPOKE_SOURCE,hasFsrs:Boolean(F)};
+  return {ACTIVE_MODES,MODE_LADDER,MODE_META,normalizedDifficulty,normalizeStimulus,normalizeTelemetry,buildEngine,saveEngine,rebuildProgressFromEvents,selectNext,initialRatings,cycleRating,allSuccess,hasCompleteRatings,finalizeCard,itemStatus,deckStats,cardParts,cardCountForUnit,datasetCards,taskPairs,chooseHybridTask,chooseIntroductionTask,hybridCardScore,introductionGuardMs,bespokeScore,lastTaskEvent,pickCardForTask,seenContextCount,HYBRID_SCHEDULER,BESPOKE_SOURCE,hasFsrs:Boolean(F)};
 });

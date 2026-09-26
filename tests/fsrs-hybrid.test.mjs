@@ -55,6 +55,26 @@ assert.equal(A.bespokeScore(4), 3, 'future FSRS Easy must remain a Bespoke succe
 }
 
 {
+  // Production ladder: a fresh unit opens on the easiest rung ('read') and a
+  // partially-known unit climbs one rung at a time — never straight to
+  // 'speak' while 'listen' is still unseen.
+  const db = fixture();
+  const engine = A.buildEngine(db);
+  const tasks = A.taskPairs(engine);
+  const unseen = F.newTasks(db, tasks);
+  const firstIntro = A.chooseIntroductionTask(db, engine, unseen, 1_000_000);
+  assert.equal(firstIntro.mode, 'read', 'a fresh unit must start at the recognition rung, not production');
+  assert.equal(firstIntro.unitId, 'u1');
+
+  // Simulate 'read' reviewed: mark the mode as having state.
+  db.fsrsProgress = { cards: { 'u1::read': { due: '2099-01-01T00:00:00.000Z', state: 2, reps: 1, scheduled_days: 3, stability: 2, difficulty: 5 } } };
+  const stillUnseen = F.newTasks(db, tasks);
+  const next = A.chooseIntroductionTask(db, engine, stillUnseen, 1_000_000);
+  assert.equal(next.unitId, 'u1', 'cross-skill continuity still prefers the touched unit');
+  assert.equal(next.mode, 'listen', 'the ladder must climb to listen before write/speak');
+}
+
+{
   const db = fixture();
   const engine = A.buildEngine(db);
   const unit = engine.unitLookup.u1;
