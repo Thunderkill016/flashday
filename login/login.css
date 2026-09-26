@@ -1,15 +1,9 @@
-/* NEO-BRUTALIST DARK MODE LOGIN PAGE */
+/* NEO-BRUTALIST DARK MODE LOGIN PAGE — shared tokens */
+@import '../tokens.css';
+
 :root {
-  --ink-950: #090B0D;
-  --ink-900: #111417;
-  --ink-800: #1c2024;
-  --flash: #E8FF65;
-  --paper-50: #f7f5ef;
   --muted: rgba(255,255,255,0.6);
   --border: rgba(255,255,255,0.15);
-  
-  --font-display: "Bricolage Grotesque", sans-serif;
-  --font-body: "Inter", "Be Vietnam Pro", sans-serif;
 }
 
 *, *::before, *::after {

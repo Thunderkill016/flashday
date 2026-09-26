@@ -1,0 +1,160 @@
+/* ============================================================
+   FlashDay design tokens — single source of truth.
+   3 layers: raw → semantic → legacy aliases (kept so older
+   rules keep working while components migrate).
+   Research basis: docs-design-audit.txt (GPT audit vs
+   LingQ / Language Reactor / Migaku / Speak / ELSA / Anki).
+   ============================================================ */
+:root {
+  /* ── RAW palette ───────────────────────────────────────── */
+  --neutral-950: #090B0D;
+  --neutral-900: #111417;
+  --neutral-800: #181C20;
+  --neutral-700: #20252A;
+  --paper-50: #F7F5EF;
+  --paper-100: #EEEAE0;
+  --paper-200: #E4E0D4;
+
+  --lime-400: #E8FF65;       /* brand — one job: primary action */
+  --cyan-400: #5EDBFF;
+  --coral-400: #FF6A5E;
+  --teal-400: #59D3A2;       /* read mode — moved off lime to end the brand collision */
+  --violet-400: #A78BFA;
+
+  --blue-400: #5A9CFF;       /* memory: new-in-deck */
+  --gold-400: #E9C34D;       /* memory: learning */
+  --gray-500: #7F8891;       /* memory: ignored/not tracked */
+
+  --green-500: #35C789;      /* feedback: correct */
+  --red-500: #F05D5E;        /* feedback: error */
+  --amber-400: #F2A93B;      /* feedback: warning */
+  --sky-400: #5AA9FF;        /* feedback: info */
+
+  /* ── SEMANTIC (dark canvas — app shell) ────────────────── */
+  --bg-canvas: var(--neutral-950);
+  --bg-surface-1: var(--neutral-900);
+  --bg-surface-2: var(--neutral-800);
+  --bg-raised: var(--neutral-700);
+
+  --border-subtle: rgba(255, 255, 255, 0.12);
+  --border-strong: rgba(255, 255, 255, 0.2);
+
+  --text-primary: #F3F4EF;
+  --text-secondary: rgba(243, 244, 239, 0.68);
+  --text-tertiary: rgba(243, 244, 239, 0.45);
+  --text-disabled: rgba(243, 244, 239, 0.3);
+
+  --action-primary-bg: var(--lime-400);
+  --action-primary-fg: var(--neutral-950);
+  --action-primary-hover: #D4EB52;
+  --brand-soft: rgba(232, 255, 101, 0.15);
+
+  /* Mode identity — icon/accent only, never a canvas tint */
+  --mode-listen: var(--cyan-400);
+  --mode-speak: var(--coral-400);
+  --mode-read: var(--teal-400);
+  --mode-write: var(--violet-400);
+
+  /* Memory state — LingQ rule: known gets NO decoration */
+  --memory-new: var(--blue-400);
+  --memory-learning: var(--gold-400);
+  --memory-known: currentColor;
+  --memory-ignored: var(--gray-500);
+
+  /* Answer/feedback semantics — separate axis from memory */
+  --feedback-correct: var(--green-500);
+  --feedback-error: var(--red-500);
+  --feedback-warning: var(--amber-400);
+  --feedback-info: var(--sky-400);
+  --feedback-correct-soft: rgba(53, 199, 137, 0.14);
+  --feedback-error-soft: rgba(240, 93, 94, 0.14);
+  --feedback-warning-soft: rgba(242, 169, 59, 0.14);
+  --feedback-info-soft: rgba(90, 169, 255, 0.14);
+
+  /* Type */
+  --font-display: "Bricolage Grotesque", "Space Grotesk", system-ui, sans-serif;
+  --font-body: "Be Vietnam Pro", "Inter", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", "JetBrains Mono", monospace;
+
+  /* Spacing — 4px grid */
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
+  --space-5: 20px; --space-6: 24px; --space-8: 32px; --space-10: 40px;
+  --space-12: 48px; --space-16: 64px;
+
+  /* Radius */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-card: 24px;
+  --radius-pill: 999px;
+
+  /* Motion — learning UI stays stable; feedback may breathe */
+  --motion-fast: 120ms;
+  --motion-base: 180ms;
+  --motion-feedback: 240ms;
+  --ease-standard: cubic-bezier(.2, .8, .2, 1);
+
+  /* Dark elevation relies on borders, not shadows */
+  --shadow-1: 0 4px 24px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 16px 48px rgba(0, 0, 0, 0.6);
+  --shadow-neo: 4px 4px 0 #000;
+  --shadow-neo-active: 1px 1px 0 #000;
+
+  --focus-ring: 0 0 0 3px rgba(232, 255, 101, 0.4);
+
+  /* ── LEGACY ALIASES (fd-* and landing names → semantic) ── */
+  --fd-canvas: var(--bg-canvas);
+  --fd-surface: var(--bg-surface-1);
+  --fd-surface-2: var(--bg-surface-2);
+  --fd-surface-hover: #1F2429;
+  --fd-surface-disabled: #14171A;
+  --fd-text-primary: var(--text-primary);
+  --fd-text-secondary: var(--text-secondary);
+  --fd-text-tertiary: var(--text-tertiary);
+  --fd-text-disabled: var(--text-disabled);
+  --fd-primary: var(--action-primary-bg);
+  --fd-primary-text: var(--action-primary-fg);
+  --fd-primary-hover: var(--action-primary-hover);
+  --fd-primary-soft: var(--brand-soft);
+  --fd-danger: var(--feedback-error);
+  --fd-error: var(--feedback-error);
+  --fd-hard: var(--feedback-warning);
+  --fd-positive: var(--feedback-correct);
+  --fd-accent: var(--mode-listen);
+  --fd-accent-soft: rgba(94, 219, 255, 0.15);
+  --fd-warning: var(--feedback-warning);
+  --fd-warning-soft: var(--feedback-warning-soft);
+  --fd-border: var(--border-subtle);
+  --fd-border-interactive: var(--border-strong);
+  --fd-shadow-neo: var(--shadow-neo);
+  --fd-shadow-neo-active: var(--shadow-neo-active);
+  --fd-shadow-card: var(--shadow-1);
+  --fd-shadow-dialog: var(--shadow-2);
+  --fd-focus: var(--focus-ring);
+  --fd-radius-sm: var(--radius-sm);
+  --fd-radius-md: var(--radius-md);
+  --fd-radius-lg: var(--radius-lg);
+  --fd-radius-card: var(--radius-card);
+  --fd-radius-card-mobile: var(--radius-lg);
+  --fd-duration-fast: var(--motion-fast);
+  --fd-font-display: var(--font-display);
+  --fd-font-body: var(--font-body);
+  --fd-font-mono: var(--font-mono);
+
+  /* landing aliases */
+  --ink-950: var(--neutral-950);
+  --ink-900: var(--neutral-900);
+  --ink-800: var(--neutral-800);
+  --line-dark: var(--border-subtle);
+  --line-light: rgba(9, 11, 13, 0.12);
+  --muted-dark: #8E969E;
+  --muted-light: #62676C;
+  --flash: var(--lime-400);
+  --listen: var(--cyan-400);
+  --speak: var(--coral-400);
+  --read: var(--teal-400);
+  --write: var(--violet-400);
+  --radius-small: var(--radius-sm);
+  --radius-card: var(--radius-xl);
+}

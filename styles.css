@@ -1,52 +1,4 @@
-:root {
-  --fd-canvas: #090B0D;
-  --fd-surface: #111417;
-  --fd-surface-2: #171A1E;
-  --fd-surface-hover: #1f2429;
-  --fd-surface-disabled: #14171a;
-  --fd-text-disabled: rgba(243,244,239,0.3);
-  
-  --fd-text-primary: #F3F4EF;
-  --fd-text-secondary: rgba(243,244,239, 0.68);
-  --fd-text-tertiary: rgba(243,244,239, 0.45);
-  
-  --fd-primary: #E8FF65;
-  --fd-primary-text: #090B0D;
-  --fd-primary-hover: #d4eb52;
-  --fd-primary-soft: rgba(232, 255, 101, 0.15);
-  
-  --fd-danger: #FF786D;
-  --fd-error: #FF786D;
-  --fd-hard: #F5B85A;
-  --fd-positive: #9FE39F;
-  
-  --fd-accent: #5EDBFF;
-  --fd-accent-soft: rgba(94, 219, 255, 0.15);
-  --fd-warning: #F5B85A;
-  --fd-warning-soft: rgba(245, 184, 90, 0.15);
-  
-  --fd-border: rgba(255, 255, 255, 0.12);
-  --fd-border-interactive: rgba(255, 255, 255, 0.2);
-  
-  --fd-shadow-neo: 4px 4px 0 #000;
-  --fd-shadow-neo-active: 1px 1px 0 #000;
-  --fd-shadow-card: 0 4px 24px rgba(0, 0, 0, 0.4);
-  --fd-shadow-dialog: 0 16px 48px rgba(0, 0, 0, 0.6);
-  
-  --fd-focus: 0 0 0 3px rgba(232, 255, 101, 0.4);
-  
-  --fd-radius-sm: 8px;
-  --fd-radius-md: 12px;
-  --fd-radius-lg: 16px;
-  --fd-radius-card: 24px;
-  --fd-radius-card-mobile: 16px;
-  
-  --fd-duration-fast: 150ms;
-  
-  --fd-font-display: "Bricolage Grotesque", "Space Grotesk", system-ui, sans-serif;
-  --fd-font-body: "Inter", "Be Vietnam Pro", system-ui, sans-serif;
-  --fd-font-mono: "IBM Plex Mono", "JetBrains Mono", monospace;
-}
+@import './tokens.css';
 
 * { box-sizing: border-box; }
 html { background: var(--fd-canvas); }
@@ -716,25 +668,64 @@ svg { display: block; }
 .source-rec-meta { color: var(--fd-text-secondary); font-size: 13px; }
 .source-rec-bars { display: flex; height: 5px; border-radius: 999px; overflow: hidden; background: var(--fd-canvas); }
 .source-rec-bars i { display: block; height: 100%; }
-.bar-known { background: var(--fd-positive); }
-.bar-learning { background: var(--fd-hard); }
-.bar-new { background: var(--fd-danger); opacity: 0.55; }
+.bar-known { background: var(--gray-500); }
+.bar-learning { background: var(--memory-learning); }
+.bar-new { background: var(--memory-new); }
 
-.source-reader { margin-top: 14px; border: 1px solid var(--fd-border); border-radius: var(--fd-radius-md); background: var(--fd-surface-2); overflow: hidden; }
-.source-reader-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--fd-border); }
+/* Reader — a document surface, not a dashboard card.
+   Theme vars are scoped to the reader so it can go light/warm
+   while the app shell stays dark. */
+.source-reader {
+  --rbg: var(--neutral-900);
+  --rbg-line: rgba(255, 255, 255, 0.1);
+  --rtext: var(--text-primary);
+  --rtext-sub: var(--text-secondary);
+  --rtext-faint: var(--text-tertiary);
+  margin-top: 14px; border: 1px solid var(--fd-border); border-radius: var(--radius-lg);
+  background: var(--rbg); overflow: hidden;
+}
+.source-reader[data-theme="light"] {
+  --rbg: #FFFFFF; --rbg-line: rgba(17, 20, 22, 0.1);
+  --rtext: #14171A; --rtext-sub: #5F676E; --rtext-faint: #858D93;
+  /* remap fd-* so nested controls (capture form, inputs) follow the theme */
+  --fd-surface: #FFFFFF; --fd-surface-2: #F2F4EF; --fd-text-primary: #14171A;
+  --fd-text-secondary: #5F676E; --fd-text-tertiary: #858D93;
+  --fd-border: rgba(17, 20, 22, 0.12); --fd-border-interactive: rgba(17, 20, 22, 0.25);
+}
+.source-reader[data-theme="warm"] {
+  --rbg: #F5EFE2; --rbg-line: rgba(60, 50, 30, 0.12);
+  --rtext: #2C2A24; --rtext-sub: #6B6455; --rtext-faint: #8A8272;
+  --fd-surface: #F5EFE2; --fd-surface-2: #EDE6D6; --fd-text-primary: #2C2A24;
+  --fd-text-secondary: #6B6455; --fd-text-tertiary: #8A8272;
+  --fd-border: rgba(60, 50, 30, 0.14); --fd-border-interactive: rgba(60, 50, 30, 0.3);
+}
+.source-reader { background: var(--rbg); color: var(--rtext); }
+.source-reader-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--rbg-line); }
 .source-reader-head strong { display: block; font-size: 15px; }
-.source-reader-head span { color: var(--fd-text-secondary); font-size: 13px; }
-.source-reader-body { max-height: 420px; overflow-y: auto; padding: 8px 16px; }
-.reader-line { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--fd-border); }
-.reader-line:last-child { border-bottom: none; }
-.reader-play { flex-shrink: 0; width: 28px; height: 28px; margin-top: 2px; border-radius: 50%; border: 1px solid var(--fd-border-interactive); background: transparent; color: var(--fd-primary); font-size: 11px; cursor: pointer; }
-.reader-play:hover { background: var(--fd-primary-soft); }
-.reader-text p { margin: 0; font-size: 15px; line-height: 1.55; }
-.reader-text small { display: block; margin-top: 2px; color: var(--fd-text-tertiary); font-size: 13px; }
-mark.token-known { background: transparent; color: inherit; border-bottom: 2px solid var(--fd-positive); }
-mark.token-learning { background: var(--fd-warning-soft); color: inherit; border-bottom: 2px solid var(--fd-hard); border-radius: 2px; padding: 0 1px; }
-mark.token-new { background: rgba(255,120,109,0.12); color: inherit; border-bottom: 2px dashed var(--fd-danger); border-radius: 2px; padding: 0 1px; }
-.source-reader .footer-note { padding: 10px 16px; border-top: 1px solid var(--fd-border); margin: 0; }
+.source-reader-head span { color: var(--rtext-sub); font-size: 13px; }
+.reader-controls { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.reader-ctl { padding: 5px 10px; border: 1px solid var(--rbg-line); border-radius: var(--radius-pill); background: transparent; color: var(--rtext-sub); font-size: 12px; cursor: pointer; }
+.reader-ctl:hover { color: var(--rtext); }
+.reader-ctl.active { color: var(--rtext); border-color: var(--rtext); }
+.source-reader-body { max-height: 60vh; overflow-y: auto; padding: 8px 0; }
+/* ~62ch measure, 18–20px, 1.6lh — GPT reader spec */
+.reader-line { display: flex; align-items: flex-start; gap: 12px; padding: 7px 0; margin: 0 auto; max-width: 62ch; padding-left: 20px; padding-right: 20px; }
+.reader-line + .reader-line { margin-top: 2px; }
+.reader-play { flex-shrink: 0; width: 26px; height: 26px; margin-top: 3px; border-radius: 50%; border: 1px solid var(--rbg-line); background: transparent; color: var(--rtext-faint); font-size: 10px; cursor: pointer; opacity: 0.5; transition: opacity var(--motion-fast) var(--ease-standard); }
+.reader-line:hover .reader-play, .reader-play:focus-visible { opacity: 1; }
+.reader-play:hover { color: var(--rtext); border-color: var(--rtext-sub); }
+.reader-text p { margin: 0; font-size: 18px; line-height: 1.6; }
+.source-reader[data-size="large"] .reader-text p { font-size: 20px; line-height: 1.65; }
+.reader-text small { display: block; margin-top: 3px; color: var(--rtext-faint); font-size: 13.5px; line-height: 1.5; }
+/* LingQ rule: known words visually disappear — decoration is reserved for
+   what still needs attention. New ≠ error: blue, not red. */
+mark.token-known, mark.token-learning, mark.token-new { background: transparent; color: inherit; }
+mark.token-learning { border-bottom: 2px solid var(--memory-learning); padding: 0 1px; }
+mark.token-new { border-bottom: 2px solid var(--memory-new); padding: 0 1px; }
+.source-reader .footer-note { padding: 10px 20px; border-top: 1px solid var(--rbg-line); margin: 0; color: var(--rtext-faint); font-size: 13px; }
+/* The global action dock is sticky-on-canvas; inside the reader it must be a
+   plain in-flow row on the document surface, or light themes get a black bar. */
+.source-reader .secondary-actions { position: static; background: transparent; padding: 0; margin-top: 14px; }
 
 /* ── Output error loop ─────────────────────────────────────────────── */
 /* Write-mode diff + retry: surface ONE correction, then let the learner
@@ -756,20 +747,15 @@ mark.token-new { background: rgba(255,120,109,0.12); color: inherit; border-bott
 .error-memory li { margin: 2px 0; }
 
 /* ── Reader click-to-mine ──────────────────────────────────────────── */
-.tok-word { cursor: pointer; border-bottom: 1px dotted transparent; }
-.tok-word:hover { color: var(--fd-primary); border-bottom-color: var(--fd-primary); }
+.tok-word { cursor: pointer; border-bottom: 1px dotted var(--rbg-line, var(--fd-border)); border-radius: 2px; }
+.tok-word:hover { color: var(--teal-400); border-bottom-color: var(--teal-400); background: rgba(89, 211, 162, 0.1); }
+.source-reader .tok-word:hover { color: var(--rtext); border-bottom-color: var(--teal-400); }
 .word-capture { margin: 10px 0 0; padding: 12px 14px; border: 1px solid var(--fd-primary); border-radius: var(--fd-radius-md); background: var(--fd-surface); }
 .wc-sentence { margin: 8px 0; font-size: 13px; color: var(--fd-text-secondary); font-style: italic; }
 
 /* ============================================================
-   MODE IDENTITY — 4 kỹ năng mang màu riêng, khớp landing
+   MODE IDENTITY — 4 kỹ năng mang màu riêng (tokens.css)
    ============================================================ */
-:root {
-  --mode-listen: #5EDBFF;
-  --mode-speak: #FF6A5E;
-  --mode-read: #C7F45B;
-  --mode-write: #A78BFA;
-}
 
 /* Study card: dải màu trên cùng theo mode đang ôn */
 .study-card { position: relative; overflow: hidden; }
@@ -841,11 +827,11 @@ mark.token-new { background: rgba(255,120,109,0.12); color: inherit; border-bott
 .answer-key { font-size: 18px; font-weight: 700; color: var(--fd-text-primary); margin: 0 0 4px; }
 .muted-copy { color: var(--fd-text-tertiary); font-weight: 400; font-size: 14px; }
 
-/* Rating chip trạng thái chấm */
-.rating-chip[data-score="3"] { background: rgba(199, 244, 91, 0.12); border-color: var(--mode-read); }
-.rating-chip[data-score="3"] small { color: var(--mode-read); opacity: 1; }
-.rating-chip[data-score="1"] { background: rgba(255, 106, 94, 0.12); border-color: var(--mode-speak); }
-.rating-chip[data-score="1"] small { color: var(--mode-speak); opacity: 1; }
+/* Rating chip trạng thái chấm — feedback semantics, không dùng mode colors */
+.rating-chip[data-score="3"] { background: var(--feedback-correct-soft); border-color: var(--feedback-correct); }
+.rating-chip[data-score="3"] small { color: var(--feedback-correct); opacity: 1; }
+.rating-chip[data-score="1"] { background: var(--feedback-error-soft); border-color: var(--feedback-error); }
+.rating-chip[data-score="1"] small { color: var(--feedback-error); opacity: 1; }
 
 /* Speak-mode extras */
 .attempt-actions { margin-top: 14px; }
@@ -853,12 +839,23 @@ mark.token-new { background: rgba(255,120,109,0.12); color: inherit; border-bott
 .local-recording { width: 100%; margin-top: 12px; height: 40px; border-radius: var(--fd-radius-sm); }
 
 /* Memory list */
-.memory-list { display: grid; gap: 16px; }
-.memory-card { padding: 20px 22px; border: 1px solid var(--fd-border); border-radius: var(--fd-radius-lg); background: var(--fd-surface); box-shadow: var(--fd-shadow-card); transition: border-color 0.2s; }
+/* Memory — a useful list, not decorative cards */
+.memory-list { display: grid; gap: 10px; }
+.memory-card { padding: 16px 18px; border: 1px solid var(--fd-border); border-radius: var(--fd-radius-md); background: var(--fd-surface); transition: border-color var(--motion-fast) var(--ease-standard); }
 .memory-card:hover { border-color: var(--fd-border-interactive); }
 .memory-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
-.memory-title { font-size: 20px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.25; }
+.memory-title { font-size: 17px; font-weight: 700; letter-spacing: -0.01em; line-height: 1.3; }
 .memory-meaning { color: var(--fd-text-secondary); font-size: 14px; margin-top: 2px; }
+.memory-badges { display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
+.memory-meta { margin-top: 8px; color: var(--fd-text-tertiary); font-size: 13px; }
+.memory-details { margin-top: 10px; }
+.memory-details summary { cursor: pointer; color: var(--fd-text-tertiary); font-size: 12.5px; user-select: none; }
+.memory-details summary:hover { color: var(--fd-text-secondary); }
+/* Memory state colors — distinct from feedback & mode colors */
+.state-pill { flex-shrink: 0; padding: 4px 12px; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; white-space: nowrap; }
+.state-new { background: rgba(90, 156, 255, 0.14); color: var(--memory-new); }
+.state-due { background: var(--feedback-warning-soft); color: var(--feedback-warning); }
+.state-learning { background: rgba(233, 195, 77, 0.14); color: var(--memory-learning); }
 .type-pill { flex-shrink: 0; padding: 4px 12px; border-radius: 999px; background: var(--fd-accent-soft); color: var(--fd-accent); font-size: 11px; font-weight: 700; letter-spacing: 0.04em; white-space: nowrap; }
 .can-do { margin: 12px 0 0; padding: 10px 14px; border-left: 3px solid var(--fd-primary); border-radius: 0 var(--fd-radius-sm) var(--fd-radius-sm) 0; background: var(--fd-surface-2); color: var(--fd-text-secondary); font-size: 14px; }
 .empty { padding: 48px 24px; text-align: center; color: var(--fd-text-tertiary); border: 1px dashed var(--fd-border); border-radius: var(--fd-radius-lg); }

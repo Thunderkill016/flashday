@@ -1,0 +1,660 @@
+ChatGPT đã nói:
+
+Dựa trên mô tả hiện tại, vấn đề lớn nhất của FlashDay không phải thiếu polish. Nó đang có ba ngôn ngữ giao diện cạnh tranh với nhau: landing editorial, app dashboard-dark, login biến thể thứ ba. Nếu tiếp tục “patch CSS” thì càng làm càng khó đồng nhất.
+
+Quan trọng hơn: UI học tập đang bị đối xử giống UI SaaS. Reader không nên trông như dashboard. Review không nên trông như form. Memory list không nên trông như collection of cards.
+
+Tôi sẽ chốt một hệ thống hướng tới việc học.
+
+1. Những app tốt đang tối ưu cái gì?
+
+Có một pattern khá rõ khi nhìn LingQ, Language Reactor, Migaku, Speak, ELSA, Duolingo và Anki.
+
+Product\tĐiều họ làm đáng học\tFlashDay nên lấy
+LingQ\tReader là sản phẩm trung tâm. New = blue, learning/LingQ = yellow, known = không highlight. Người dùng chỉnh font, font size, line spacing 1.0–3.0, highlight style, light/dark. 
+LingQ
++1
+\tKnown nên “biến mất” khỏi thị giác. Chỉ làm nổi thứ cần attention. Reader phải có typography settings.
+Language Reactor\tUI xoay quanh video/subtitle; click lookup, right-click save, keyboard replay/previous/next, auto-pause. Learning stage từng dùng green/orange/grey và cho phép tắt coloring để giảm visual noise. 
+Language Reactor
++1
+\tInteraction phải giữ learner trong flow. Lookup không nên biến thành navigation event lớn. Cho phép giảm/tắt highlight.
+Migaku\tUnknown red, learning orange, known green, ignored grey, tracked purple; trạng thái chủ yếu dùng underline và có comprehension score của content. 
+Migaku
++1
+\tEncoding trạng thái từ vựng có thể nhẹ hơn full background highlight. Dùng knowledge state để giúp chọn content.
+Anki\tQuestion trước → người dùng recall → reveal → mới xuất hiện Again/Hard/Good/Easy. Mobile còn cho map toàn bộ nửa trái/phải màn hình thành Again/Good. 
+Anki Manual
++1
+\tTrong recall, ẩn gần như mọi thứ không phục vụ retrieval. Rating phải ở thumb zone.
+Speak\tLearn → Practice → Apply; nói gần như ngay lập tức, feedback sau production. Matching chạy streaming và họ đặc biệt tránh hệ thống “tự sửa hộ” learner quá nhiều. 
+Speak
++2
+\tSpeaking feedback phải phản ánh lỗi thật, nhưng không được interrupt utterance bằng cả đống feedback giữa lúc nói.
+ELSA\tFeedback pronunciation được đưa xuống word/sound với color coding: green đúng, yellow/orange cần cải thiện. 
+ELSA Speak
++1
+\tError feedback phải localized: learner phải biết sai ở đâu, không chỉ nhận score 72%.
+Duolingo\tLesson surface tương đối tập trung; gần đây chính Duolingo thừa nhận inconsistent headers/type/spacing đã tích lũy và họ đơn giản hóa system, giảm container thừa, chuẩn hóa hierarchy. 
+Duolingo Blog
+\tMột lesson = một nhiệm vụ chính + một CTA chính. Không biến mỗi mẩu thông tin thành card.
+
+Một số reference UI đáng nhìn cạnh nhau:
+
+4
+4 ảnh
+
+Có một điểm rất đáng chú ý: các app immersion tốt không cố tô càng nhiều càng tốt. LingQ thậm chí để known word trở lại bình thường; LR cho phép tắt learning-state coloring; Migaku dùng underline. Đây là hướng đúng cho FlashDay.
+
+2. Typography: app hiện tại đang quá “designed”
+
+Ba font không tự động là vấn đề, nhưng vai trò hiện tại của chúng có nguy cơ gây visual chatter.
+
+Tôi sẽ chia thế này:
+
+Role\tFont
+Landing headline\tBricolage Grotesque
+App UI + reader + review content\tBe Vietnam Pro
+Numeric/debug/keyboard shortcut cực ít\tIBM Plex Mono
+Login\tBe Vietnam Pro, cùng system với app
+
+Không dùng IBM Plex Mono cho label thông thường kiểu TODAY, MEMORY, DUE, LISTEN. Nó khiến một app học tiếng Anh trông giống developer tool.
+
+Bricolage cũng không nên xuất hiện trong transcript, answer, definition hay review prompt.
+
+Type scale tôi sẽ dùng
+Token\tSize / line-height\tUse
+text-xs\t12 / 16\tmetadata rất phụ
+text-sm\t14 / 20\tlabels, secondary UI
+text-md\t16 / 24\tUI/body
+text-lg\t18 / 28\tmobile reader
+text-xl\t20 / 32\tdesktop reader
+text-2xl\t24 / 32\trevealed answer
+text-3xl\t30 / 38\treview prompt
+text-4xl\t36 / 44\tapp page title
+display\t48+\tmarketing only
+Reader
+
+Tôi sẽ đặt:
+
+Desktop
+
+font-size: 20px
+line-height: 1.6
+max-width: 62ch
+user adjustable khoảng 18–24px
+paragraph gap 0.9em
+
+Mobile
+
+font-size: 18px
+line-height: 1.6
+full width với padding 20px
+
+Đừng để transcript chạy full 760px chỉ vì app container là 760px. Với text dài, hãy nghĩ theo character measure, khoảng 58–68ch, không phải pixel width.
+
+Và không có lý do để copy chính xác px của LingQ/Migaku: các product đó không công khai đầy đủ CSS production. Điều đáng copy là hierarchy và interaction, không phải screenshot measurement.
+
+3. Color architecture: hiện FlashDay đang mắc lỗi semantic
+
+brand lime #E8FF65 và read #C7F45B quá giống nhau.
+
+Tôi sẽ bỏ màu read hiện tại.
+
+Trong peripheral vision:
+
+E8FF65 vs C7F45B ≈ cùng một tín hiệu.
+
+Learner không nên phải tự hỏi lime này nghĩa là:
+
+FlashDay?
+selected?
+primary CTA?
+Read mode?
+learned?
+correct?
+
+Brand color phải có một công việc chính.
+
+Tôi sẽ đổi mode palette thành
+Mode\tColor
+Listen\t#5EDBFF cyan
+Speak\t#FF6A5E coral
+Read\t#59D3A2 teal/emerald
+Write\t#A78BFA purple
+FlashDay brand\t#E8FF65 lime
+
+Các màu mode chỉ nên xuất hiện ở icon, 2–4px accent, mode selector hoặc very-low-alpha surface.
+
+Không tô nguyên reader green vì đang Read mode.
+
+4. Tách hoàn toàn 4 loại semantics
+
+Đây là thay đổi quan trọng nhất của palette.
+
+A. Brand
+CSS
+--brand-accent: #E8FF65;
+--brand-on-accent: #090B0D;
+
+Dùng cho primary action, selected navigation quan trọng, brand moments.
+
+B. Skill/mode
+CSS
+--mode-listen: #5EDBFF;
+--mode-speak:  #FF6A5E;
+--mode-read:   #59D3A2;
+--mode-write:  #A78BFA;
+C. Memory state
+
+Tôi sẽ gần LingQ hơn Migaku:
+
+CSS
+--memory-new:      #5A9CFF;
+--memory-learning: #E9C34D;
+--memory-known:    currentColor;
+--memory-ignored:  #7F8891;
+
+Known không cần green.
+
+Đây là một quyết định rất tốt của LingQ: known words trở thành bình thường. 
+LingQ
+
+Nếu 80% transcript đã known mà bạn tô 80% green, UI sẽ biến thành heatmap. Learner lại chú ý vào cái đã biết thay vì cái cần học.
+
+D. Performance feedback
+CSS
+--feedback-correct: #35C789;
+--feedback-error:   #F05D5E;
+--feedback-warning: #F2A93B;
+--feedback-info:    #5AA9FF;
+
+Memory state ≠ correctness.
+
+Một từ new không phải error. Một từ known cũng không có nghĩa câu trả lời hiện tại đúng.
+
+Đây là chỗ rất nhiều learning apps tự làm rối semantic color.
+
+5. Unified token architecture
+
+Đừng đổi tên --fd-* thành một đống tên mới rồi coi như xong.
+
+FlashDay cần 3 tầng token:
+
+Văn bản thuần túy
+Foundation/raw
+      ↓
+Semantic
+      ↓
+Component
+
+Ví dụ:
+
+CSS
+/* RAW — components không được gọi trực tiếp */
+--neutral-950: #090B0D;
+--neutral-900: #111417;
+--neutral-800: #181C20;
+
+--lime-400: #E8FF65;
+--blue-400: #5A9CFF;
+
+/* SEMANTIC */
+--bg-canvas: var(--neutral-950);
+--bg-surface: var(--neutral-900);
+--text-primary: #F5F7F2;
+--text-secondary: #B1B8BE;
+
+--action-primary-bg: var(--lime-400);
+--action-primary-fg: var(--neutral-950);
+
+--memory-new: var(--blue-400);
+
+/* COMPONENT */
+--review-bg: var(--bg-canvas);
+--review-action-bg: var(--action-primary-bg);
+--reader-new-decoration: var(--memory-new);
+
+Không component nào được dùng #E8FF65 trực tiếp.
+
+Đó là luật nên enforce.
+
+6. Color themes tôi sẽ chốt
+Dark
+CSS
+--bg-canvas:        #0B0D0F;
+--bg-surface-1:     #121518;
+--bg-surface-2:     #181C20;
+--bg-raised:        #20252A;
+
+--border-subtle:    #272D32;
+--border-strong:    #394148;
+
+--text-primary:     #F5F7F2;
+--text-secondary:   #B1B8BE;
+--text-tertiary:    #7F8891;
+Light
+CSS
+--bg-canvas:        #F5F6F1;
+--bg-surface-1:     #FFFFFF;
+--bg-surface-2:     #EEF1EB;
+--bg-raised:        #FFFFFF;
+
+--border-subtle:    #DDE1D8;
+--border-strong:    #C3C9BF;
+
+--text-primary:     #111416;
+--text-secondary:   #5F676E;
+--text-tertiary:    #858D93;
+
+#E8FF65 có contrast cực thấp trên white, nên đừng bao giờ dùng lime làm text trên light theme. Nó là filled accent với dark foreground.
+
+7. Spacing / radius / elevation
+Spacing
+
+Base grid 4px:
+
+CSS
+--space-1: 4px;
+--space-2: 8px;
+--space-3: 12px;
+--space-4: 16px;
+--space-5: 20px;
+--space-6: 24px;
+--space-8: 32px;
+--space-10: 40px;
+--space-12: 48px;
+--space-16: 64px;
+
+Không cần 17px ở chỗ này, 22px chỗ kia, 27px chỗ khác.
+
+Radius
+CSS
+--radius-sm: 8px;
+--radius-md: 12px;
+--radius-lg: 16px;
+--radius-xl: 20px;
+--radius-pill: 999px;
+
+Đừng để button 14px, card 23px, modal 27px chỉ vì “looks right”.
+
+Elevation
+
+Đặc biệt ở dark mode: đừng dựa vào shadow.
+
+Văn bản thuần túy
+Level 0 = canvas
+Level 1 = surface + border
+Level 2 = raised surface + slightly stronger border
+Level 3 = dialog/popover + shadow
+
+Light theme mới dùng shadow rõ hơn:
+
+CSS
+--shadow-1: 0 1px 2px rgb(0 0 0 / .06);
+--shadow-2: 0 4px 16px rgb(0 0 0 / .08);
+--shadow-3: 0 12px 32px rgb(0 0 0 / .12);
+
+Reader gần như không cần elevation.
+
+8. Component states
+
+Mỗi interactive component bắt buộc có cùng state vocabulary:
+
+State\tRule
+Rest\tbaseline
+Hover\tsurface change nhẹ
+Active/pressed\ttranslate/brightness nhẹ
+Selected\tborder/accent + shape, không chỉ color
+focus-visible\t2–3px focus ring rõ
+Disabled\tgiảm contrast nhưng vẫn readable
+Loading\tgiữ kích thước, không layout shift
+Error\terror semantic + icon/text
+Success\tsuccess semantic + icon/text
+
+Tuyệt đối tránh:
+
+Văn bản thuần túy
+green = selected
+green = known
+green = correct
+green = Read mode
+
+một lúc.
+
+9. Motion
+
+Landing của bạn có thể dramatic.
+
+Learning surface thì không.
+
+CSS
+--motion-fast: 120ms;
+--motion-base: 180ms;
+--motion-feedback: 240ms;
+--motion-page: 280ms;
+
+--ease-standard: cubic-bezier(.2,.8,.2,1);
+
+Trong review:
+
+không floating cards;
+không orbit;
+không continuous gradient;
+không animated counters;
+không pulse trên progress;
+feedback correct/error có thể 180–240ms;
+respect prefers-reduced-motion.
+
+Learning UI nên ổn định trong lúc não đang recall.
+
+10. Review card: hiện nên thiết kế như “recall chamber”
+
+Anki có một principle cực mạnh: trước reveal, learner chỉ có question; rating chỉ xuất hiện sau answer. 
+Anki Manual
+
+FlashDay nên làm đúng tinh thần đó.
+
+BEFORE REVEAL
+Văn bản thuần túy
+────────────────────────
+       12 / 24
+
+           🔊
+
+ “I wish I ___ more time.”
+
+────────────────────────
+
+
+
+         Reveal
+────────────────────────
+
+Không hiện:
+
+stability;
+retrievability;
+tags;
+next due;
+source metadata;
+memory state;
+grammar explanation;
+streak;
+XP;
+modes;
+navigation clutter.
+
+Bạn muốn learner retrieve English, không phải đọc dashboard.
+
+AFTER REVEAL
+Văn bản thuần túy
+“I wish I had more time.”
+
+        had
+       ─────
+         ↑
+ past form after wish
+
+Your answer:
+“I wish I have more time.”
+
+────────────────────────
+Again   Hard   Good   Easy
+ 2m      1d     4d     9d
+────────────────────────
+
+Speak cũng đi theo logic production → feedback, và họ nhấn mạnh feedback phải phản ánh thực tế learner nói chứ không “clean up” lỗi trước khi teaching. 
+Speak
+
+11. Rating buttons: thumb zone
+
+Trên mobile, đặt cố định ở bottom safe area.
+
+Văn bản thuần túy
+┌──────┬──────┬──────┬──────┐
+│Again │ Hard │ Good │ Easy │
+│  2m  │  1d  │  4d  │  9d  │
+└──────┴──────┴──────┴──────┘
+
+Target height tôi sẽ dùng 52–56px, không 36–40px.
+
+AnkiMobile thậm chí mặc định cho phép tap cả vùng trái để Again và vùng phải để Good, tức là họ rất coi trọng speed/ergonomics của review. 
+AnkiMobile Manual
+
+Một lưu ý FSRS quan trọng: Hard vẫn là successful recall; quên thì phải dùng Again. Anki cảnh báo việc dùng Hard thay Again làm scheduling sai. 
+Anki Manual
+
+FlashDay nên có microcopy lần đầu:
+
+Forgot → Again
+Recalled with effort → Hard
+
+Không cần lặp lại sau khi user hiểu.
+
+12. Reader: bỏ “dark cards in a 760px column”
+
+Đây có lẽ là nâng cấp visual lớn nhất.
+
+Transcript không nên nằm trong một card khổng lồ.
+
+Nó nên giống reader:
+
+Văn bản thuần túy
+← Article                         Aa   ···
+
+How habits actually form
+12 min · 92% comprehension
+
+─────────────────────────────────
+
+When you repeat a behavior enough times,
+your brain begins to reduce the amount of
+attention required to perform it...
+
+     learning
+        ━━━
+
+Eventually it becomes almost automatic.
+
+...
+
+Canvas chính là reading surface.
+
+Dictionary/popover chỉ xuất hiện khi click.
+
+Word states
+
+Tôi đề nghị mặc định:
+
+Văn bản thuần túy
+Known      no decoration
+New        subtle blue underline/background
+Learning   gold underline/background
+Selected   separate neutral/brand outline
+
+Và có setting:
+
+Văn bản thuần túy
+Vocabulary highlighting
+● Subtle
+○ Strong
+○ Off
+
+LingQ đã phải bổ sung cả underline-vs-highlight configuration, fonts, size và line spacing vì reader preferences khác nhau đáng kể. 
+LingQ
+
+Đó là thứ FlashDay nên học.
+
+13. Dark vs light: tôi sẽ KHÔNG giữ dark-only
+
+Ở điểm này tôi sẽ thay đổi thiết kế hiện tại của bạn.
+
+Có khá nhiều bằng chứng về positive polarity advantage: dark text trên light background cho kết quả tốt hơn trong proofreading/visual-detail tasks so với light-on-dark trong các thí nghiệm được kiểm soát; các nghiên cứu liên hệ một phần hiệu ứng với luminance cao hơn → pupil nhỏ hơn → retinal image sắc hơn. 
+PubMed
++2
+
+Không nên diễn giải thành:
+
+“Light luôn tốt hơn dark cho mọi người và mọi hoàn cảnh.”
+
+Nhưng với FlashDay, learner đang:
+
+phân biệt spelling;
+nhìn word boundaries;
+tìm lỗi;
+đọc transcript dài;
+chú ý function words;
+
+nên tôi không chấp nhận dark-only reader.
+
+LingQ cũng có light default và dark option, cộng reader customization thay vì ép một polarity. 
+LingQ
+
+Tôi sẽ cung cấp:
+
+Văn bản thuần túy
+Reader appearance
+◉ System
+○ Light
+○ Dark
+○ Warm
+
+Warm có thể là:
+
+CSS
+background: #F4F0E6;
+text: #24231F;
+
+Và nhớ lựa chọn riêng cho Reader.
+
+Không nhất thiết toàn bộ app phải đổi light theo reader. User có thể:
+
+dark app shell + light reading canvas
+
+nếu transition được xử lý mềm và reader chiếm phần lớn viewport.
+
+Language Reactor là dark-heavy vì nó sống cạnh video player; đó không phải bằng chứng dark là tốt hơn cho long-form reading. 
+Language Reactor
+
+14. Memory list: đừng biến nó thành grid card
+
+Memory là data-management surface.
+
+Desktop:
+
+Văn bản thuần túy
+Memory                                     Search
+
+[Due 38] [Learning 104] [New 28] [Known]
+
+Word             Meaning            State       Due
+────────────────────────────────────────────────────
+although         mặc dù             Learning    Today
+eventually       cuối cùng          Learning    Tomorrow
+roughly          xấp xỉ             Known       Oct 12
+
+Mỗi row khoảng 60–68px.
+
+Word:
+16–17px / 600
+
+Meaning:
+14–16px / 400
+
+Metadata:
+13–14px
+
+Không full-background blue/yellow/green theo state. Một small dot/chip hoặc left indicator là đủ.
+
+FSRS internals như:
+
+Văn bản thuần túy
+difficulty 5.7
+stability 12.4
+retrievability .914
+
+không nên nằm ở primary UI.
+
+Cho nó vào:
+
+Advanced memory details
+
+Normal learner chỉ cần hiểu:
+
+Due today
+Learning
+Last seen 4 days ago
+
+15. 8 thay đổi có impact cao nhất
+
+Xóa ba token systems. Tạo một tokens.css foundation + theme.css semantic. Landing/login/app đều consume nó; không duplicate hex values.
+
+Biến review thành true focus mode. Trong recall chỉ prompt/audio/input/reveal. Toàn bộ metadata xuất hiện sau response.
+
+Thiết kế lại reader như document chứ không phải card. ~62ch, 18–20px, 1.6 line height, typography controls và click-word popover không phá flow.
+
+Known words phải visually disappear. New + learning mới mang decoration; đừng biến transcript thành rainbow heatmap.
+
+Đổi Read từ #C7F45B → teal #59D3A2. Brand lime giữ độc quyền cho product/action. Mode color chỉ là accent, không phải canvas.
+
+Tách memory semantics khỏi answer semantics. New blue, learning gold, known neutral; correct green, error red. Không để một hue mang 3 ý nghĩa.
+
+Đưa rating/action bar xuống fixed mobile bottom zone. 52–56px target, safe-area aware, intervals là secondary text; desktop có keyboard 1–4 + Space/Enter.
+
+Ship Light + Dark reader ngay trong design-system round này. Dark-only không phù hợp với một sản phẩm mà long-form reading và error noticing là core behavior.
+
+Kiến trúc CSS tôi sẽ dùng
+Văn bản thuần túy
+styles/
+├── tokens/
+│   ├── primitive.css
+│   ├── semantic.css
+│   ├── light.css
+│   └── dark.css
+│
+├── base/
+│   ├── reset.css
+│   ├── typography.css
+│   └── accessibility.css
+│
+├── components/
+│   ├── button.css
+│   ├── input.css
+│   ├── chip.css
+│   ├── dialog.css
+│   ├── review-card.css
+│   ├── rating-dock.css
+│   ├── reader.css
+│   ├── word-token.css
+│   └── memory-row.css
+│
+├── surfaces/
+│   ├── app.css
+│   ├── auth.css
+│   └── marketing.css
+│
+└── index.css
+
+Landing vẫn có thể giữ Bricolage, massive typography, orbit, bento và drama. Không cần biến FlashDay thành một app nhạt nhẽo để unified. Cái cần thống nhất là color foundation, spacing, controls, accessibility và semantics.
+
+Marketing có nhiệm vụ thuyết phục. App có nhiệm vụ giúp não học.
+
+Hai thứ không cần cùng mức độ biểu diễn.
+
+Chốt direction
+
+FlashDay nên trông như:
+
+LingQ's reader discipline + Anki's recall focus + Speak/ELSA's correction clarity + Duolingo's interaction polish, nhưng giữ visual identity lime/Bricolage của riêng FlashDay ở shell và marketing.
+
+Nếu chỉ sửa một thứ trong round này, đừng bắt đầu từ shadow/radius. Hãy merge token architecture và rebuild Reader + Review quanh cognitive state của learner. Khi hai màn hình đó đúng, phần còn lại của sản phẩm sẽ có một chuẩn để đi theo. 
+
+ChatGPT có thể mắc lỗi. Hãy kiểm tra thông tin quan trọng.
+Phản hồi mới nhất
+
+
+
+
+Cao
+Đã hoàn tất phản hồi"

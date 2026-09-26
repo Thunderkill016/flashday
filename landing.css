@@ -1,35 +1,8 @@
+@import './tokens.css';
+
 :root {
-  /* BASE */
-  --ink-950: #090B0D; 
-  --ink-900: #111417; 
-  --ink-800: #191D21; 
-  --paper-50: #F7F5EF; 
-  --paper-100: #EEEAE0; 
-  
-  --line-dark: rgba(255,255,255,.12); 
-  --line-light: rgba(9,11,13,.12); 
-  --muted-dark: #8E969E; 
-  --muted-light: #62676C;
-  
-  /* BRAND & SKILLS */
-  --flash: #E8FF65;
-  --listen: #5EDBFF;
-  --speak: #FF6A5E;
-  --read: #C7F45B;
-  --write: #A78BFA;
-  
-  /* TYPOGRAPHY */
-  --font-display: "Bricolage Grotesque", system-ui, sans-serif;
-  --font-body: "Be Vietnam Pro", system-ui, sans-serif;
-  --font-mono: "IBM Plex Mono", monospace;
-  
-  /* RADII */
-  --radius-small: 10px; 
-  --radius-card: 22px; 
-  --radius-stage: 42px; 
-  --radius-pill: 999px;
-  
-  /* MOTION */
+  /* landing-only extras — shared tokens live in tokens.css */
+  --radius-stage: 42px;
   --ease-fluid: cubic-bezier(.22,1,.36,1);
 }
 
@@ -746,9 +719,9 @@ a { text-decoration: none; color: inherit; }
 .reader-body { padding: 28px 32px 32px; }
 .reader-line { font-size: 17px; line-height: 2; color: rgba(255,255,255,0.85); margin: 0 0 18px; }
 .tk { border-radius: 5px; padding: 1px 3px; }
-.tk-known { background: rgba(199,244,91,0.16); color: var(--read); }
-.tk-learning { background: rgba(245,184,90,0.16); color: #F5B85A; }
-.tk-new { background: rgba(255,106,94,0.16); color: #FF8B81; }
+.tk-known { color: rgba(255,255,255,0.85); }
+.tk-learning { color: rgba(255,255,255,0.85); border-bottom: 2px solid var(--memory-learning); }
+.tk-new { color: rgba(255,255,255,0.85); border-bottom: 2px solid var(--memory-new); }
 .tk-plain { color: rgba(255,255,255,0.55); }
 .tk-capture { background: rgba(232,255,101,0.22); color: var(--flash); position: relative; cursor: pointer; border-bottom: 2px solid var(--flash); }
 .tk-cursor { display: inline-block; width: 2px; height: 1em; background: var(--flash); vertical-align: -0.15em; margin-left: 2px; animation: cursorBlink 1s step-end infinite; }

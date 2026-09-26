@@ -223,6 +223,17 @@
 
   let readerSourceKey=null;
   let readerCaptures=[];
+  const READER_THEMES=['dark','light','warm'];
+  const READER_SIZES=['normal','large'];
+  function readerPrefs(){
+    try{
+      const raw=JSON.parse(localStorage.getItem('flashday:reader-prefs')||'{}');
+      return {theme:READER_THEMES.includes(raw.theme)?raw.theme:'dark',size:READER_SIZES.includes(raw.size)?raw.size:'normal'};
+    }catch{return {theme:'dark',size:'normal'};}
+  }
+  function saveReaderPrefs(prefs){
+    try{localStorage.setItem('flashday:reader-prefs',JSON.stringify(prefs));}catch{}
+  }
 
   // LingQ-style click-to-mine: an untagged word in the reader is one click
   // away from becoming a tracked unit with its source sentence attached.
@@ -278,9 +289,16 @@
     readerCaptures=(db.captures||[]).filter(c=>IM.sourceKey(c)===key)
       .sort((a,b)=>(Number(a.subtitle?.index)||0)-(Number(b.subtitle?.index)||0)||(Number(a.mediaTimestamp)||0)-(Number(b.mediaTimestamp)||0));
     const summary=IM.assessSource(db,key,readerCaptures);
+    const prefs=readerPrefs();
+    panel.dataset.theme=prefs.theme;
+    panel.dataset.size=prefs.size;
     panel.innerHTML=`<div class="source-reader-head">
         <div><strong>${esc(summary.title)}</strong><span>${summary.segments} câu · ~${summary.minutes} phút · deck phủ ${Math.round(summary.coverage*100)}%</span></div>
-        <button type="button" class="ghost-btn" id="closeSourceReader">Đóng</button>
+        <div class="reader-controls">
+          <button type="button" class="reader-ctl" id="readerSizeToggle" title="Đổi cỡ chữ">A${prefs.size==='large'?'−':'+'}</button>
+          ${READER_THEMES.map(t=>`<button type="button" class="reader-ctl${t===prefs.theme?' active':''}" data-rtheme="${t}">${{dark:'Tối',light:'Sáng',warm:'Ấm'}[t]}</button>`).join('')}
+          <button type="button" class="ghost-btn" id="closeSourceReader">Đóng</button>
+        </div>
       </div>
       <div class="source-reader-body">${readerCaptures.map((c,lineIndex)=>{
         const parts=IM.annotatedParts(db,c.sentence||'');
@@ -293,9 +311,21 @@
         </div>`;
       }).join('')}</div>
       <div id="wordCapturePanel" class="hidden"></div>
-      <p class="footer-note">Tô sáng: <mark class="token-known">đã thuộc</mark> <mark class="token-learning">đang học</mark> <mark class="token-new">trong bộ nhưng chưa ôn</mark> — phần không tô là từ ngoài deck. <b>Bấm từ bất kỳ để lưu thành Unit.</b></p>`;
+      <p class="footer-note">Chữ trơn = đã thuộc hoặc ngoài deck · <mark class="token-learning">đang học</mark> <mark class="token-new">mới vào deck</mark>. <b>Bấm từ bất kỳ để lưu thành Unit.</b></p>`;
     panel.classList.remove('hidden');
     $('closeSourceReader').onclick=()=>{readerSourceKey=null;panel.classList.add('hidden');panel.innerHTML='';};
+    const rerender=()=>{openSource(key);openSource(key);};
+    $('readerSizeToggle').onclick=()=>{
+      const current=readerPrefs();
+      saveReaderPrefs({...current,size:current.size==='large'?'normal':'large'});
+      rerender();
+    };
+    for(const button of panel.querySelectorAll('[data-rtheme]')){
+      button.onclick=()=>{
+        saveReaderPrefs({...readerPrefs(),theme:button.dataset.rtheme});
+        rerender();
+      };
+    }
     for(const button of panel.querySelectorAll('.reader-play')){
       button.onclick=()=>speakSentence(button.dataset.say||'');
     }

@@ -46,4 +46,35 @@ assert.match(productBootstrap, /flashday:had-session/);
 assert.match(productBootstrap, /\/login\/\?session=lost#signin/);
 assert.match(productBootstrap, /\/login\/#signin/);
 
-console.log('FlashDay entrypoint contract: 36 checks passed');
+// Design system contract: one token foundation shared by all three
+// entrypoints. Each stylesheet imports tokens.css; no stylesheet may
+// re-declare its own palette values (that was the pre-audit drift bug).
+const tokens = readFileSync(join(root, 'tokens.css'), 'utf8');
+const landingCss = readFileSync(join(root, 'landing.css'), 'utf8');
+const stylesCss = readFileSync(join(root, 'styles.css'), 'utf8');
+const loginCss = readFileSync(join(root, 'login', 'login.css'), 'utf8');
+assert.match(landingCss, /@import '\.\/tokens\.css'/);
+assert.match(stylesCss, /@import '\.\/tokens\.css'/);
+assert.match(loginCss, /@import '\.\.\/tokens\.css'/);
+// Read mode must not collide with brand lime — the audit caught #C7F45B
+// sitting next to #E8FF65 as two near-identical greens.
+assert.match(tokens, /--teal-400: #59D3A2/);
+assert.match(tokens, /--mode-read: var\(--teal-400\)/);
+assert.match(tokens, /--read: var\(--teal-400\)/);
+assert.doesNotMatch(tokens, /--read: #C7F45B|--mode-read: #C7F45B/);
+// Memory vs feedback semantics stay on separate axes.
+assert.match(tokens, /--memory-new: var\(--blue-400\)/);
+assert.match(tokens, /--feedback-error: var\(--red-500\)/);
+// Known words must not be decorated (LingQ rule) — and "new" is blue, never red.
+assert.match(stylesCss, /mark\.token-known, mark\.token-learning, mark\.token-new \{ background: transparent; color: inherit; \}/);
+assert.match(stylesCss, /mark\.token-new \{ border-bottom: 2px solid var\(--memory-new\)/);
+const markRules = stylesCss.match(/mark\.token-(known|learning|new)\s*\{[^}]*\}/g)?.join('\n') || '';
+assert.doesNotMatch(markRules, /--fd-danger|--fd-positive|--fd-hard/);
+// Reader renders as a themed document surface.
+assert.match(stylesCss, /\.source-reader\[data-theme="light"\]/);
+assert.match(stylesCss, /\.source-reader\[data-theme="warm"\]/);
+const learningHub = readFileSync(join(root, 'learning-hub.js'), 'utf8');
+assert.match(learningHub, /data-rtheme/);
+assert.match(learningHub, /flashday:reader-prefs/);
+
+console.log(`FlashDay entrypoint contract: 51 checks passed`);

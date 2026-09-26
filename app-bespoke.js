@@ -246,15 +246,10 @@
       $('prompt').textContent = card.native_sentence || '—';
       $('audioPrimary').classList.add('hidden');
     }
-    const source = card.source;
-    if (source) {
-      $('sourceChip').classList.remove('hidden');
-      $('sourceChip').textContent = source.label || 'Nguồn';
-      $('sourceChip').setAttribute('aria-expanded', 'false');
-    } else {
-      $('sourceChip').classList.add('hidden');
-      $('sourceChip').setAttribute('aria-expanded', 'false');
-    }
+    // Recall chamber: source metadata is noise during retrieval — the chip
+    // only appears on the answer side (renderBack).
+    $('sourceChip').classList.add('hidden');
+    $('sourceChip').setAttribute('aria-expanded', 'false');
     renderAttemptArea();
     renderCardUnits();
     updateHeader();
@@ -511,6 +506,12 @@
   function renderBack() {
     const card = current.card;
     $('studyCard').classList.add('is-revealed');
+    const source = card.source;
+    if (source) {
+      $('sourceChip').classList.remove('hidden');
+      $('sourceChip').textContent = source.label || 'Nguồn';
+      $('sourceChip').setAttribute('aria-expanded', 'false');
+    }
     $('instruction').textContent = 'Đáp án và tự chấm';
     $('prompt').textContent = card.sentence;
     $('audioPrimary').classList.remove('hidden');
@@ -779,7 +780,15 @@
       const cardCount = A.cardCountForUnit(db, item.id, engine);
       const seenContexts = A.seenContextCount(db, item.id);
       const pill = seenContexts > 0 && cardCount > 1 ? `${cardCount} ngữ cảnh · đã gặp ${seenContexts}` : `${cardCount} ngữ cảnh`;
-      return `<article class="memory-card"><div class="memory-top"><div><div class="memory-title">${esc(item.target)}</div><div class="memory-meaning">${esc(item.meaning)}</div></div><span class="type-pill">${pill}</span></div>${item.canDo ? `<p class="can-do">${esc(item.canDo)}</p>` : ''}<div class="cap-grid" style="margin-top:14px">${statuses.map((status) => `<div class="cap-cell" data-mode="${esc(status.mode)}"><label><span>${esc(status.label)}</span><b>${esc(status.status)}</b></label><small>${status.ratings} ratings</small></div>`).join('')}</div></article>`;
+      const totalRatings = statuses.reduce((sum, status) => sum + status.ratings, 0);
+      const dueNow = statuses.some((status) => status.dueAt != null && status.dueAt <= nowMs);
+      const state = totalRatings === 0 ? 'new' : dueNow ? 'due' : 'learning';
+      const stateLabel = { new: 'Mới', due: 'Đến hạn', learning: 'Đang học' }[state];
+      const nextDue = statuses.map((status) => status.dueAt).filter((dueAt) => dueAt != null).sort((a, b) => a - b)[0];
+      const dueText = nextDue == null ? 'chưa lên lịch'
+        : nextDue <= nowMs ? 'đang đến hạn'
+        : `hạn ${new Date(nextDue).toLocaleDateString('vi-VN', { day: 'numeric', month: 'numeric' })}`;
+      return `<article class="memory-card"><div class="memory-top"><div><div class="memory-title">${esc(item.target)}</div><div class="memory-meaning">${esc(item.meaning)}</div></div><div class="memory-badges"><span class="state-pill state-${state}">${stateLabel}</span><span class="type-pill">${pill}</span></div></div><div class="memory-meta">${dueText} · ${totalRatings} lượt chấm${item.canDo ? ` · ${esc(item.canDo)}` : ''}</div><details class="memory-details"><summary>Chi tiết 4 kỹ năng</summary><div class="cap-grid" style="margin-top:12px">${statuses.map((status) => `<div class="cap-cell" data-mode="${esc(status.mode)}"><label><span>${esc(status.label)}</span><b>${esc(status.status)}</b></label><small>${status.ratings} ratings</small></div>`).join('')}</div></details></article>`;
     }).join('') || '<div class="empty">Chưa có unit.</div>';
   }
 
