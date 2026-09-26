@@ -297,8 +297,24 @@ if (!client) {
   const inRecoveryFlow = () =>
     mode === AUTH_MODE.UPDATE_PASSWORD || mode === AUTH_MODE.RECOVERY;
 
-  const returnedFromAuthHandler = /firebaseapp\.com|accounts\.google\.com/
+  const returnedFromAuthHandler = /firebaseapp\.com|accounts\.google\.com|\/__\/auth\//
     .test(document.referrer || '');
+
+  // The auth handler navigates the popup window back to this page after
+  // delivering the credential to the opener. When that happens the opener
+  // is already routing to /app/ — running the full login flow in the popup
+  // just flashes the form (or worse, /app/) inside a tiny window. Same-origin
+  // now, so window.close() is allowed and the popup disappears immediately.
+  if (window.opener) {
+    showStatus('Đang hoàn tất đăng nhập…', 'info');
+    window.close();
+  } else {
+
+  // Returning from the auth round-trip means a session is being resolved —
+  // show progress instead of a silent form flash.
+  if (returnedFromAuthHandler && !resetCode) {
+    showStatus('Đang hoàn tất đăng nhập Google…', 'info');
+  }
 
   client.auth.getSession().then(({ data, error }) => {
     if (error) {
@@ -358,6 +374,7 @@ if (!client) {
       );
     }
   });
+  }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
