@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {
+  detectStorageBlocking,
   isIgnorableResetError,
   mapAuthError,
   matchRows,
@@ -43,6 +44,56 @@ assert.equal(isIgnorableResetError({ code: 'auth/user-not-found' }), true);
 assert.equal(isIgnorableResetError({ code: 'auth/invalid-email' }), true);
 assert.equal(isIgnorableResetError({ code: 'auth/too-many-requests' }), false);
 assert.equal(isIgnorableResetError({ code: 'auth/network-request-failed' }), false);
+
+// detectStorageBlocking: plain Node exposes neither storage API → blocked.
+const bareStatus = await detectStorageBlocking();
+assert.equal(bareStatus.blocked, true);
+assert.equal(bareStatus.sessionStorage, false);
+assert.equal(bareStatus.indexedDB, false);
+
+// Fully writable storage → not blocked.
+globalThis.sessionStorage = { setItem() {}, removeItem() {} };
+globalThis.indexedDB = {
+  open() {
+    const request = {};
+    queueMicrotask(() => request.onsuccess?.());
+    return request;
+  },
+  deleteDatabase() {}
+};
+assert.deepEqual(await detectStorageBlocking(), {
+  sessionStorage: true,
+  indexedDB: true,
+  blocked: false
+});
+
+// sessionStorage throwing (privacy mode) is flagged while IndexedDB stays ok.
+globalThis.sessionStorage = {
+  setItem() { throw new Error('denied'); },
+  removeItem() {}
+};
+const partial = await detectStorageBlocking();
+assert.equal(partial.sessionStorage, false);
+assert.equal(partial.indexedDB, true);
+assert.equal(partial.blocked, true);
+
+// IndexedDB request erroring (private browsing) is flagged independently.
+globalThis.sessionStorage = { setItem() {}, removeItem() {} };
+globalThis.indexedDB = {
+  open() {
+    const request = {};
+    queueMicrotask(() => request.onerror?.());
+    return request;
+  },
+  deleteDatabase() {}
+};
+const idbBlocked = await detectStorageBlocking();
+assert.equal(idbBlocked.sessionStorage, true);
+assert.equal(idbBlocked.indexedDB, false);
+assert.equal(idbBlocked.blocked, true);
+
+delete globalThis.sessionStorage;
+delete globalThis.indexedDB;
 
 // rowDocId: explicit id wins, owner-keyed rows collapse to owner_id.
 assert.equal(rowDocId({ id: 'a', owner_id: 'u' }), 'a');

@@ -1,4 +1,5 @@
 import { createClient } from '../firebase-client.js';
+import { detectStorageBlocking } from '../cloud-compat.mjs';
 import {
   AUTH_MODE,
   MIN_PASSWORD_LENGTH,
@@ -25,6 +26,8 @@ const actionParams = new URLSearchParams(window.location.search);
 const actionMode = actionParams.get('mode');
 const actionCode = actionParams.get('oobCode');
 const resetCode = actionMode === 'resetPassword' ? actionCode : null;
+// Set by the /app/ route guard when Firebase restores no session there.
+const sessionLost = actionParams.get('session') === 'lost';
 
 let mode = AUTH_MODE.SIGN_IN;
 let signedInUser = null;
@@ -314,6 +317,30 @@ if (!client) {
     // slow Google round-trip signs the learner in but strands them here.
     if (event === 'SIGNED_IN' && signedInUser && !inRecoveryFlow()) {
       window.location.assign(appUrl());
+    }
+  });
+
+  // A blocked IndexedDB means the session dies on every navigation — that is
+  // the login→app→login loop. sessionStorage blocked only breaks the Google
+  // popup/redirect handoff; email+password still works. Real auth errors
+  // already on screen take precedence over this diagnostic.
+  detectStorageBlocking().then((storage) => {
+    if (!$('auth-status').classList.contains('hidden')) return;
+    if (!storage.indexedDB) {
+      showStatus(
+        'Trình duyệt đang chặn bộ nhớ trang web (IndexedDB) nên phiên đăng nhập không lưu được qua mỗi lần chuyển trang. Tắt chế độ ẩn danh/extension chặn tracker hoặc đổi trình duyệt, rồi tải lại.',
+        'error'
+      );
+    } else if (!storage.sessionStorage) {
+      showStatus(
+        'Trình duyệt đang chặn sessionStorage — đăng nhập Google có thể không hoàn tất. Đăng nhập bằng email/mật khẩu vẫn hoạt động.',
+        'error'
+      );
+    } else if (sessionLost) {
+      showStatus(
+        'Phiên đăng nhập không được giữ sau khi chuyển trang. Hãy thử lại — nếu vẫn lặp lại, kiểm tra chế độ ẩn danh hoặc extension chặn tracker.',
+        'error'
+      );
     }
   });
 }

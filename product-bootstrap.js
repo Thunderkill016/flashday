@@ -14,7 +14,12 @@ if (!config?.apiKey || !config?.projectId || !config?.appId) {
   client.auth.onAuthStateChange((event, session) => {
     if (event === 'INITIAL_SESSION') {
       initialSessionResolved = true;
-      if (!session && window.location.pathname.includes('/app/')) window.location.replace('/');
+      // ?session=lost lets /login/ distinguish "never signed in" from "the
+      // session did not persist" (blocked storage, expired token) and show
+      // the right guidance instead of a silent login→app→login loop.
+      if (!session && window.location.pathname.includes('/app/')) {
+        window.location.replace('/login/?session=lost#signin');
+      }
       return;
     }
     if (event === 'SIGNED_OUT' && initialSessionResolved && window.location.pathname.includes('/app/')) {

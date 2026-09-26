@@ -37,6 +37,50 @@ export function mapAuthError(error) {
   return new Error(table[code] || String(error?.message || error || 'Authentication failed'));
 }
 
+// Firebase Auth persists sessions in IndexedDB and hands popup/redirect
+// results through sessionStorage. Privacy modes and tracker-blocking
+// extensions disable either one, which is how sign-in can "succeed" yet the
+// session vanishes on the next page. Probe both so the UI can name the
+// actual blocker instead of looping between /login/ and /app/ forever.
+export async function detectStorageBlocking() {
+  const status = { sessionStorage: true, indexedDB: true };
+  try {
+    const store = globalThis.sessionStorage;
+    if (!store) throw new Error('sessionStorage unavailable');
+    store.setItem('__flashday_probe__', '1');
+    store.removeItem('__flashday_probe__');
+  } catch (_error) {
+    status.sessionStorage = false;
+  }
+  const idb = globalThis.indexedDB;
+  if (!idb) {
+    status.indexedDB = false;
+  } else {
+    try {
+      await new Promise((resolve) => {
+        const request = idb.open('__flashday_probe__');
+        request.onsuccess = () => {
+          request.result?.close();
+          idb.deleteDatabase('__flashday_probe__');
+          resolve();
+        };
+        request.onerror = () => {
+          status.indexedDB = false;
+          resolve();
+        };
+        // Restricted engines can leave the request pending forever; a short
+        // grace period keeps the login UI responsive — the onerror path is
+        // what actually marks IndexedDB as blocked.
+        setTimeout(resolve, 500);
+      });
+    } catch (_error) {
+      status.indexedDB = false;
+    }
+  }
+  status.blocked = !status.sessionStorage || !status.indexedDB;
+  return status;
+}
+
 // Password-reset requests must answer identically whether or not the email
 // exists — otherwise the form becomes an account-enumeration oracle. These
 // codes are swallowed so the UI always shows the neutral "check your inbox".
