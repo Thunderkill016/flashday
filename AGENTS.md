@@ -73,6 +73,21 @@ do not fork another client construction or navigate-to-app path.
 8. **Keep `canonical.js` fast and `no-cache`.** It is the origin policy
    enforcer; it must run before Firebase initialises and its updates must
    not sit in CDN cache.
+9. **HTML entry points must be `no-cache`; hashed assets `immutable`.**
+   Firebase Hosting's default freshness lets browsers pin a cached
+   `index.html` for ~1h — which pins them to the OLD hashed JS chunks,
+   so "the deploy didn't take effect" bugs appear that are really stale
+   HTML. `firebase.json` now sets `Cache-Control: no-cache` on every
+   page pattern (`/`, `/login`, `/login/**`, `/app`, `/app/**`, `/auth`,
+   `/auth/**`, `**/*.html`) and `max-age=31536000, immutable` on
+   `/assets/**`. When a "bug" exists in source but not in production,
+   diff the chunk hash in `performance.getEntriesByType('resource')`
+   against `dist/` before suspecting code.
+10. **`INITIAL_SESSION` is a replay, not a login.** `onAuthStateChange`
+    fires it immediately with the session `getSession()` already
+    returned — hydrating inside the listener doubles every Firestore
+    read per page load. Skip it (`event === 'INITIAL_SESSION'` → return)
+    after hydrating explicitly.
 
 ## Canonical domain policy
 
