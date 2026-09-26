@@ -772,6 +772,13 @@
     const stats = A.deckStats(db, Date.now(), current?.engine || null);
     $('sessionCount').textContent = sessionReviews;
     $('dueCount').textContent = stats.waiting ? `${stats.waiting} đang chờ ôn` : 'Không có thẻ đang chờ';
+    // Due work stays visible from the home tab without owning the home —
+    // immersion is the default surface, review is one glance away.
+    const badge = $('reviewDueBadge');
+    if (badge) {
+      badge.textContent = stats.waiting || 0;
+      badge.classList.toggle('hidden', !stats.waiting);
+    }
     const total = sessionReviews + (stats.waiting || 0);
     const progress = total > 0 ? Math.round((sessionReviews / total) * 100) : 0;
     $('progressBar').style.width = `${progress}%`;

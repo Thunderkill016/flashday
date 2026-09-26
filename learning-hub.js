@@ -237,20 +237,38 @@
     window.speechSynthesis.speak(utterance);
   }
 
-  // "Next for you": imported sources ranked by live comprehensibility — the
-  // hub answers "what should I immerse in next" with knowledge state, not
-  // vibes. Stats update themselves as units move new→learning→known.
+  // The library surface IS the home — LingQ lesson library, LR media catalog.
+  // The last-opened source pins to the top as "Đọc tiếp" (Continue Studying),
+  // the rest rank by live comprehensibility. An empty library shows the
+  // fastest way in: one demo transcript or the import form right below.
+  const LAST_SOURCE_KEY='flashday:last-source';
+  function lastOpenedSource(){
+    try{return localStorage.getItem(LAST_SOURCE_KEY)||'';}catch{return '';}
+  }
   function renderSources(){
     const root=$('sourceRecommendations');if(!root)return;
     if(!IM){root.innerHTML='';return;}
     const db=store.refresh();
     const sources=IM.assessSources(db);
-    if(!sources.length){root.innerHTML='';return;}
-    root.innerHTML=`<div class="source-recs-head"><span class="eyebrow">NEXT FOR YOU</span><strong>Tiếp tục học từ tiếng Anh thật</strong><span>Độ phù hợp đo từ trạng thái ôn tập thật của bạn — phần ngoài deck được giữ nguyên, không giả vờ hiểu.</span></div>`+
-      sources.map(source=>{
+    const importShell=$('importShell');
+    if(importShell)importShell.open=!sources.length;
+    if(!sources.length){
+      root.innerHTML=`<div class="source-recs-empty">
+        <strong>Chưa có nguồn nào.</strong>
+        <p>Dán transcript YouTube vào ô bên dưới — hoặc xem ngay vòng học hoàn chỉnh trên một đoạn hội thoại mẫu có sẵn unit trong deck.</p>
+        <button type="button" class="ghost-btn" id="demoSourceBtn">Thử transcript mẫu →</button>
+      </div>`;
+      $('demoSourceBtn')?.addEventListener('click',importDemoSource);
+      return;
+    }
+    const lastKey=lastOpenedSource();
+    const ordered=[...sources].sort((a,b)=>((b.key===lastKey)-(a.key===lastKey)));
+    root.innerHTML=`<div class="source-recs-head"><span class="eyebrow">NEXT FOR YOU</span><strong>Tiếp tục đọc & khám phá nguồn</strong><span>Độ phù hợp đo từ trạng thái ôn tập thật của bạn — phần ngoài deck được giữ nguyên, không giả vờ hiểu.</span></div>`+
+      ordered.map(source=>{
+        const isContinue=source.key===lastKey;
         const meta=`~${source.minutes} phút · deck phủ ${Math.round(source.coverage*100)}%`+(source.learningUnits.length?` · ${source.learningUnits.length} unit đang học`:'')+(source.unmetLearning?` · ${source.unmetLearning} chưa gặp lại`:'');
-        return `<button type="button" class="source-rec" data-source-key="${esc(source.key)}">
-          <span class="source-rec-top"><b>${esc(source.title)}</b><span class="verdict-pill verdict-${source.verdict.key}">${esc(source.verdict.label)}</span></span>
+        return `<button type="button" class="source-rec${isContinue?' source-rec-continue':''}" data-source-key="${esc(source.key)}">
+          <span class="source-rec-top"><span class="source-rec-name">${isContinue?'<span class="continue-chip">Đọc tiếp</span>':''}<b>${esc(source.title)}</b></span><span class="verdict-pill verdict-${source.verdict.key}">${esc(source.verdict.label)}</span></span>
           <span class="source-rec-meta">${esc(meta)}</span>
           <span class="source-rec-bars"><i class="bar-known" style="width:${source.knownPct}%"></i><i class="bar-learning" style="width:${source.learningPct}%"></i><i class="bar-new" style="width:${source.newPct}%"></i></span>
         </button>`;
@@ -409,6 +427,7 @@
     readerCaptures=(db.captures||[]).filter(c=>IM.sourceKey(c)===key)
       .sort((a,b)=>(Number(a.subtitle?.index)||0)-(Number(b.subtitle?.index)||0)||(Number(a.mediaTimestamp)||0)-(Number(b.mediaTimestamp)||0));
     const summary=IM.assessSource(db,key,readerCaptures);
+    try{localStorage.setItem(LAST_SOURCE_KEY,key);}catch{}
     const prefs=readerPrefs();
     panel.dataset.theme=prefs.theme;
     panel.dataset.size=prefs.size;
@@ -483,6 +502,31 @@
     }
   }
 
+  // One-click starter for an empty library (Refold "beginner content"
+  // pattern): a short dialogue written around the seed deck units so the
+  // reader immediately shows highlights, taps mine real captures, and the
+  // review loop can start without any external transcript.
+  const DEMO_SOURCE_TITLE='Demo — nhắn tin hẹn gặp';
+  const DEMO_LINES=[
+    ['Hey, are you almost here?','Này, cậu gần tới chưa?'],
+    ["Sorry, I'm running late. I'm on my way.",'Xin lỗi, tớ đang bị trễ. Tớ đang trên đường tới.'],
+    ['No problem. Can you pick up an order for me on the way?','Không sao. Cậu lấy giúp tớ một đơn hàng trên đường được không?'],
+    ['Sure — sorry, could you say that again?','Được chứ — xin lỗi, cậu nói lại được không?'],
+    ['Can you pick up an order for me? The shop closes at six.','Cậu lấy giúp tớ một đơn hàng được không? Quán đóng cửa lúc sáu giờ.'],
+    ["Got it. I'll be there in ten minutes.",'Hiểu rồi. Tớ sẽ tới trong mười phút.']
+  ];
+  function importDemoSource(){
+    const segments=DEMO_LINES.map(([text,translation],index)=>({
+      start:index*4,end:index*4+3.2,index,text,translation
+    }));
+    store.transact((db)=>TI.importIntoDb(db,segments,{
+      sourceId:'demo-meetup',sourceKind:'transcript',sourceTitle:DEMO_SOURCE_TITLE,
+      subtitleFileName:'demo-meetup',
+      resolveUnitIds:(sentence)=>L.matchUnitsInText(db.items||[],sentence).map(match=>match.unitId)
+    }));
+    reloadHub({message:'Đã thêm transcript mẫu — đọc thử và bấm từ bất kỳ để lưu thành Unit.',openSource:DEMO_SOURCE_TITLE});
+  }
+
   async function importPersonalTranscript(){
     const file=$('transcriptFileInput')?.files?.[0];
     const pasted=$('importPasteInput')?.value?.trim()||'';
@@ -516,7 +560,10 @@
       });
       const {result,suitability}=transactionResult;
       const message=`${result.total} segments · ${result.added} mới · ${result.ready} có translation · ${result.linkedSegments} segment gặp lại ${result.linkedUnitIds.length} Unit đã có.`;
-      reloadHub({message,suitability});
+      // Post-import transition: land in the reader on the new source (LingQ
+      // "View lesson"), never back at a form or straight into review.
+      const newSourceKey=IM?IM.sourceKey({sourceTitle,subtitleFileName:file?.name||'dán transcript',file:{name:$('importMediaNameInput')?.value.trim()||file?.name||''},url:$('importUrlInput')?.value.trim()||''}):null;
+      reloadHub({message:`${message} Đã thêm — bắt đầu đọc và bấm từ bất kỳ để lưu Unit.`,suitability,openSource:newSourceKey||sourceTitle});
     }catch(error){
       showInlineMessage(`Import lỗi: ${error.message}`,true);
       if(button)button.disabled=false;
@@ -530,8 +577,22 @@
     sessionStorage.removeItem('flashday-learning-hub-return');
     window.setTimeout(()=>{
       document.querySelector('[data-view="capture"]')?.click();
-      if(payload.message)showInlineMessage(payload.message,false);
-      if(payload.suitability)renderSuitability(payload.suitability);
+      // Success message lands where the learner now is — the reader — not
+      // inside the import form, which auto-collapses once the library fills.
+      if(payload.openSource){
+        openSource(payload.openSource);
+        if(payload.message){
+          const reader=$('sourceReader');
+          const notice=document.createElement('p');
+          notice.className='reader-notice';
+          notice.textContent=payload.message;
+          reader?.querySelector('.source-reader-body')?.prepend(notice);
+        }
+        $('sourceReader')?.scrollIntoView({block:'start',behavior:'smooth'});
+      }else{
+        if(payload.message)showInlineMessage(payload.message,false);
+        if(payload.suitability)renderSuitability(payload.suitability);
+      }
     },0);
   }
 

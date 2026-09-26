@@ -86,4 +86,22 @@ assert.match(canonicalJs, /flashday:theme/);
 assert.match(canonicalJs, /dataset\.theme/);
 assert.match(app, /id="themeBtn"/);
 
-console.log(`FlashDay entrypoint contract: 56 checks passed`);
+// Content-first IA contract (Codex R&D: LingQ Library / LR catalog / Migaku
+// Read-hub all lead with content; SRS review never precedes acquisition).
+// 'Học' is the default tab, the library+import panel sits above Guided Path,
+// and the import affordance is a collapsible shell that auto-opens when the
+// library is empty — never buried again.
+const tabOrder = [...app.matchAll(/data-view="(\w+)"/g)].map((m) => m[1]);
+assert.deepStrictEqual(tabOrder.slice(0, 3), ['capture', 'review', 'memory'], 'Học must be the first/default tab — content before review');
+assert.match(app, /class="tab active"[^>]*data-view="capture"/);
+assert.match(app, /<section id="reviewView" class="view hidden"/);
+assert.match(app, /<section id="captureView" class="view"/);
+assert.match(app, /id="importShell"/);
+assert(app.indexOf('id="sourceRecommendations"') < app.indexOf('id="guidedModules"'), 'content surface must precede guided path');
+const hubSrc = learningHub;
+assert.match(hubSrc, /flashday:last-source/, 'last-opened source must pin as Đọc tiếp');
+assert.match(hubSrc, /openSource:\s*newSourceKey|openSource:DEMO_SOURCE_TITLE|payload\.openSource/, 'post-import must land in the reader');
+assert.match(hubSrc, /importDemoSource/, 'empty library must offer a one-click demo source');
+assert.match(hubSrc, /kinds\.add\(kind\)/);
+
+console.log(`FlashDay entrypoint contract: ${56 + 10} checks passed`);

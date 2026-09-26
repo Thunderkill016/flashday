@@ -27,12 +27,12 @@
       </header>
 
       <nav class="tabs" aria-label="Khu vực FlashDay" role="tablist">
-        <button class="tab active" type="button" role="tab" aria-selected="true" aria-controls="reviewView" data-view="review">Ôn</button>
-        <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="captureView" data-view="capture">Học</button>
+        <button class="tab active" type="button" role="tab" aria-selected="true" aria-controls="captureView" data-view="capture">Học</button>
+        <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="reviewView" data-view="review">Ôn<span id="reviewDueBadge" class="tab-badge hidden">0</span></button>
         <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="memoryView" data-view="memory">Bộ nhớ</button>
       </nav>
 
-      <section id="reviewView" class="view" role="tabpanel">
+      <section id="reviewView" class="view hidden" role="tabpanel">
         <div class="progress" id="progressTrack" role="progressbar" aria-label="Tiến độ lượt ôn" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="progressBar"></div></div>
         <div class="review-status">
           <span class="status-left"><strong id="sessionCount">0</strong> lượt ôn hôm nay</span>
@@ -55,8 +55,38 @@
         <div id="memoryList" class="memory-list"></div>
       </section>
 
-      <section id="captureView" class="view hidden" role="tabpanel">
-        <div class="page-title"><h2>Học</h2><p>Hai cửa vào nội dung, một bộ nhớ chung: đi theo lộ trình hoặc học từ nguồn bạn thực sự xem.</p></div>
+      <section id="captureView" class="view" role="tabpanel">
+        <div class="page-title"><h2>Học từ nội dung thật</h2><p>Nguồn vào trước: đọc và chạm từ để lưu Unit — thẻ ôn chỉ xuất hiện sau khi bạn đã gặp chúng trong ngữ cảnh.</p></div>
+
+        <section class="learning-panel" aria-labelledby="personalTitle">
+          <div class="learning-panel-head">
+            <div><span class="eyebrow">IMMERSION · MY CONTENT</span><h3 id="personalTitle">Nội dung của bạn</h3><p>Transcript YouTube (Show transcript → copy → dán), file JSON/SRT, hoặc text bất kỳ. URL được giữ làm provenance; FlashDay không giả vờ tự lấy transcript.</p></div>
+          </div>
+
+          <div id="sourceRecommendations" class="source-recs" aria-live="polite"></div>
+          <div id="sourceReader" class="source-reader hidden"></div>
+
+          <details id="importShell" class="import-shell">
+            <summary><span class="import-shell-plus">＋</span> Thêm nội dung mới <span class="import-shell-hint">dán transcript · file · URL</span></summary>
+            <div class="capture-form import-form">
+              <div class="field"><label for="importPasteInput">Dán transcript / text</label><textarea id="importPasteInput" rows="4" placeholder="Mở video → Show transcript → copy → dán vào đây. Hỗ trợ cả dạng có timestamp (0:05) lẫn text thường."></textarea><small class="field-note">Nhanh nhất: dán thẳng, không cần file. Timestamp YouTube tự được nhận diện.</small></div>
+              <div class="field file-field"><label for="transcriptFileInput">…hoặc file transcript JSON / SRT</label><input id="transcriptFileInput" type="file" accept=".json,.srt,application/json,text/plain"></div>
+              <div class="field"><label for="importSourceTitle">Tên video / nguồn</label><input id="importSourceTitle" placeholder="Ví dụ: MKBHD — phone review"></div>
+              <div class="field"><label for="importUrlInput">YouTube URL</label><input id="importUrlInput" type="url" placeholder="https://youtube.com/watch?v=..."></div>
+              <div class="field"><label for="importSourceLevel">Level ước lượng của nguồn</label><select id="importSourceLevel"><option value="">Chưa biết</option><option>A1</option><option>A2</option><option>B1</option><option>B2</option><option>C1</option><option>C2</option></select><small class="field-note">Metadata đầu vào để Bridge lọc độ khó; chưa có auto CEFR classifier.</small></div>
+              <details class="capture-details">
+                <summary>Media nâng cao <span>(tùy chọn)</span></summary>
+                <div class="capture-details-body">
+                  <div class="field"><label for="importMediaNameInput">Tên media</label><input id="importMediaNameInput" placeholder="video.mp4"></div>
+                  <div class="field"><label for="importAudioBaseInput">Thư mục audio đã cắt</label><input id="importAudioBaseInput" placeholder="media"></div>
+                </div>
+              </details>
+              <button id="importTranscriptBtn" class="primary-btn" type="button">Phân tích & mở để đọc</button>
+              <div id="sourceSuitability" class="suitability hidden" aria-live="polite"></div>
+              <p id="importSummary" class="footer-note" aria-live="polite"></p>
+            </div>
+          </details>
+        </section>
 
         <section class="learning-panel" aria-labelledby="guidedTitle">
           <div class="learning-panel-head">
@@ -77,31 +107,6 @@
 
           <div id="guidedModules" class="guided-modules" aria-live="polite"></div>
           <section id="transferMissions" class="transfer-missions" aria-live="polite"></section>
-        </section>
-
-        <section class="learning-panel" aria-labelledby="personalTitle">
-          <div class="learning-panel-head">
-            <div><span class="eyebrow">MY CONTENT · V1</span><h3 id="personalTitle">Học từ YouTube bạn chọn</h3><p>V1 dùng transcript JSON/SRT mà bạn cung cấp. URL chỉ được giữ làm provenance; FlashDay chưa giả vờ tự lấy transcript từ YouTube.</p></div>
-          </div>
-          <div class="capture-form import-form">
-            <div class="field"><label for="importSourceTitle">Tên video / nguồn</label><input id="importSourceTitle" placeholder="Ví dụ: MKBHD — phone review"></div>
-            <div class="field"><label for="importUrlInput">YouTube URL</label><input id="importUrlInput" type="url" placeholder="https://youtube.com/watch?v=..."></div>
-            <div class="field"><label for="importSourceLevel">Level ước lượng của nguồn</label><select id="importSourceLevel"><option value="">Chưa biết</option><option>A1</option><option>A2</option><option>B1</option><option>B2</option><option>C1</option><option>C2</option></select><small class="field-note">Đây là metadata đầu vào để Bridge lọc độ khó; chưa có auto CEFR classifier.</small></div>
-            <div class="field file-field"><label for="transcriptFileInput">Transcript JSON / SRT</label><input id="transcriptFileInput" type="file" accept=".json,.srt,application/json,text/plain"></div>
-            <div class="field"><label for="importPasteInput">…hoặc dán transcript thẳng</label><textarea id="importPasteInput" rows="4" placeholder="Mở video → Show transcript → copy → dán vào đây. Hỗ trợ cả dạng có timestamp (0:05) lẫn text thường."></textarea><small class="field-note">Dán text không cần file. Timestamp YouTube tự được nhận diện.</small></div>
-            <details class="capture-details">
-              <summary>Media nâng cao <span>(tùy chọn)</span></summary>
-              <div class="capture-details-body">
-                <div class="field"><label for="importMediaNameInput">Tên media</label><input id="importMediaNameInput" placeholder="video.mp4"></div>
-                <div class="field"><label for="importAudioBaseInput">Thư mục audio đã cắt</label><input id="importAudioBaseInput" placeholder="media"></div>
-              </div>
-            </details>
-            <button id="importTranscriptBtn" class="primary-btn" type="button">Phân tích & thêm nguồn</button>
-            <div id="sourceSuitability" class="suitability hidden" aria-live="polite"></div>
-            <p id="importSummary" class="footer-note" aria-live="polite"></p>
-          </div>
-          <div id="sourceRecommendations" class="source-recs" aria-live="polite"></div>
-          <div id="sourceReader" class="source-reader hidden"></div>
         </section>
 
         <details class="manual-unit-shell">
