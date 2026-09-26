@@ -218,18 +218,30 @@ export function createClient(config) {
           code === 'auth/popup-blocked' ||
           code === 'auth/operation-not-supported-in-this-environment'
         ) {
-          // If the round-trip survives, the marker lets /login/ skip the form
-          // flash; if storage is blocked it just never appears — no harm.
-          try {
-            sessionStorage.setItem(OAUTH_PENDING_KEY, '1');
-          } catch (_e) {
-            /* storage-blocked browsers lose the marker, same as the state */
-          }
-          await signInWithRedirect(auth, googleProvider);
-          // The page is already navigating away; flag it so the UI can show
-          // a handoff message in the remaining moments.
-          return ok({ redirecting: true });
+          // signInWithRedirect always returns to the page that initiated it —
+          // so the login page must NOT start it, or the learner gets bounced
+          // back to the form. Hand off to /auth/, which initiates from there.
+          return ok({ needsRedirect: true });
         }
+        return fail(error);
+      }
+    },
+
+    // Starts the Google redirect flow. MUST only be called from /auth/ —
+    // Firebase returns to whatever page initiated the redirect, and the
+    // transition page is the one designed to receive the credential.
+    startOAuthRedirect: async (provider) => {
+      if (provider !== 'google')
+        return fail(new Error('Provider is not enabled'));
+      try {
+        try {
+          sessionStorage.setItem(OAUTH_PENDING_KEY, '1');
+        } catch (_e) {
+          /* storage-blocked browsers lose the marker, same as the state */
+        }
+        await signInWithRedirect(auth, new GoogleAuthProvider());
+        return ok({ redirecting: true });
+      } catch (error) {
         return fail(error);
       }
     },
@@ -542,7 +554,12 @@ export function createClient(config) {
         if (this._op === 'delete') return await this._delete();
         return await this._select();
       } catch (error) {
-        return fail(mapAuthError(error));
+        // Tag the failure with the table+op so "Missing or insufficient
+        // permissions" says WHICH write the rules rejected.
+        const mapped = mapAuthError(error);
+        if (mapped?.message)
+          mapped.message = `[${this._table}:${this._op}] ${mapped.message}`;
+        return fail(mapped);
       }
     }
 

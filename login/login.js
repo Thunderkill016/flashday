@@ -267,11 +267,14 @@ async function submitGoogle() {
     openAuthenticatedApp(data.session);
     return;
   }
-  if (data?.redirecting) {
+  if (data?.needsRedirect) {
+    // The redirect must start on /auth/ so Google returns there — never back
+    // to this form. /auth/ is a branded transition page that forwards to /app/.
     showStatus(
       'Popup bị chặn — đang chuyển tới trang đăng nhập Google…',
       'info'
     );
+    window.location.assign('/auth/?flow=redirect');
     return;
   }
   if (data?.cancelled) {

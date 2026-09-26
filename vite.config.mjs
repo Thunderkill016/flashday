@@ -12,9 +12,10 @@ export default defineConfig(({ mode }) => {
         input: {
           landing: landingEntry,
           app: resolve(import.meta.dirname, 'app/index.html'),
-          login: resolve(import.meta.dirname, 'login/index.html')
-        }
-      }
+          login: resolve(import.meta.dirname, 'login/index.html'),
+          auth: resolve(import.meta.dirname, 'auth/index.html'),
+        },
+      },
     },
     define: {
       __FLASHDAY_FIREBASE_CONFIG__: JSON.stringify({
@@ -23,8 +24,8 @@ export default defineConfig(({ mode }) => {
         projectId: env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || '',
         appId: env.NEXT_PUBLIC_FIREBASE_APP_ID || '',
         messagingSenderId: env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || '',
-        storageBucket: env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || ''
-      })
-    }
+        storageBucket: env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || '',
+      }),
+    },
   };
 });
