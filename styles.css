@@ -430,6 +430,14 @@ svg { display: block; }
   flex: 1;
 }
 
+/* Capture & Memory views need their own measure — full-bleed on desktop
+   makes forms and list rows sprawl. ~880px keeps line lengths sane and
+   leaves the reader room for its 62ch column. */
+#captureView, #memoryView {
+  width: min(100% - 32px, 880px);
+  margin-inline: auto;
+}
+
 /* Progress Bar at the absolute top */
 .progress {
   height: 4px;
