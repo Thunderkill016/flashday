@@ -33,9 +33,17 @@
   let syncChain = Promise.resolve();
   let isHydrating = false;
   let cardTelemetry = blankCardTelemetry();
+  let errorLoop = blankErrorLoop();
 
   function blankAttempt() {
     return { text: '', spoke: false, recordedLocally: false };
+  }
+
+  // Speak-style retry loop state: the FIRST wrong attempt is kept so the
+  // review event can tell "needed a correction pass" from "clean recall".
+  const MAX_RETRIES = 2;
+  function blankErrorLoop() {
+    return { retryCount: 0, firstAttempt: '', firstStage: '', lastClassification: null, inRetry: false };
   }
 
   // Per-card learning telemetry. Written into the review event at finalize so
@@ -92,6 +100,22 @@
 
   function itemById(id) {
     return (db.items || []).find((item) => item.id === id);
+  }
+
+  // Forms a tagged unit may legitimately appear as in an attempt: the exact
+  // card occurance, the canonical target, and curated variants. Any of them
+  // counts as "target produced" for the error classifier.
+  function attemptUnits(card) {
+    return A.cardParts(card)
+      .filter((part) => part.unit_id)
+      .map((part) => {
+        const item = itemById(part.unit_id);
+        return {
+          unitId: part.unit_id,
+          label: part.occurance,
+          forms: [part.occurance, item?.target, ...(item?.forms || []), ...(item?.accepted || [])].filter(Boolean)
+        };
+      });
   }
 
   function scoreGlyph(score) {
@@ -154,6 +178,7 @@
       current = A.selectNext(db, Date.now());
       ratings = A.initialRatings(current.card);
       attempt = blankAttempt();
+      errorLoop = blankErrorLoop();
       cardTelemetry = blankCardTelemetry();
       cardTelemetry.presentedAt = Date.now();
       isBack = false;
@@ -202,7 +227,9 @@
     $('trackBadge').className = 'badge';
     $('feedback').classList.add('hidden');
     $('sourcePanel').classList.add('hidden');
-    $('instruction').textContent = meta.front;
+    $('instruction').textContent = errorLoop.inRetry
+      ? `Lần thử ${errorLoop.retryCount + 1} — sửa lại rồi xem đáp án.`
+      : meta.front;
     if (current.mode === B.Mode.LISTEN) {
       $('prompt').textContent = '';
       $('audioPrimary').classList.remove('hidden');
@@ -361,6 +388,50 @@
     return attempt.text.trim() ? `Câu trả lời của bạn: “${esc(attempt.text.trim())}”` : 'Bạn chưa ghi câu trả lời; hãy dùng nút nghe lại hoặc thử trả lời ở card tiếp theo.';
   }
 
+  // Error loop for production modes: diff the typed attempt against the
+  // answer, show ONE correction, and offer a retry before self-grading.
+  // The card only moves on when the learner retries or consciously skips.
+  function errorCorrectionHtml(cls, units) {
+    const hint = P.primaryErrorHint(cls, units);
+    const attemptView = cls.ops.map((op) => {
+      if (op.type === 'same') return `<span>${esc(op.actual)}</span>`;
+      if (op.type === 'extra') return `<span class="diff-extra">${esc(op.actual)}</span>`;
+      if (op.type === 'sub') return `<span class="diff-sub">${esc(op.actual)}</span>`;
+      return '';
+    }).filter(Boolean).join(' ');
+    const answerView = cls.ops.map((op) => {
+      if (op.type === 'same') return `<span>${esc(op.expected)}</span>`;
+      if (op.type === 'missing') return `<span class="diff-missing">${esc(op.expected)}</span>`;
+      if (op.type === 'sub') return `<span class="diff-sub">${esc(op.expected)}</span>`;
+      return '';
+    }).filter(Boolean).join(' ');
+    return `<div class="error-panel">
+      <p class="error-hint">${esc(hint || 'Câu trả lời còn khác đáp án.')}</p>
+      <div class="diff-line"><span class="diff-label">Bạn viết</span><span class="diff-text">${attemptView || '<i>(trống)</i>'}</span></div>
+      <div class="diff-line"><span class="diff-label">Đáp án</span><span class="diff-text">${answerView}</span></div>
+      <div class="secondary-actions error-actions">
+        <button id="retryAttempt" class="primary-btn" type="button">Viết lại lần nữa</button>
+        <button id="skipRetry" class="ghost-btn" type="button">Tiếp tục tự chấm</button>
+      </div>
+    </div>`;
+  }
+
+  function startRetry() {
+    if (!current) return;
+    if (!errorLoop.firstAttempt) {
+      errorLoop.firstAttempt = attempt.text || (attempt.spoke ? '(đã nói)' : '');
+      errorLoop.firstStage = errorLoop.lastClassification?.stage || 'self-check';
+    }
+    errorLoop.retryCount += 1;
+    errorLoop.inRetry = true;
+    attempt = blankAttempt();
+    ratings = A.initialRatings(current.card);
+    isBack = false;
+    $('studyCard').classList.remove('is-revealed');
+    renderFront();
+    toast(`Lần thử ${errorLoop.retryCount + 1}/${MAX_RETRIES + 1} — sửa lại theo gợi ý vừa rồi.`);
+  }
+
   function renderBack() {
     const card = current.card;
     $('studyCard').classList.add('is-revealed');
@@ -368,7 +439,21 @@
     $('prompt').textContent = card.sentence;
     $('audioPrimary').classList.remove('hidden');
     $('feedback').className = 'feedback';
-    $('feedback').innerHTML = `<p class="attempt-recap">${responseSummary()}</p><div class="answer-key">${card.native_sentence ? esc(card.native_sentence) : '<span class="muted-copy">Card chưa có bản dịch.</span>'}</div>${card.phonetic ? `<p>${esc(card.phonetic)}</p>` : ''}`;
+    let correctionHtml = '';
+    if (current.mode === B.Mode.WRITE && attempt.text.trim()) {
+      const units = attemptUnits(card);
+      const cls = P.classifyAttempt(card.sentence, attempt.text, units);
+      errorLoop.lastClassification = cls;
+      errorLoop.inRetry = false;
+      if (cls.stage !== 'exact' && errorLoop.retryCount < MAX_RETRIES) {
+        correctionHtml = errorCorrectionHtml(cls, units);
+      }
+    }
+    $('feedback').innerHTML = `${correctionHtml}<p class="attempt-recap">${responseSummary()}</p><div class="answer-key">${card.native_sentence ? esc(card.native_sentence) : '<span class="muted-copy">Card chưa có bản dịch.</span>'}</div>${card.phonetic ? `<p>${esc(card.phonetic)}</p>` : ''}`;
+    $('retryAttempt')?.addEventListener('click', startRetry);
+    $('skipRetry')?.addEventListener('click', () => {
+      $('feedback').querySelector('.error-panel')?.remove();
+    });
     renderRatingArea();
     renderCardUnits();
     renderDebug();
@@ -388,7 +473,12 @@
     const ratingStatus = ratingsComplete
       ? 'Đã chấm tất cả Unit. Bạn có thể lưu lần ôn.'
       : 'Chấm từng Unit trước khi lưu lần ôn.';
-    $('answerArea').innerHTML = `<div class="rating-intro">Chấm từng phần cần học dựa trên lần thử vừa rồi. “Nhớ” là trạng thái lịch ôn, không phải đánh giá thành thạo.</div><p class="rating-status" aria-live="polite">${ratingStatus}</p><div class="word-bank" id="ratingParts">${partsHtml}</div><div id="selectedDefinition" class="selected-definition hidden"></div><div class="secondary-actions"><button id="allSuccessBtn" type="button">Tất cả nhớ</button><label class="report-label"><input id="reportError" type="checkbox"> Card lỗi</label></div><button id="nextCardBtn" class="primary-btn" type="button" ${ratingsComplete ? '' : 'disabled'}>Lưu lần ôn</button>`;
+    const missed = parts.filter((part) => part.unit_id && (ratings[part.unit_id] ?? 0) === 1);
+    const speakRetry = current.mode === B.Mode.SPEAK && missed.length && errorLoop.retryCount < MAX_RETRIES
+      ? `<button id="speakRetry" class="ghost-btn" type="button">Nói lại lần nữa (${errorLoop.retryCount + 1}/${MAX_RETRIES + 1})</button>`
+      : '';
+    $('answerArea').innerHTML = `<div class="rating-intro">Chấm từng phần cần học dựa trên lần thử vừa rồi. “Nhớ” là trạng thái lịch ôn, không phải đánh giá thành thạo.</div><p class="rating-status" aria-live="polite">${ratingStatus}</p><div class="word-bank" id="ratingParts">${partsHtml}</div><div id="selectedDefinition" class="selected-definition hidden"></div><div class="secondary-actions"><button id="allSuccessBtn" type="button">Tất cả nhớ</button>${speakRetry}<label class="report-label"><input id="reportError" type="checkbox"> Card lỗi</label></div><button id="nextCardBtn" class="primary-btn" type="button" ${ratingsComplete ? '' : 'disabled'}>Lưu lần ôn</button>`;
+    $('speakRetry')?.addEventListener('click', startRetry);
     $('ratingParts').querySelectorAll('[data-unit]').forEach((button) => {
       button.onclick = () => {
         const id = button.dataset.unit;
@@ -418,6 +508,42 @@
     }
   }
 
+  // Build the error record for this review. Write mode uses the real word
+  // diff; speak/listen/read fall back to which units the learner self-marked
+  // as missed — we never pretend to score pronunciation we did not hear.
+  function buildErrorRecord() {
+    if (!current) return null;
+    const card = current.card;
+    const missedUnits = A.cardParts(card)
+      .filter((part) => part.unit_id && (ratings[part.unit_id] ?? 0) === 1)
+      .map((part) => part.unit_id);
+    if (current.mode === B.Mode.WRITE) {
+      const cls = errorLoop.lastClassification
+        || P.classifyAttempt(card.sentence, attempt.text, attemptUnits(card));
+      const hadError = errorLoop.retryCount > 0 || cls.stage === 'miss' || missedUnits.length;
+      if (!hadError) return null;
+      return {
+        stage: cls.stage,
+        types: cls.errorTypes,
+        missedUnits: [...new Set([...cls.missingUnits, ...missedUnits])],
+        firstAttempt: errorLoop.firstAttempt || attempt.text,
+        finalAttempt: attempt.text,
+        corrected: cls.corrected,
+        retryCount: errorLoop.retryCount
+      };
+    }
+    if (!missedUnits.length && !errorLoop.retryCount) return null;
+    return {
+      stage: 'self-check',
+      types: ['self-check'],
+      missedUnits,
+      firstAttempt: '',
+      finalAttempt: '',
+      corrected: !missedUnits.length && errorLoop.retryCount > 0,
+      retryCount: errorLoop.retryCount
+    };
+  }
+
   function finalizeCard() {
     if (!current) return;
     if (!A.hasCompleteRatings(current.card, ratings)) {
@@ -428,11 +554,13 @@
       return;
     }
     stopAudio();
+    const error = buildErrorRecord();
     const result = A.finalizeCard(db, current, ratings, {
       isReported,
       response: P.responseForMode(current.mode, attempt),
       stimulus: { audioKind: current.mode === B.Mode.LISTEN ? stimulusAudioKind : 'none' },
       telemetry: cardTelemetry,
+      error,
       nowMs: Date.now()
     });
     save();
@@ -531,11 +659,37 @@
     $('progressTrack').setAttribute('aria-valuenow', String(progress));
   }
 
+  const ERROR_LABELS = {
+    'missing-target': 'thiếu cụm cần học',
+    'word-form': 'sai/thiếu từ',
+    'missing-words': 'bỏ sót từ',
+    'extra-words': 'thừa từ',
+    'word-order': 'lộn thứ tự',
+    'self-check': 'nói chưa được'
+  };
+
+  // Duolingo-Mistakes-style surface: units whose production attempts keep
+  // failing, derived from the review event log — a repair queue, not a grade.
+  function errorMemoryHtml(nowMs) {
+    const stats = A.errorStats(db);
+    const recent = Object.entries(stats.byUnit)
+      .filter(([, bucket]) => bucket.count > 0)
+      .sort((a, b) => b[1].lastAt - a[1].lastAt)
+      .slice(0, 5);
+    if (!recent.length) return '';
+    const rows = recent.map(([unitId, bucket]) => {
+      const item = itemById(unitId);
+      const fixed = bucket.correctedCount ? ` · đã sửa ${bucket.correctedCount}×` : '';
+      return `<li><b>${esc(item?.target || unitId)}</b><span class="muted-copy"> — ${bucket.count} lần lỗi${fixed}</span></li>`;
+    }).join('');
+    return `<div class="error-memory"><b>Lỗi cần sửa</b><ul>${rows}</ul></div>`;
+  }
+
   function renderMemory() {
     const list = $('memoryList');
     const engine = A.buildEngine(db);
     const nowMs = Date.now();
-    list.innerHTML = (db.items || []).map((item) => {
+    list.innerHTML = errorMemoryHtml(nowMs) + (db.items || []).map((item) => {
       const statuses = A.itemStatus(db, item.id, nowMs, engine);
       const cardCount = A.cardCountForUnit(db, item.id, engine);
       const seenContexts = A.seenContextCount(db, item.id);

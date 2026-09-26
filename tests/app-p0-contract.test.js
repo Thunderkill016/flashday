@@ -62,5 +62,8 @@ assert(firestoreRules.includes("'rotation'"), 'rules allowlist must accept the r
 // order drifts (e.g. speak before read), fresh units would demand production
 // before recognition — a silent pedagogy regression.
 assert(adapter.includes("MODE_LADDER=['read','listen','write','speak']"), 'mode ladder must order recognition before production');
+assert(firestoreRules.includes("'error'"), 'rules allowlist must accept the error record');
+assert(cloud.includes('error: optMap(event.error)'), 'cloud mapping must persist the error record');
+assert(cloud.includes('error: optMap(row.error)'), 'cloud mapping must restore the error record');
 
-console.log('FlashDay app P0 contract: 27 checks passed');
+console.log('FlashDay app P0 contract: 30 checks passed');

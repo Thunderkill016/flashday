@@ -95,6 +95,7 @@
       language_policy: optStr(event.languagePolicy),
       fsrs_grades: optMap(event.fsrsGrades),
       telemetry: optMap(event.telemetry),
+      error: optMap(event.error),
       memory: optMap(event.memory),
       is_reported: Boolean(event.isReported),
       answered_at: new Date(Number(event.answeredAt) || Date.now()).toISOString()
@@ -120,6 +121,7 @@
       languagePolicy: optStr(row.language_policy),
       fsrsGrades: optMap(row.fsrs_grades),
       telemetry: optMap(row.telemetry),
+      error: optMap(row.error),
       memory: optMap(row.memory),
       isReported: Boolean(row.is_reported),
       answeredAt: Date.parse(row.answered_at) || Date.now()

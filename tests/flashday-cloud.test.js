@@ -25,6 +25,7 @@ const C = require('../flashday-cloud.js');
     scheduler: 'bespoke-language-policy+fsrs6', memoryScheduler: 'ts', languagePolicy: 'bespoke',
     fsrsGrades: { 'unit-1': 3 },
     telemetry: { presentedAt: 500, firstAttemptAt: 700, revealedAt: 900, recallLatencyMs: 400, sourceViewedPreReveal: false, audioPlays: 2 },
+    error: { stage: 'miss', types: ['missing-target', 'word-form'], missedUnits: ['unit-1'], firstAttempt: 'I am my way', finalAttempt: 'I am on my way', corrected: true, retryCount: 1 },
     memory: { 'unit-1': { grade: 3, before: null, after: { stability: 2.5, difficulty: 5.1, scheduled_days: 2 } } }
   }, 'deck-1'));
   assert.strictEqual(event.mode, 'listen');
@@ -40,6 +41,11 @@ const C = require('../flashday-cloud.js');
   assert.strictEqual(event.telemetry.recallLatencyMs, 400, 'cloud sync must not drop recall latency');
   assert.strictEqual(event.telemetry.audioPlays, 2);
   assert.strictEqual(event.memory['unit-1'].after.stability, 2.5, 'cloud sync must preserve FSRS memory snapshots');
+  assert.strictEqual(event.error.stage, 'miss', 'error record must survive cloud round-trip');
+  assert.deepStrictEqual(event.error.types, ['missing-target', 'word-form']);
+  assert.deepStrictEqual(event.error.missedUnits, ['unit-1']);
+  assert.strictEqual(event.error.corrected, true);
+  assert.strictEqual(event.error.retryCount, 1);
 }
 
 {

@@ -735,3 +735,22 @@ mark.token-known { background: transparent; color: inherit; border-bottom: 2px s
 mark.token-learning { background: var(--fd-warning-soft); color: inherit; border-bottom: 2px solid var(--fd-hard); border-radius: 2px; padding: 0 1px; }
 mark.token-new { background: rgba(255,120,109,0.12); color: inherit; border-bottom: 2px dashed var(--fd-danger); border-radius: 2px; padding: 0 1px; }
 .source-reader .footer-note { padding: 10px 16px; border-top: 1px solid var(--fd-border); margin: 0; }
+
+/* ── Output error loop ─────────────────────────────────────────────── */
+/* Write-mode diff + retry: surface ONE correction, then let the learner
+   fix it — the Speak correction pattern without an AI tutor. */
+.error-panel { margin: 0 0 14px; padding: 12px 14px; border: 1px solid var(--fd-hard); border-radius: var(--fd-radius-md); background: var(--fd-warning-soft); }
+.error-hint { margin: 0 0 10px; font-size: 14px; font-weight: 600; }
+.diff-line { display: flex; gap: 8px; align-items: baseline; font-size: 14px; line-height: 1.6; }
+.diff-label { flex-shrink: 0; width: 62px; color: var(--fd-text-tertiary); font-size: 12px; }
+.diff-text { flex: 1; }
+.diff-sub { color: var(--fd-hard); border-bottom: 2px solid var(--fd-hard); font-weight: 600; }
+.diff-missing { color: var(--fd-danger); border-bottom: 2px dashed var(--fd-danger); font-weight: 600; }
+.diff-extra { color: var(--fd-text-tertiary); text-decoration: line-through; }
+.error-actions { margin-top: 10px; }
+
+/* Recurring-error memory (derived from review events). */
+.error-memory { margin: 0 0 14px; padding: 12px 14px; border: 1px solid var(--fd-border); border-radius: var(--fd-radius-md); background: var(--fd-surface-2); }
+.error-memory b { display: block; font-size: 13px; margin-bottom: 6px; }
+.error-memory ul { margin: 0; padding-left: 18px; font-size: 13px; }
+.error-memory li { margin: 2px 0; }

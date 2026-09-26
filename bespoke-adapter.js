@@ -299,7 +299,50 @@
     };
   }
 
-  function finalizeCard(db,selection,ratings,{isReported=false,response={},stimulus={},telemetry={},nowMs=Date.now()}={}){
+  // Output-error record for the append-only log (Speak-style retry loop):
+  // keeps the first failed attempt, the final attempt, and which tagged
+  // units stayed missing — enough for recurring-error memory later.
+  const ERROR_STAGES=new Set(['exact','close','miss','empty','self-check']);
+  const ERROR_TYPE_SET=new Set(['missing-target','word-form','missing-words','extra-words','word-order','self-check']);
+  function normalizeError(raw){
+    if(raw==null)return null;
+    const src=(raw&&typeof raw==='object')?raw:{};
+    const types=(Array.isArray(src.types)?src.types:[]).map((t)=>String(t||'').slice(0,40)).filter((t)=>ERROR_TYPE_SET.has(t)).slice(0,8);
+    const missedUnits=(Array.isArray(src.missedUnits)?src.missedUnits:[]).map((id)=>String(id||'').slice(0,160)).filter(Boolean).slice(0,24);
+    return {
+      stage:ERROR_STAGES.has(src.stage)?src.stage:'',
+      types,
+      missedUnits,
+      firstAttempt:String(src.firstAttempt||'').slice(0,1200),
+      finalAttempt:String(src.finalAttempt||'').slice(0,1200),
+      corrected:Boolean(src.corrected),
+      retryCount:Math.max(0,Math.min(9,Math.round(Number(src.retryCount)||0)))
+    };
+  }
+
+  // Recurring-error memory: which production error types and which units
+  // keep failing — derived from the event log so cloud sync replays it
+  // exactly like FSRS/Bespoke progress caches.
+  function errorStats(db){
+    const byType={};const byUnit={};
+    for(const event of db.events||[]){
+      const error=event?.error;
+      if(!error)continue;
+      const at=Number(event.answeredAt)||0;
+      for(const type of error.types||[]){
+        const bucket=byType[type]||(byType[type]={count:0,lastAt:0});
+        bucket.count++;if(at>bucket.lastAt)bucket.lastAt=at;
+      }
+      for(const unitId of error.missedUnits||[]){
+        const bucket=byUnit[unitId]||(byUnit[unitId]={count:0,lastAt:0,correctedCount:0});
+        bucket.count++;if(at>bucket.lastAt)bucket.lastAt=at;
+        if(error.corrected)bucket.correctedCount++;
+      }
+    }
+    return {byType,byUnit};
+  }
+
+  function finalizeCard(db,selection,ratings,{isReported=false,response={},stimulus={},telemetry={},error=null,nowMs=Date.now()}={}){
     const engine=selection.engine||buildEngine(db);const applied={};
     const unitIds=B.unitIds(selection.card);
     // Snapshot each Unit x Mode FSRS state before the rating lands so the event
@@ -334,6 +377,7 @@
       },
       stimulus:normalizeStimulus(stimulus),
       telemetry:normalizeTelemetry(telemetry,nowMs),
+      error:normalizeError(error),
       memory,
       answeredAt:nowMs,
       scheduler:F?HYBRID_SCHEDULER:'google-bespoke-port',
@@ -392,5 +436,5 @@
     return seen.size;
   }
 
-  return {ACTIVE_MODES,MODE_LADDER,MODE_META,normalizedDifficulty,normalizeStimulus,normalizeTelemetry,buildEngine,saveEngine,rebuildProgressFromEvents,selectNext,initialRatings,cycleRating,allSuccess,hasCompleteRatings,finalizeCard,itemStatus,deckStats,cardParts,cardCountForUnit,datasetCards,taskPairs,chooseHybridTask,chooseIntroductionTask,hybridCardScore,introductionGuardMs,bespokeScore,lastTaskEvent,pickCardForTask,seenContextCount,HYBRID_SCHEDULER,BESPOKE_SOURCE,hasFsrs:Boolean(F)};
+  return {ACTIVE_MODES,MODE_LADDER,MODE_META,normalizedDifficulty,normalizeStimulus,normalizeTelemetry,buildEngine,saveEngine,rebuildProgressFromEvents,selectNext,initialRatings,cycleRating,allSuccess,hasCompleteRatings,finalizeCard,normalizeError,errorStats,itemStatus,deckStats,cardParts,cardCountForUnit,datasetCards,taskPairs,chooseHybridTask,chooseIntroductionTask,hybridCardScore,introductionGuardMs,bespokeScore,lastTaskEvent,pickCardForTask,seenContextCount,HYBRID_SCHEDULER,BESPOKE_SOURCE,hasFsrs:Boolean(F)};
 });
