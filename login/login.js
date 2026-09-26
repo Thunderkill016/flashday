@@ -444,7 +444,18 @@ if (!client) {
   }
 
   if (justSignedOut) {
+    // One-shot confirmation: strip the marker so a reload/screenshot doesn't
+    // repeat it, and let the notice fade — a goodbye doesn't need to squat in
+    // the card forever (errors must persist; acknowledgements may not).
     showStatus('Bạn đã đăng xuất.', 'info');
+    window.history.replaceState(
+      null,
+      '',
+      window.location.pathname + window.location.hash
+    );
+    window.setTimeout(() => {
+      if ($('auth-status').dataset.tone === 'info') clearStatus();
+    }, 6000);
   }
 }
 
