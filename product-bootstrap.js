@@ -1,4 +1,4 @@
-import { createClient } from './firebase-client.js';
+import { createClient } from './firebase-client.mjs';
 
 const config = __FLASHDAY_FIREBASE_CONFIG__;
 
@@ -8,21 +8,29 @@ if (!config?.apiKey || !config?.projectId || !config?.appId) {
   }));
 } else {
   const client = createClient(config);
+  const HAD_SESSION_KEY = 'flashday:had-session';
+  const markSession = (had) => {
+    try { window.localStorage.setItem(HAD_SESSION_KEY, had ? '1' : ''); } catch (_e) {}
+  };
 
   // Wait for Firebase Auth to settle before any route guard can kick in.
   let initialSessionResolved = false;
   client.auth.onAuthStateChange((event, session) => {
     if (event === 'INITIAL_SESSION') {
       initialSessionResolved = true;
-      // ?session=lost lets /login/ distinguish "never signed in" from "the
-      // session did not persist" (blocked storage, expired token) and show
-      // the right guidance instead of a silent login→app→login loop.
+      // ?session=lost tells /login/ the session was expected but vanished
+      // (blocked storage, expired token) — only send it when a session has
+      // existed on this device, otherwise first-time visitors get blamed.
+      if (session) markSession(true);
       if (!session && window.location.pathname.includes('/app/')) {
-        window.location.replace('/login/?session=lost#signin');
+        let hadSession = true; // blocked storage is exactly the case session=lost explains
+        try { hadSession = window.localStorage.getItem(HAD_SESSION_KEY) === '1'; } catch (_e) {}
+        window.location.replace(hadSession ? '/login/?session=lost#signin' : '/login/#signin');
       }
       return;
     }
     if (event === 'SIGNED_OUT' && initialSessionResolved && window.location.pathname.includes('/app/')) {
+      markSession(false);
       window.location.replace('/login/?signedOut=1#signin');
     }
   });

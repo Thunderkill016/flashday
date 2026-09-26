@@ -72,8 +72,12 @@
         L.setSkillLevel(db,skill,$(id)?.value||'',{basis:'self-reported',now});
       }
     });
-    await pushProfile().catch(()=>undefined);
-    reloadHub({message:'Đã lưu profile theo 4 kỹ năng.'});
+    const canSync=!!(supabaseClient&&learner);
+    const synced=canSync?await pushProfile().then(()=>true).catch(()=>false):false;
+    const message=!canSync||synced
+      ?(canSync?'Đã lưu profile theo 4 kỹ năng.':'Đã lưu profile trên thiết bị này.')
+      :'Đã lưu trên thiết bị — chưa đồng bộ được lên tài khoản.';
+    reloadHub({message});
   }
 
   function renderGuidedModules(){
@@ -264,9 +268,14 @@
     learner=data?.session?.user||null;
     window.clearTimeout(profileSyncTimer);
     profileSyncTimer=window.setTimeout(()=>pullProfile().catch(()=>undefined),700);
-    supabaseClient.auth.onAuthStateChange((_event,session)=>{
+    supabaseClient.auth.onAuthStateChange((event,session)=>{
+      // INITIAL_SESSION replays the session getSession() already pulled above.
+      if(event==='INITIAL_SESSION')return;
       learner=session?.user||null;
-      if(learner)window.setTimeout(()=>pullProfile().catch(()=>undefined),700);
+      if(learner){
+        window.clearTimeout(profileSyncTimer);
+        profileSyncTimer=window.setTimeout(()=>pullProfile().catch(()=>undefined),700);
+      }
     });
   }
 

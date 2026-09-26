@@ -5,7 +5,6 @@
   const A = window.FlashDayBespoke;
   const B = window.BespokeSrs;
   const SC = window.FlashDaySourceCapture;
-  const TI = window.FlashDayTranscriptImport;
   const P = window.FlashDayProduct;
   const C = window.FlashDayCloud;
   const KEY = 'flashday-memory-engine-repo-driven';
@@ -170,18 +169,27 @@
   function renderDone(message) {
     stopAudio();
     current = null;
+    const hasContent = (db.items || []).length > 0;
     $('trackBadge').textContent = 'Xong';
     $('trackBadge').className = 'badge neutral';
     $('sourceChip').classList.add('hidden');
     $('sourceChip').setAttribute('aria-expanded', 'false');
-    $('instruction').textContent = 'Không có card hợp lệ để rút.';
-    $('prompt').textContent = message || 'Bespoke engine đang chờ lần review tiếp theo.';
+    if (hasContent) {
+      $('instruction').textContent = 'Chưa đến lượt ôn.';
+      $('prompt').textContent = message || 'Bespoke engine đang chờ lần review tiếp theo.';
+    } else {
+      $('instruction').textContent = 'Chưa có nội dung để học.';
+      $('prompt').textContent = 'Thêm Unit ở tab Bộ nhớ hoặc cài một module gợi ý để bắt đầu.';
+    }
     $('audioPrimary').classList.add('hidden');
-    $('answerArea').innerHTML = '<button class="primary-btn" style="width:100%" id="switchMemory">Xem trạng thái</button>';
+    $('answerArea').innerHTML = hasContent
+      ? '<button class="primary-btn" style="width:100%" id="retryDraw">Kiểm tra lại</button><button class="ghost-btn" style="width:100%" id="switchMemory">Xem trạng thái</button>'
+      : '<button class="primary-btn" style="width:100%" id="switchMemory">Thêm nội dung</button>';
     $('feedback').classList.add('hidden');
     $('sourcePanel').classList.add('hidden');
     $('studyCard').classList.remove('is-revealed');
     $('switchMemory').onclick = () => setView('memory');
+    if (hasContent) $('retryDraw').onclick = nextCard;
     $('capabilities').innerHTML = '';
     updateHeader();
     $('debugPre').textContent = message || 'No card drawn.';
@@ -503,27 +511,31 @@
       return;
     }
     const ids = B.unitIds(current.card);
-    $('capabilities').innerHTML = `<div class="cap-title"><strong>${ids.length} unit trong card</strong><span>${A.cardCountForUnit(db, current.unitId)} card cho unit đang được chọn</span></div><div class="cap-grid">${ids.map((id) => {
+    const engine = current.engine;
+    $('capabilities').innerHTML = `<div class="cap-title"><strong>${ids.length} unit trong card</strong><span>${A.cardCountForUnit(db, current.unitId, engine)} card cho unit đang được chọn</span></div><div class="cap-grid">${ids.map((id) => {
       const item = itemById(id);
-      const status = A.itemStatus(db, id).find((entry) => entry.mode === current.mode);
+      const status = A.itemStatus(db, id, Date.now(), engine).find((entry) => entry.mode === current.mode);
       return `<div class="cap-cell"><label><span>${esc(item?.target || id)}</span><b>${esc(status?.status || 'Mới')}</b></label><small>${esc(item?.meaning || '')}</small></div>`;
     }).join('')}</div>`;
   }
 
   function updateHeader() {
-    const stats = A.deckStats(db);
+    const stats = A.deckStats(db, Date.now(), current?.engine || null);
     $('sessionCount').textContent = sessionReviews;
     $('dueCount').textContent = stats.waiting ? `${stats.waiting} đang chờ ôn` : 'Không có thẻ đang chờ';
-    const progress = Math.min(100, sessionReviews * 8);
+    const total = sessionReviews + (stats.waiting || 0);
+    const progress = total > 0 ? Math.round((sessionReviews / total) * 100) : 0;
     $('progressBar').style.width = `${progress}%`;
     $('progressTrack').setAttribute('aria-valuenow', String(progress));
   }
 
   function renderMemory() {
     const list = $('memoryList');
+    const engine = A.buildEngine(db);
+    const nowMs = Date.now();
     list.innerHTML = (db.items || []).map((item) => {
-      const statuses = A.itemStatus(db, item.id);
-      const cardCount = A.cardCountForUnit(db, item.id);
+      const statuses = A.itemStatus(db, item.id, nowMs, engine);
+      const cardCount = A.cardCountForUnit(db, item.id, engine);
       return `<article class="memory-card"><div class="memory-top"><div><div class="memory-title">${esc(item.target)}</div><div class="memory-meaning">${esc(item.meaning)}</div></div><span class="type-pill">${cardCount} cards</span></div>${item.canDo ? `<p class="can-do">${esc(item.canDo)}</p>` : ''}<div class="cap-grid" style="margin-top:14px">${statuses.map((status) => `<div class="cap-cell"><label><span>${esc(status.label)}</span><b>${esc(status.status)}</b></label><small>${status.ratings} ratings</small></div>`).join('')}</div></article>`;
     }).join('') || '<div class="empty">Chưa có unit.</div>';
   }
@@ -533,7 +545,8 @@
       if (last) $('debugPre').textContent = JSON.stringify(last.event || last, null, 2);
       return;
     }
-    const engine = A.buildEngine(db);
+    if (!debugEnabled) return;
+    const engine = current.engine || A.buildEngine(db);
     const state = engine.ratingStates[current.unitId];
     $('debugPre').textContent = JSON.stringify({
       upstream: 'google/bespoke@67b1eda5b28f7a69be20561014255cdc81110a3e',
@@ -729,7 +742,10 @@
     learner = data?.session?.user || null;
     renderAuth();
     if (learner) await hydrateCloud();
-    supabaseClient.auth.onAuthStateChange((_event, session) => {
+    supabaseClient.auth.onAuthStateChange((event, session) => {
+      // INITIAL_SESSION replays the session getSession() just returned — hydrating
+      // again would double every Firestore read on each page load.
+      if (event === 'INITIAL_SESSION') return;
       window.setTimeout(() => {
         learner = session?.user || null;
         activeDeck = null;
@@ -837,35 +853,8 @@
     }
   };
 
-  $('importTranscriptBtn').onclick = async () => {
-    const file = $('transcriptFileInput').files?.[0];
-    if (!file) {
-      toast('Chọn file transcript trước.');
-      return;
-    }
-    try {
-      const raw = await file.text();
-      const isJson = file.name.toLowerCase().endsWith('.json') || file.type.includes('json');
-      const segments = isJson ? TI.parseJson(raw) : TI.parseSrt(raw);
-      const result = TI.importIntoDb(db, segments, {
-        sourceId: file.name,
-        url: $('importUrlInput').value.trim(),
-        fileName: $('importMediaNameInput').value.trim() || file.name,
-        subtitleFileName: file.name,
-        audioBasePath: $('importAudioBaseInput').value.trim(),
-        contextRadius: 1,
-        paddingMs: 200
-      });
-      save();
-      requestCloudSync('transcript');
-      const matched = A.datasetCards(db).length;
-      $('importSummary').textContent = `${result.total} segments · ${result.added} mới · ${result.ready} có translation · ${matched} source cards match Unit hiện có.`;
-      toast(`Đã import ${result.added} source segments`);
-      renderMemory();
-    } catch (error) {
-      toast(`Import lỗi: ${error.message}`);
-    }
-  };
+  // transcriptFileInput/importTranscriptBtn are owned by learning-hub.js
+  // (importPersonalTranscript) — it runs after this module and wins onclick.
 
   window.addEventListener('flashday:supabase-ready', (event) => {
     connectCloud(event.detail);

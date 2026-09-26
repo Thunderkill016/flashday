@@ -35,5 +35,11 @@ assert.match(viteConfig, /login: resolve\(import\.meta\.dirname, 'login\/index\.
 assert.doesNotMatch(viteConfig, /transformIndexHtml|landing-auth\.mjs/);
 assert.match(productBootstrap, /event === 'INITIAL_SESSION'/);
 assert.doesNotMatch(productBootstrap, /auth\.getSession\(\)/);
+// Regression: ?session=lost must only fire when a session actually existed on
+// this device — a first-time visitor hitting /app/ used to be told their
+// "session was not kept" even though nothing had ever been signed in.
+assert.match(productBootstrap, /flashday:had-session/);
+assert.match(productBootstrap, /\/login\/\?session=lost#signin/);
+assert.match(productBootstrap, /\/login\/#signin/);
 
-console.log('FlashDay entrypoint contract: 30 checks passed');
+console.log('FlashDay entrypoint contract: 33 checks passed');

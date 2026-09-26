@@ -1,6 +1,6 @@
 /*
  * Pure helpers for the Firebase → Supabase compatibility layer in
- * firebase-client.js. No firebase imports — this module must stay loadable in
+ * firebase-client.mjs. No firebase imports — this module must stay loadable in
  * plain Node so the test suite can exercise the mapping logic directly.
  */
 

@@ -58,11 +58,33 @@
           ]
         },
         {
+          "source": "/assets/**",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "public, max-age=31536000, immutable"
+            }
+          ]
+        },
+        {
+          "source": "**/*.html",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "no-cache"
+            }
+          ]
+        },
+        {
           "source": "/login",
           "headers": [
             {
               "key": "Content-Security-Policy",
               "value": "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseapp.com https://*.firebaseio.com wss://*.firebaseio.com https://apis.google.com; frame-src 'self' https://*.firebaseapp.com https://*.web.app https://accounts.google.com https://apis.google.com; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+            },
+            {
+              "key": "Cache-Control",
+              "value": "no-cache"
             }
           ]
         },
@@ -72,6 +94,10 @@
             {
               "key": "Content-Security-Policy",
               "value": "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseapp.com https://*.firebaseio.com wss://*.firebaseio.com https://apis.google.com; frame-src 'self' https://*.firebaseapp.com https://*.web.app https://accounts.google.com https://apis.google.com; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+            },
+            {
+              "key": "Cache-Control",
+              "value": "no-cache"
             }
           ]
         },
@@ -81,6 +107,10 @@
             {
               "key": "Content-Security-Policy",
               "value": "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseapp.com https://*.firebaseio.com wss://*.firebaseio.com https://apis.google.com; frame-src 'self' https://*.firebaseapp.com https://*.web.app https://accounts.google.com https://apis.google.com; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+            },
+            {
+              "key": "Cache-Control",
+              "value": "no-cache"
             }
           ]
         },
@@ -90,6 +120,10 @@
             {
               "key": "Content-Security-Policy",
               "value": "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseapp.com https://*.firebaseio.com wss://*.firebaseio.com https://apis.google.com; frame-src 'self' https://*.firebaseapp.com https://*.web.app https://accounts.google.com https://apis.google.com; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+            },
+            {
+              "key": "Cache-Control",
+              "value": "no-cache"
             }
           ]
         },
@@ -99,6 +133,10 @@
             {
               "key": "Content-Security-Policy",
               "value": "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseapp.com https://*.firebaseio.com wss://*.firebaseio.com https://apis.google.com; frame-src 'self' https://*.firebaseapp.com https://*.web.app https://accounts.google.com https://apis.google.com; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+            },
+            {
+              "key": "Cache-Control",
+              "value": "no-cache"
             }
           ]
         },
@@ -108,6 +146,10 @@
             {
               "key": "Content-Security-Policy",
               "value": "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseapp.com https://*.firebaseio.com wss://*.firebaseio.com https://apis.google.com; frame-src 'self' https://*.firebaseapp.com https://*.web.app https://accounts.google.com https://apis.google.com; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+            },
+            {
+              "key": "Cache-Control",
+              "value": "no-cache"
             }
           ]
         },
@@ -117,6 +159,10 @@
             {
               "key": "Content-Security-Policy",
               "value": "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseapp.com https://*.firebaseio.com wss://*.firebaseio.com https://apis.google.com; frame-src 'self' https://*.firebaseapp.com https://*.web.app https://accounts.google.com https://apis.google.com; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+            },
+            {
+              "key": "Cache-Control",
+              "value": "no-cache"
             }
           ]
         }
@@ -162,11 +208,33 @@
           ]
         },
         {
+          "source": "/assets/**",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "public, max-age=31536000, immutable"
+            }
+          ]
+        },
+        {
+          "source": "**/*.html",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "no-cache"
+            }
+          ]
+        },
+        {
           "source": "/login",
           "headers": [
             {
               "key": "Content-Security-Policy",
               "value": "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseapp.com https://*.firebaseio.com wss://*.firebaseio.com https://apis.google.com; frame-src 'self' https://*.firebaseapp.com https://*.web.app https://accounts.google.com https://apis.google.com; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+            },
+            {
+              "key": "Cache-Control",
+              "value": "no-cache"
             }
           ]
         },
@@ -176,6 +244,10 @@
             {
               "key": "Content-Security-Policy",
               "value": "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseapp.com https://*.firebaseio.com wss://*.firebaseio.com https://apis.google.com; frame-src 'self' https://*.firebaseapp.com https://*.web.app https://accounts.google.com https://apis.google.com; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+            },
+            {
+              "key": "Cache-Control",
+              "value": "no-cache"
             }
           ]
         },
@@ -185,6 +257,10 @@
             {
               "key": "Content-Security-Policy",
               "value": "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseapp.com https://*.firebaseio.com wss://*.firebaseio.com https://apis.google.com; frame-src 'self' https://*.firebaseapp.com https://*.web.app https://accounts.google.com https://apis.google.com; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+            },
+            {
+              "key": "Cache-Control",
+              "value": "no-cache"
             }
           ]
         },
@@ -194,6 +270,10 @@
             {
               "key": "Content-Security-Policy",
               "value": "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseapp.com https://*.firebaseio.com wss://*.firebaseio.com https://apis.google.com; frame-src 'self' https://*.firebaseapp.com https://*.web.app https://accounts.google.com https://apis.google.com; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+            },
+            {
+              "key": "Cache-Control",
+              "value": "no-cache"
             }
           ]
         },
@@ -203,6 +283,10 @@
             {
               "key": "Content-Security-Policy",
               "value": "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseapp.com https://*.firebaseio.com wss://*.firebaseio.com https://apis.google.com; frame-src 'self' https://*.firebaseapp.com https://*.web.app https://accounts.google.com https://apis.google.com; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+            },
+            {
+              "key": "Cache-Control",
+              "value": "no-cache"
             }
           ]
         },
@@ -212,6 +296,10 @@
             {
               "key": "Content-Security-Policy",
               "value": "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseapp.com https://*.firebaseio.com wss://*.firebaseio.com https://apis.google.com; frame-src 'self' https://*.firebaseapp.com https://*.web.app https://accounts.google.com https://apis.google.com; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+            },
+            {
+              "key": "Cache-Control",
+              "value": "no-cache"
             }
           ]
         },
@@ -221,6 +309,10 @@
             {
               "key": "Content-Security-Policy",
               "value": "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseapp.com https://*.firebaseio.com wss://*.firebaseio.com https://apis.google.com; frame-src 'self' https://*.firebaseapp.com https://*.web.app https://accounts.google.com https://apis.google.com; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+            },
+            {
+              "key": "Cache-Control",
+              "value": "no-cache"
             }
           ]
         }

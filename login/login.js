@@ -231,11 +231,12 @@ function validateSubmission() {
 }
 
 async function submitGoogle() {
-  // Popup-first inside the shim: a resolved session opens the app directly;
-  // the redirect fallback path lands back here and routes via getSession().
+  // Popup-first inside the shim: a resolved session opens the app directly.
+  // If the popup is blocked the shim flags needsRedirect and we hand off to
+  // /auth/ — the redirect must start there so Google returns there instead
+  // of bouncing the learner back to this form.
   const { data, error } = await client.auth.signInWithOAuth({
     provider: 'google',
-    options: { redirectTo: appUrl() },
   });
   if (error) throw error;
   if (data?.session) {

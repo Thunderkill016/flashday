@@ -298,8 +298,10 @@
     return 'Mới';
   }
 
-  function itemStatus(db,itemId,nowMs=Date.now()){
-    const engine=buildEngine(db);const state=engine.ratingStates[itemId]||new B.RatingState();
+  // Rendering paths already hold a freshly built engine (from selectNext or a
+  // per-render build) — pass it in to avoid re-indexing every capture per unit.
+  function itemStatus(db,itemId,nowMs=Date.now(),engine=null){
+    engine=engine||buildEngine(db);const state=engine.ratingStates[itemId]||new B.RatingState();
     return ACTIVE_MODES.map(mode=>{
       if(!F)return {mode,label:MODE_META[mode].label,status:bespokeModeStatus(state,mode),urgency:state.urgency(mode,nowMs/1000),ratings:state.ratings().filter(r=>r.mode===mode).length};
       const memory=F.taskState(db,itemId,mode,nowMs);
@@ -313,15 +315,15 @@
     });
   }
 
-  function deckStats(db,nowMs=Date.now()){
-    const engine=buildEngine(db);
+  function deckStats(db,nowMs=Date.now(),engine=null){
+    engine=engine||buildEngine(db);
     const base=engine.stats(nowMs/1000);
     if(!F)return base;
     const memory=F.stats(db,taskPairs(engine),nowMs);
     return {waiting:memory.due,known:base.known,mature:base.mature,fsrs:memory};
   }
   function cardParts(card){return CI.splitIntoParts(card);}
-  function cardCountForUnit(db,unitId){return buildEngine(db).cardIndex.size(unitId);}
+  function cardCountForUnit(db,unitId,engine=null){return (engine||buildEngine(db)).cardIndex.size(unitId);}
 
   return {ACTIVE_MODES,MODE_META,normalizedDifficulty,normalizeStimulus,normalizeTelemetry,buildEngine,saveEngine,rebuildProgressFromEvents,selectNext,initialRatings,cycleRating,allSuccess,hasCompleteRatings,finalizeCard,itemStatus,deckStats,cardParts,cardCountForUnit,datasetCards,taskPairs,chooseHybridTask,chooseIntroductionTask,hybridCardScore,introductionGuardMs,bespokeScore,HYBRID_SCHEDULER,BESPOKE_SOURCE,hasFsrs:Boolean(F)};
 });

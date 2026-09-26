@@ -1,4 +1,4 @@
-import { createClient } from './firebase-client.js';
+import { createClient } from './firebase-client.mjs';
 
 export const MIN_PASSWORD_LENGTH = 8;
 
