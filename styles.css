@@ -789,6 +789,18 @@ mark.token-new { border-bottom: 2px solid var(--memory-new); padding: 0 1px; }
 .source-reader .tok-word:hover { color: var(--rtext); border-bottom-color: var(--teal-400); }
 .word-capture { margin: 10px 0 0; padding: 12px 14px; border: 1px solid var(--brand-line); border-radius: var(--fd-radius-md); background: var(--fd-surface); }
 .wc-sentence { margin: 8px 0; font-size: 13px; color: var(--fd-text-secondary); font-style: italic; }
+/* Tap-word lookup (dictionary panel): EN defs + tappable VN machine glosses,
+   always labeled "dịch máy" so provenance stays honest. */
+.wc-lookup { margin: 8px 0; }
+.wc-def { margin: 3px 0; font-size: 13px; color: var(--fd-text-secondary); line-height: 1.5; }
+.wc-def b { color: var(--fd-text-tertiary); font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: 0.04em; }
+.wc-glosses { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.wc-gloss { padding: 5px 12px; border: 1px solid var(--fd-accent); border-radius: var(--radius-pill); background: transparent; color: var(--fd-accent); font-size: 13px; cursor: pointer; }
+.wc-gloss:hover { background: var(--fd-accent); color: var(--fd-on-accent); }
+.wc-mt-note { font-size: 12px; color: var(--fd-text-tertiary); margin-top: 6px; }
+/* Embedded source media — real audio/video in the reader instead of TTS. */
+.reader-player { margin: 0 0 10px; }
+.reader-player iframe, .reader-player #readerPlayerEl { display: block; width: 100%; max-width: 560px; aspect-ratio: 16 / 9; margin: 0 auto; border: 0; border-radius: var(--fd-radius-md); background: #000; }
 
 /* ============================================================
    MODE IDENTITY — 4 kỹ năng mang màu riêng (tokens.css)

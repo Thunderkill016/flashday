@@ -6,6 +6,7 @@
   const L=window.FlashDayLearningEntry;
   const TI=window.FlashDayTranscriptImport;
   const IM=window.FlashDayImmersion;
+  const WLK=window.FlashDayLookup;
   const KEY='flashday-memory-engine-repo-driven';
   const PROFILE_TABLE='learner_profiles';
   const $=(id)=>document.getElementById(id);
@@ -328,10 +329,26 @@
     });
     if(changed)window.dispatchEvent(new CustomEvent('flashday:learning-state-changed'));
   }
+  // YouTube-embedded playback — real source audio instead of browser TTS when
+  // the source carries a YouTube URL (LingQ/LR parity for "play the real
+  // media"). TTS remains the fallback and is honestly labeled.
+  let readerPlayer=null;
+  let readerPlayerVideoId='';
+  let readerPlayerReady=false;
+  // Monotonic guard so a slow lookup for word A cannot overwrite the panel
+  // after the learner has already tapped word B.
+  let captureLookupSeq=0;
+
+  function destroyReaderPlayer(){
+    try{readerPlayer?.destroy?.();}catch{}
+    readerPlayer=null;readerPlayerVideoId='';readerPlayerReady=false;
+  }
+
   function closeReader(){
     const panel=$('sourceReader');
     flushEncounters();
     lineObserver?.disconnect();lineObserver=null;
+    destroyReaderPlayer();
     readerSourceKey=null;
     readerCaptures=[];
     if(panel){panel.classList.add('hidden');panel.innerHTML='';}
@@ -359,6 +376,22 @@
     }).join('');
   }
 
+  function renderLookupResult(slot,result){
+    if(!slot)return;
+    const defs=(result.en||[]).map(e=>`<p class="wc-def">${e.pos?`<b>${esc(e.pos)}</b> `:''}${esc(e.def)}</p>`).join('');
+    const glosses=[result.vi?.main,...(result.vi?.alternatives||[])].filter(Boolean);
+    const chips=glosses.length
+      ?`<div class="wc-glosses">${glosses.map(g=>`<button type="button" class="wc-gloss" data-gloss="${esc(g)}">${esc(g)}</button>`).join('')}</div>
+        <p class="field-note wc-mt-note">Bản dịch máy — kiểm tra trước khi lưu. Bấm để điền vào ô nghĩa.</p>`
+      :'';
+    slot.innerHTML=(defs||chips)
+      ?`${defs}${chips}`
+      :`<p class="field-note wc-mt-note">Không tra được từ điển — nhập nghĩa thủ công.</p>`;
+    for(const chip of slot.querySelectorAll('.wc-gloss')){
+      chip.onclick=()=>{const input=$('wcMeaning');if(input){input.value=chip.dataset.gloss;input.focus();}};
+    }
+  }
+
   function openWordCapture(word,capture){
     const box=$('wordCapturePanel');if(!box)return;
     box.classList.remove('hidden');
@@ -369,13 +402,30 @@
     box.innerHTML=`<div class="word-capture">
       <p class="field-note" style="margin:0">Lưu từ/cụm này thành Unit — câu nguồn đi kèm tự động.</p>
       <div class="field"><label for="wcTarget">Từ / cụm tiếng Anh</label><input id="wcTarget" value="${esc(word)}"></div>
+      <div id="wcLookup" class="wc-lookup"><p class="field-note wc-mt-note">Đang tra từ điển…</p></div>
       <div class="field"><label for="wcMeaning">Nghĩa tiếng Việt</label><input id="wcMeaning" placeholder="ví dụ: đang trên đường tới"></div>
       ${capture?.sentence?`<p class="wc-sentence">${esc(capture.sentence)}</p>`:''}
       ${needsSentenceTranslation?`<div class="field"><label for="wcSentenceTranslation">Dịch cả câu trên (để tạo card có ngữ cảnh)</label><input id="wcSentenceTranslation" placeholder="ví dụ: Tôi đang trên đường tới."></div><p class="field-note" style="margin:0">Không có bản dịch câu → unit chỉ có card cụm từ, chưa ôn trong ngữ cảnh.</p>`:''}
       <div class="secondary-actions"><button id="wcSave" class="primary-btn" type="button">Lưu unit</button><button id="wcCancel" class="ghost-btn" type="button">Huỷ</button></div>
     </div>`;
     $('wcMeaning').focus();
-    $('wcCancel').onclick=()=>{box.classList.add('hidden');box.innerHTML='';};
+    // Instant-meaning lookup (the LingQ/LR/Migaku table-stakes gap). Machine
+    // glosses are labeled as such and only become the meaning after the
+    // learner accepts or edits one — mirroring LingQ's hint-acceptance flow.
+    const seq=++captureLookupSeq;
+    const lookupSlot=$('wcLookup');
+    if(WLK?.lookup){
+      WLK.lookup(word).then(result=>{
+        if(seq!==captureLookupSeq||!lookupSlot.isConnected)return;
+        renderLookupResult(lookupSlot,result);
+      }).catch(()=>{
+        if(seq!==captureLookupSeq||!lookupSlot.isConnected)return;
+        lookupSlot.innerHTML='<p class="field-note wc-mt-note">Không tra được từ điển — nhập nghĩa thủ công.</p>';
+      });
+    }else if(lookupSlot){
+      lookupSlot.innerHTML='';
+    }
+    $('wcCancel').onclick=()=>{captureLookupSeq++;box.classList.add('hidden');box.innerHTML='';};
     $('wcSave').onclick=()=>{
       try{
         const target=$('wcTarget').value.trim();
@@ -399,6 +449,7 @@
           }
           return {result:true};
         });
+        captureLookupSeq++;
         box.classList.add('hidden');box.innerHTML='';
         // The review/memory views hold their own db copy — notify them the
         // learner state changed so the mined unit appears without a reload.
@@ -406,7 +457,10 @@
         showInlineMessage(sentenceTranslation||capture?.nativeSentence
           ?`Đã lưu “${target}” — câu nguồn có bản dịch, sẽ ôn trong ngữ cảnh.`
           :`Đã lưu “${target}” — chưa có dịch câu nên tạm thời chỉ ôn dạng cụm từ.`);
-        openSource(readerSourceKey);
+        // Close+reopen refreshes highlights so the newly mined unit shows as
+        // a marked token right where the learner tapped it.
+        const key=readerSourceKey;
+        if(key){openSource(key);openSource(key);}
       }catch(error){showInlineMessage(error.message,true);}
     };
   }
@@ -427,6 +481,7 @@
     readerCaptures=(db.captures||[]).filter(c=>IM.sourceKey(c)===key)
       .sort((a,b)=>(Number(a.subtitle?.index)||0)-(Number(b.subtitle?.index)||0)||(Number(a.mediaTimestamp)||0)-(Number(b.mediaTimestamp)||0));
     const summary=IM.assessSource(db,key,readerCaptures);
+    const videoId=WLK?.youtubeVideoId?WLK.youtubeVideoId(readerCaptures[0]?.url||''):null;
     try{localStorage.setItem(LAST_SOURCE_KEY,key);}catch{}
     const prefs=readerPrefs();
     panel.dataset.theme=prefs.theme;
@@ -440,13 +495,14 @@
           <button type="button" class="ghost-btn" id="closeSourceReader">Đóng</button>
         </div>
       </div>
+      ${videoId?`<div class="reader-player"><div id="readerPlayerEl"></div></div>`:''}
       <div class="source-reader-body">${readerCaptures.map((c,lineIndex)=>{
         const parts=IM.annotatedParts(db,c.sentence||'');
         const marked=parts.map(part=>part.unitId
           ?`<mark class="token-${part.knowledge}" title="${esc((db.items||[]).find(i=>i.id===part.unitId)?.meaning||'')}">${esc(part.text)}</mark>`
           :wordSpans(part.text)).join('');
         return `<div class="reader-line" data-capture="${esc(c.id)}">
-          <button type="button" class="reader-play" data-say="${esc(c.sentence||'')}" title="Nghe câu này">▶</button>
+          <button type="button" class="reader-play" data-say="${esc(c.sentence||'')}" data-ts="${Number(c.mediaTimestamp)||0}" title="${videoId?'Nghe audio gốc từ video':'Nghe giọng máy đọc'}">▶</button>
           <div class="reader-text"><p data-line="${lineIndex}">${marked||esc(c.sentence||'')}</p>${c.nativeSentence?`<small>${esc(c.nativeSentence)}</small>`:''}</div>
         </div>`;
       }).join('')}</div>
@@ -476,10 +532,28 @@
       },{root:body,threshold:0.6});
       for(const line of panel.querySelectorAll('.reader-line'))lineObserver.observe(line);
     }
+    // Real source audio first: when the source has a YouTube video, the line
+    // play button seeks the embedded player to the subtitle timestamp. TTS
+    // stays the fallback for sources without media.
+    if(videoId){
+      readerPlayerVideoId=videoId;
+      WLK.ensureYouTubeApi().then((YT)=>{
+        if(readerSourceKey!==key||readerPlayerVideoId!==videoId)return;
+        readerPlayer=new YT.Player('readerPlayerEl',{videoId,playerVars:{rel:0},events:{onReady:()=>{readerPlayerReady=true;}}});
+      }).catch(()=>{readerPlayerVideoId='';});
+    }
     for(const button of panel.querySelectorAll('.reader-play')){
       button.onclick=()=>{
-        speakSentence(button.dataset.say||'');
-        queueEncounter(button.closest('.reader-line')?.dataset.capture,'line-played');
+        const line=button.closest('.reader-line');
+        const capture=readerCaptures.find(c=>String(c.id)===String(line?.dataset.capture));
+        const canSeek=readerPlayer&&readerPlayerReady&&readerPlayerVideoId&&typeof readerPlayer.seekTo==='function';
+        if(canSeek&&capture&&Number.isFinite(Number(capture.mediaTimestamp))){
+          readerPlayer.seekTo(Number(capture.mediaTimestamp),true);
+          readerPlayer.playVideo?.();
+        }else{
+          speakSentence(button.dataset.say||'');
+        }
+        queueEncounter(line?.dataset.capture,'line-played');
       };
     }
     for(const word of panel.querySelectorAll('.tok-word')){
