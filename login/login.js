@@ -224,6 +224,7 @@ $('auth-google-btn').addEventListener('click', async () => {
     return;
   }
   setBusy(true);
+  showStatus('Đang chờ Google xác thực…', 'info');
   try {
     await submitGoogle();
     // Resolving without navigation means a cancelled popup or a redirect

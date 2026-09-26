@@ -25,18 +25,6 @@ import {
   signOut as firebaseSignOut
 } from 'firebase/auth';
 import {
-  getFirestore,
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  setDoc,
-  deleteDoc,
-  query,
-  where,
-  writeBatch
-} from 'firebase/firestore';
-import {
   isIgnorableResetError,
   mapAuthError,
   matchRows,
@@ -60,7 +48,20 @@ const FIRESTORE_BATCH_LIMIT = 450;
 export function createClient(config) {
   const app = initializeApp(config);
   const auth = getAuth(app);
-  const firestore = getFirestore(app);
+
+  // Firestore is only needed for cloud data — loading it eagerly triples the
+  // JS the login page must parse before auth can even start. Dynamic-import
+  // it on first use so sign-in stays light.
+  let firestorePromise = null;
+  async function firestore() {
+    if (!firestorePromise) {
+      firestorePromise = import('firebase/firestore').then((fs) => ({
+        ...fs,
+        db: fs.getFirestore(app)
+      }));
+    }
+    return firestorePromise;
+  }
 
   // Completes a signInWithRedirect round-trip on whichever page the provider
   // sends the user back to. Keep the promise so callers can surface redirect
@@ -251,10 +252,11 @@ export function createClient(config) {
     }
   };
 
-  function userCollection(table) {
+  async function userCollection(table) {
     const user = auth.currentUser;
     if (!user) return { error: new Error('Not authenticated') };
-    return { user, ref: collection(firestore, 'users', user.uid, table) };
+    const fs = await firestore();
+    return { user, fs, ref: fs.collection(fs.db, 'users', user.uid, table) };
   }
 
   class Builder {
@@ -323,19 +325,19 @@ export function createClient(config) {
       return this;
     }
 
-    _wheres() {
+    _wheres(fs) {
       // owner_id is implied by the users/{uid}/ path scope, so it never needs
       // a Firestore where clause; every other eq filter does double duty as a
       // server-side where plus an in-memory match for exact parity.
       return this._filters
         .filter(({ column }) => column !== 'owner_id')
-        .map(({ column, value }) => where(column, '==', value));
+        .map(({ column, value }) => fs.where(column, '==', value));
     }
 
     async _select() {
-      const scoped = userCollection(this._table);
+      const scoped = await userCollection(this._table);
       if (scoped.error) return fail(scoped.error);
-      const snapshot = await getDocs(query(scoped.ref, ...this._wheres()));
+      const snapshot = await scoped.fs.getDocs(scoped.fs.query(scoped.ref, ...this._wheres(scoped.fs)));
       let rows = snapshot.docs.map((entry) => entry.data());
       rows = sortRows(matchRows(rows, this._filters), this._orders);
       rows = paginateRows(rows, this._range, this._limit);
@@ -351,15 +353,16 @@ export function createClient(config) {
     }
 
     async _write(merge) {
-      const scoped = userCollection(this._table);
+      const scoped = await userCollection(this._table);
       if (scoped.error) return fail(scoped.error);
+      const fs = scoped.fs;
       const written = [];
       for (const row of this._rows) {
         const id = rowDocId(row, scoped.user.uid) || crypto.randomUUID();
-        const target = doc(scoped.ref, id);
+        const target = fs.doc(scoped.ref, id);
         // Merged upserts must preserve the original created_at — the security
         // rules treat it as write-once.
-        const existing = merge ? await getDoc(target) : null;
+        const existing = merge ? await fs.getDoc(target) : null;
         if (merge && this._ignoreDuplicates && existing?.exists()) continue;
         const record = {
           created_at: existing?.exists() ? existing.data().created_at : new Date().toISOString(),
@@ -367,7 +370,7 @@ export function createClient(config) {
           id,
           owner_id: scoped.user.uid
         };
-        await setDoc(target, record, merge ? { merge: true } : undefined);
+        await fs.setDoc(target, record, merge ? { merge: true } : undefined);
         written.push(record);
       }
       if (this._single || this._maybeSingle) return ok(written[0] || null);
@@ -375,22 +378,23 @@ export function createClient(config) {
     }
 
     async _delete() {
-      const scoped = userCollection(this._table);
+      const scoped = await userCollection(this._table);
       if (scoped.error) return fail(scoped.error);
       if (!this._filters.length) return fail(new Error('Delete requires at least one filter'));
-      const snapshot = await getDocs(query(scoped.ref, ...this._wheres()));
+      const fs = scoped.fs;
+      const snapshot = await fs.getDocs(fs.query(scoped.ref, ...this._wheres(fs)));
       const targets = matchRows(
         snapshot.docs.map((entry) => entry.data()),
         this._filters
       ).map((row) => rowDocId(row, scoped.user.uid));
 
       const removed = [];
-      let batch = writeBatch(firestore);
+      let batch = fs.writeBatch(fs.db);
       let pending = 0;
       const flush = async () => {
         if (!pending) return;
         await batch.commit();
-        batch = writeBatch(firestore);
+        batch = fs.writeBatch(fs.db);
         pending = 0;
       };
       const queue = async (ref) => {
@@ -400,15 +404,15 @@ export function createClient(config) {
         if (pending >= FIRESTORE_BATCH_LIMIT) await flush();
       };
 
-      for (const id of targets) await queue(doc(scoped.ref, id));
+      for (const id of targets) await queue(fs.doc(scoped.ref, id));
 
       if (this._table === 'decks') {
         for (const deckId of targets) {
           for (const childTable of DECK_CHILD_TABLES) {
-            const children = await getDocs(
-              query(
-                collection(firestore, 'users', scoped.user.uid, childTable),
-                where('deck_id', '==', deckId)
+            const children = await fs.getDocs(
+              fs.query(
+                fs.collection(fs.db, 'users', scoped.user.uid, childTable),
+                fs.where('deck_id', '==', deckId)
               )
             );
             for (const child of children.docs) await queue(child.ref);
