@@ -78,5 +78,12 @@ assert.match(stylesCss, /\.source-reader\[data-theme="warm"\]/);
 const learningHub = readFileSync(join(root, 'learning-hub.js'), 'utf8');
 assert.match(learningHub, /data-rtheme/);
 assert.match(learningHub, /flashday:reader-prefs/);
+// App shell theme: light is the default surface, dark is opt-in,
+// applied pre-paint by canonical.js and toggled from the topbar.
+assert.match(tokens, /html\[data-theme="light"\]/);
+const canonicalJs = readFileSync(join(root, 'public/canonical.js'), 'utf8');
+assert.match(canonicalJs, /flashday:theme/);
+assert.match(canonicalJs, /dataset\.theme/);
+assert.match(app, /id="themeBtn"/);
 
-console.log(`FlashDay entrypoint contract: 52 checks passed`);
+console.log(`FlashDay entrypoint contract: 56 checks passed`);

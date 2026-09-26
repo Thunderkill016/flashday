@@ -1042,6 +1042,11 @@
   });
   $('resetBtn').onclick = resetLearning;
   $('authBtn').onclick = openAuthDialog;
+  $('themeBtn').onclick = () => {
+    const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem('flashday:theme', next); } catch (e) { /* storage blocked */ }
+  };
   $('signOutBtn').onclick = async () => {
     if (!supabaseClient) return;
     try {
