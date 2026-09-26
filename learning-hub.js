@@ -470,20 +470,34 @@
         const meaning=$('wcMeaning').value.trim();
         const sentenceTranslation=$('wcSentenceTranslation')?.value.trim()||'';
         if(!meaning){$('wcMeaning').focus();return;}
+        let linkedExisting=false;
         store.transact((db)=>{
-          D.addItem(db,{
-            target,meaning,
-            type:target.includes(' ')?'chunk':'word_sense',
-            origin:'source-captured',
-            exampleSentence:capture?.sentence||'',
-            exampleTranslation:sentenceTranslation||capture?.nativeSentence||'',
-            contexts:capture?.sourceTitle?[capture.sourceTitle]:[]
-          });
-          // Attaching the translation to the capture row is what turns this
-          // sentence into a real card via cardsFromCaptures on next rebuild.
-          if(capture&&sentenceTranslation){
+          let unitId;
+          const existing=(db.items||[]).find(i=>D.normalizeKey(i.target)===D.normalizeKey(target));
+          if(existing){
+            // Re-mining a known unit in a new context attaches the context —
+            // LingQ-style — instead of failing on "already exists".
+            unitId=existing.id;linkedExisting=true;
+          }else{
+            unitId=D.addItem(db,{
+              target,meaning,
+              type:target.includes(' ')?'chunk':'word_sense',
+              origin:'source-captured',
+              exampleSentence:capture?.sentence||'',
+              exampleTranslation:sentenceTranslation||capture?.nativeSentence||'',
+              contexts:capture?.sourceTitle?[capture.sourceTitle]:[]
+            }).id;
+          }
+          // The capture row is the unit's provenance: link it so encounters on
+          // this line credit the unit, memory search finds it via the source
+          // sentence, and cardsFromCaptures can build its context card.
+          if(capture){
             const row=(db.captures||[]).find(c=>String(c.id)===String(capture.id));
-            if(row&&!row.nativeSentence){row.nativeSentence=sentenceTranslation;row.updatedAt=Date.now();}
+            if(row){
+              row.linkedUnitIds=[...new Set([...(row.linkedUnitIds||[]),unitId])];
+              if(sentenceTranslation&&!row.nativeSentence)row.nativeSentence=sentenceTranslation;
+              row.updatedAt=Date.now();
+            }
           }
           return {result:true};
         });
@@ -492,9 +506,11 @@
         // The review/memory views hold their own db copy — notify them the
         // learner state changed so the mined unit appears without a reload.
         window.dispatchEvent(new CustomEvent('flashday:learning-state-changed'));
-        showInlineMessage(sentenceTranslation||capture?.nativeSentence
-          ?`Đã lưu “${target}” — câu nguồn có bản dịch, sẽ ôn trong ngữ cảnh.`
-          :`Đã lưu “${target}” — chưa có dịch câu nên tạm thời chỉ ôn dạng cụm từ.`);
+        showInlineMessage(linkedExisting
+          ?`“${target}” đã có trong deck — đã gắn thêm ngữ cảnh này.`
+          :sentenceTranslation||capture?.nativeSentence
+            ?`Đã lưu “${target}” — câu nguồn có bản dịch, sẽ ôn trong ngữ cảnh.`
+            :`Đã lưu “${target}” — chưa có dịch câu nên tạm thời chỉ ôn dạng cụm từ.`);
         // Close+reopen refreshes highlights so the newly mined unit shows as
         // a marked token right where the learner tapped it.
         const key=readerSourceKey;
