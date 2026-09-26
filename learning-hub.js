@@ -5,6 +5,7 @@
   const S=window.FlashDayStore;
   const L=window.FlashDayLearningEntry;
   const TI=window.FlashDayTranscriptImport;
+  const IM=window.FlashDayImmersion;
   const KEY='flashday-memory-engine-repo-driven';
   const PROFILE_TABLE='learner_profiles';
   const $=(id)=>document.getElementById(id);
@@ -190,6 +191,69 @@
     if(summary){summary.textContent=message;summary.style.color=isError?'var(--fd-error)':'';}
   }
 
+  function speakSentence(text){
+    if(!('speechSynthesis' in window)||!text)return;
+    const utterance=new SpeechSynthesisUtterance(text);
+    utterance.lang='en-US';utterance.rate=0.92;
+    window.speechSynthesis.speak(utterance);
+  }
+
+  // "Next for you": imported sources ranked by live comprehensibility — the
+  // hub answers "what should I immerse in next" with knowledge state, not
+  // vibes. Stats update themselves as units move new→learning→known.
+  function renderSources(){
+    const root=$('sourceRecommendations');if(!root)return;
+    if(!IM){root.innerHTML='';return;}
+    const db=store.refresh();
+    const sources=IM.assessSources(db);
+    if(!sources.length){root.innerHTML='';return;}
+    root.innerHTML=`<div class="source-recs-head"><span class="eyebrow">NEXT FOR YOU</span><strong>Tiếp tục học từ tiếng Anh thật</strong><span>Độ phù hợp đo từ trạng thái ôn tập thật của bạn — phần ngoài deck được giữ nguyên, không giả vờ hiểu.</span></div>`+
+      sources.map(source=>{
+        const meta=`~${source.minutes} phút · deck phủ ${Math.round(source.coverage*100)}%`+(source.learningUnits.length?` · ${source.learningUnits.length} unit đang học`:'');
+        return `<button type="button" class="source-rec" data-source-key="${esc(source.key)}">
+          <span class="source-rec-top"><b>${esc(source.title)}</b><span class="verdict-pill verdict-${source.verdict.key}">${esc(source.verdict.label)}</span></span>
+          <span class="source-rec-meta">${esc(meta)}</span>
+          <span class="source-rec-bars"><i class="bar-known" style="width:${source.knownPct}%"></i><i class="bar-learning" style="width:${source.learningPct}%"></i><i class="bar-new" style="width:${source.newPct}%"></i></span>
+        </button>`;
+      }).join('');
+    for(const button of root.querySelectorAll('.source-rec')){
+      button.onclick=()=>openSource(button.dataset.sourceKey);
+    }
+  }
+
+  let readerSourceKey=null;
+
+  // Inline transcript reader — the immersion surface. Unit spans are tinted
+  // by knowledge level so seeing a word mid-sentence doubles as a noticing
+  // moment, not just decoration.
+  function openSource(key){
+    const panel=$('sourceReader');if(!panel||!IM)return;
+    if(readerSourceKey===key){readerSourceKey=null;panel.classList.add('hidden');panel.innerHTML='';return;}
+    readerSourceKey=key;
+    const db=store.refresh();
+    const captures=(db.captures||[]).filter(c=>IM.sourceKey(c)===key)
+      .sort((a,b)=>(Number(a.subtitle?.index)||0)-(Number(b.subtitle?.index)||0)||(Number(a.mediaTimestamp)||0)-(Number(b.mediaTimestamp)||0));
+    const summary=IM.assessSource(db,key,captures);
+    panel.innerHTML=`<div class="source-reader-head">
+        <div><strong>${esc(summary.title)}</strong><span>${summary.segments} câu · ~${summary.minutes} phút · deck phủ ${Math.round(summary.coverage*100)}%</span></div>
+        <button type="button" class="ghost-btn" id="closeSourceReader">Đóng</button>
+      </div>
+      <div class="source-reader-body">${captures.map(c=>{
+        const parts=IM.annotatedParts(db,c.sentence||'');
+        const marked=parts.map(part=>part.unitId?`<mark class="token-${part.knowledge}" title="${esc((db.items||[]).find(i=>i.id===part.unitId)?.meaning||'')}">${esc(part.text)}</mark>`:esc(part.text)).join('');
+        return `<div class="reader-line">
+          <button type="button" class="reader-play" data-say="${esc(c.sentence||'')}" title="Nghe câu này">▶</button>
+          <div class="reader-text"><p>${marked||esc(c.sentence||'')}</p>${c.nativeSentence?`<small>${esc(c.nativeSentence)}</small>`:''}</div>
+        </div>`;
+      }).join('')}</div>
+      <p class="footer-note">Tô sáng: <mark class="token-known">đã thuộc</mark> <mark class="token-learning">đang học</mark> <mark class="token-new">trong bộ nhưng chưa ôn</mark> — phần không tô là từ ngoài deck.</p>`;
+    panel.classList.remove('hidden');
+    $('closeSourceReader').onclick=()=>{readerSourceKey=null;panel.classList.add('hidden');panel.innerHTML='';};
+    for(const button of panel.querySelectorAll('.reader-play')){
+      button.onclick=()=>speakSentence(button.dataset.say||'');
+    }
+  }
+
   async function importPersonalTranscript(){
     const file=$('transcriptFileInput')?.files?.[0];
     if(!file){showInlineMessage('Chọn file transcript JSON hoặc SRT trước.',true);return;}
@@ -282,6 +346,7 @@
   renderProfile();
   renderGuidedModules();
   renderTransferMissions();
+  renderSources();
   if($('importTranscriptBtn'))$('importTranscriptBtn').onclick=importPersonalTranscript;
   restoreUi();
   window.addEventListener('flashday:supabase-ready',(event)=>connectProfileCloud(event.detail));

@@ -12,6 +12,7 @@ import './source-capture.js';
 import './transcript-import.js';
 import './fsrs-scheduler.mjs';
 import './bespoke-adapter.js';
+import './immersion-engine.js';
 import './flashday-product.js';
 import './flashday-cloud.js';
 import './app-bespoke.js';
