@@ -164,6 +164,10 @@
     // are learner-owned observations, not review events and never affect FSRS.
     const transferAttempts = mergeById(progressPayload.transferAttempts || [], localDb.transferAttempts || [])
       .sort((a, b) => Number(a.submittedAt || 0) - Number(b.submittedAt || 0));
+    // Reader encounters are immersion observations, not reviews — they ride
+    // the learning_progress payload like transferAttempts, never FSRS state.
+    const encounters = mergeById(progressPayload.encounters || [], localDb.encounters || [])
+      .sort((a, b) => Number(a.at || 0) - Number(b.at || 0));
 
     return {
       version: String(localDb.version || progressPayload.version || 'repo-driven-2'),
@@ -173,6 +177,7 @@
       captures: mergeById(remoteCaptures, localDb.captures || []),
       events,
       transferAttempts,
+      encounters,
       learningProfile: mergeLearningProfile(localDb.learningProfile, progressPayload.learningProfile),
       // Review events are durable history. Both scheduler objects are caches and
       // must be rebuilt after a multi-device merge whenever history exists.

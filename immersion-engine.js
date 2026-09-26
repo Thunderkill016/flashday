@@ -122,8 +122,14 @@
     const covered=totals.known+totals.learning+totals.fresh;
     const knownShare=covered>0?totals.known/covered:0;
     const verdict=verdictFor(coverage,knownShare,learningUnits.size,totals.fresh);
+    // Units reviewed but never re-met in immersion are the biggest return —
+    // a source containing them closes the loop, so they outrank plain
+    // learning coverage.
+    const encountered=new Set((db.encounters||[]).map(e=>e.unitId));
+    const unmetLearning=[...learningUnits].filter(id=>!encountered.has(id)).length;
     const fitScore=Math.round(
       learningUnits.size*20
+      +unmetLearning*12
       +knownShare*40
       +coverage*40
     );
@@ -137,6 +143,7 @@
       newPct:Math.round((totals.fresh/total)*100),
       outsidePct:Math.round((totals.uncovered/total)*100),
       learningUnits:[...learningUnits],newUnits:[...newUnits],knownUnits:[...knownUnits],
+      unmetLearning,
       verdict,fitScore,
       parts
     };
@@ -157,6 +164,36 @@
     return out;
   }
 
+  // Return-to-source: every deck unit surfaced inside a source the learner
+  // actually opens is an immersion encounter — the loop closing back from
+  // RETRIEVE into IMMERSION. Dedupe is per unit+capture+day: rereading the
+  // same line today doesn't inflate the count, meeting it again tomorrow
+  // (or inside a different line) is a real new encounter.
+  function encounterDay(nowMs){
+    return new Date(nowMs).toISOString().slice(0,10);
+  }
+  function collectEncounters(db,captures,{nowMs=Date.now()}={}){
+    const day=encounterDay(nowMs);
+    const seen=new Set((db.encounters||[]).map(e=>`${e.unitId}|${e.captureId}|${encounterDay(Number(e.at)||0)}`));
+    const out=[];
+    for(const c of captures||[]){
+      for(const tag of CI.tagKnownUnits(c.sentence||'',db.items||[])){
+        const key=`${tag.unit_id}|${c.id}|${day}`;
+        if(seen.has(key))continue;
+        seen.add(key);
+        out.push({id:`enc-${tag.unit_id}-${c.id}-${day}`,unitId:tag.unit_id,captureId:c.id,at:nowMs});
+      }
+    }
+    return out;
+  }
+  // How many distinct source lines a unit has been met in — the "your words
+  // appear again" signal LingQ sells; separate from review rotation counts.
+  function encounterCount(db,unitId){
+    const seen=new Set();
+    for(const e of db.encounters||[])if(e.unitId===unitId)seen.add(e.captureId);
+    return seen.size;
+  }
+
   // Parts of a sentence annotated by unit — the reader highlights what the
   // learner already knows differently from what is still being acquired.
   function annotatedParts(db,sentence,{nowMs=Date.now(),taskState=null}={}){
@@ -174,5 +211,5 @@
     return parts;
   }
 
-  return {sourceKey,unitKnowledge,assessCapture,assessSource,assessSources,annotatedParts,meaningfulChars};
+  return {sourceKey,unitKnowledge,assessCapture,assessSource,assessSources,annotatedParts,meaningfulChars,collectEncounters,encounterCount};
 });

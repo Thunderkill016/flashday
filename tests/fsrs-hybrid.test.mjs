@@ -36,10 +36,25 @@ assert.equal(A.bespokeScore(4), 3, 'future FSRS Easy must remain a Bespoke succe
   const untouchedMode = first.mode === 'listen' ? 'speak' : 'listen';
   assert.equal(Boolean(db.fsrsProgress.cards[`u1::${untouchedMode}`]), false, 'other skills must not receive fake FSRS reviews');
 
+  // A near-due short-term step must not dead-end the session: opening another
+  // mode of a unit already encountered adds no new memory load, so the guard
+  // lets cross-skill continuation through.
+  const continuation = A.selectNext(db, 1_000_001);
+  assert.equal(continuation.unitId, first.unitId, 'continuation stays on the touched unit');
+  assert.notEqual(continuation.mode, first.mode, 'continuation opens a different mode');
+
+  // The guard still protects genuinely fresh units: when every mode of the
+  // seen unit is scheduled and only fresh-unit tasks remain unseen, a
+  // short-term step due within the guard window blocks introduction.
+  const db2 = fixture();
+  db2.fsrsProgress = { cards: {} };
+  for (const mode of ['listen', 'speak', 'read', 'write']) {
+    db2.fsrsProgress.cards[`u1::${mode}`] = { due: new Date(1_000_000 + 5 * 60 * 1000).toISOString(), state: 2, reps: 1, scheduled_days: 0, stability: 0.5, difficulty: 5 };
+  }
   assert.throws(
-    () => A.selectNext(db, 1_000_001),
+    () => A.selectNext(db2, 1_000_000),
     /tạm không mở Unit × kỹ năng mới/,
-    'a short-term FSRS review must block immediate flooding of new memories'
+    'a short-term FSRS review must still block brand-new units'
   );
 
   const memory = F.taskState(db, first.unitId, first.mode, 1_000_000);

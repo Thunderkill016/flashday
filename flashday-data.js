@@ -27,7 +27,7 @@
 
   function createInitialDb(items=SEED_ITEMS,now=Date.now()){
     return {
-      version:'repo-driven-2',createdAt:now,items:clone(items),events:[],captures:[],bespokeCards:[],transferAttempts:[],
+      version:'repo-driven-2',createdAt:now,items:clone(items),events:[],captures:[],bespokeCards:[],transferAttempts:[],encounters:[],
       bespokeProgress:null,fsrsProgress:null,learningProfile:null,
       scheduler:HYBRID_SCHEDULER,schedulerSource:HYBRID_SOURCE
     };
@@ -41,6 +41,7 @@
       captures:Array.isArray(raw.captures)?clone(raw.captures):[],
       bespokeCards:Array.isArray(raw.bespokeCards)?clone(raw.bespokeCards):[],
       transferAttempts:Array.isArray(raw.transferAttempts)?clone(raw.transferAttempts):[],
+      encounters:Array.isArray(raw.encounters)?clone(raw.encounters):[],
       bespokeProgress:raw.bespokeProgress?clone(raw.bespokeProgress):null,
       fsrsProgress:raw.fsrsProgress?clone(raw.fsrsProgress):null,
       learningProfile:raw.learningProfile?clone(raw.learningProfile):null,

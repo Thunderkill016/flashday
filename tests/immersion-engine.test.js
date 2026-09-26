@@ -88,4 +88,30 @@ const mixed = (unitId) => (unitId === 'u1' ? 'known' : 'learning');
   assert.strictEqual(IM.unitKnowledge(db, 'u1', { taskState: () => 'known' }), 'known');
 }
 
-console.log('FlashDay immersion engine: 6 checks passed');
+{
+  const db = dbFixture();
+  db.captures = [
+    cap('a1', "I'm on my way to work.", 'video-a', 0, 4),
+    cap('a2', 'Sure, on my way already.', 'video-a', 4, 7)
+  ];
+  const now = Date.now();
+  // First open records one encounter per unit×capture — two lines, two rows.
+  const first = IM.collectEncounters(db, db.captures, { nowMs: now });
+  assert.strictEqual(first.length, 2);
+  db.encounters = first;
+  // Same day, same lines → nothing new; rereading tomorrow is a new encounter.
+  assert.strictEqual(IM.collectEncounters(db, db.captures, { nowMs: now }).length, 0);
+  const tomorrow = IM.collectEncounters(db, db.captures, { nowMs: now + 86400000 });
+  assert.strictEqual(tomorrow.length, 2);
+  // encounterCount measures distinct source lines, not raw events.
+  db.encounters = [...first, ...tomorrow];
+  assert.strictEqual(IM.encounterCount(db, 'u1'), 2, 'two distinct captures, days must not multiply it');
+  // An unmet learning unit boosts the source that would re-surface it.
+  const met = IM.assessSource(db, 'video-a', db.captures, { taskState: learning });
+  assert.strictEqual(met.unmetLearning, 0, 'encountered units are met');
+  const neverMet = IM.assessSource({ ...db, encounters: [] }, 'video-a', db.captures, { taskState: learning });
+  assert.strictEqual(neverMet.unmetLearning, 1);
+  assert(neverMet.fitScore > met.fitScore, 'unmet learning units must rank a source higher');
+}
+
+console.log('FlashDay immersion engine: 7 checks passed');

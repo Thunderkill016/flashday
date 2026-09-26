@@ -556,7 +556,12 @@
     const speakRetry = current.mode === B.Mode.SPEAK && missed.length && errorLoop.retryCount < MAX_RETRIES
       ? `<button id="speakRetry" class="ghost-btn" type="button">Nói lại lần nữa (${errorLoop.retryCount + 1}/${MAX_RETRIES + 1})</button>`
       : '';
-    $('answerArea').innerHTML = `<div class="rating-intro">Chấm từng phần cần học dựa trên lần thử vừa rồi. “Nhớ” là trạng thái lịch ôn, không phải đánh giá thành thạo.</div><p class="rating-status" aria-live="polite">${ratingStatus}</p><div class="word-bank" id="ratingParts">${partsHtml}</div><div id="selectedDefinition" class="selected-definition hidden"></div><div class="secondary-actions"><button id="allSuccessBtn" type="button">Tất cả nhớ</button>${speakRetry}<label class="report-label"><input id="reportError" type="checkbox"> Card lỗi</label></div><button id="nextCardBtn" class="primary-btn" type="button" ${ratingsComplete ? '' : 'disabled'}>Lưu lần ôn</button>`;
+    // "Tất cả nhớ" only exists on single-unit cards. On multi-unit cards it
+    // would mark every unit remembered after ONE attempt — overcrediting
+    // units the learner never individually recalled.
+    const unitCount = parts.filter((part) => part.unit_id).length;
+    const allSuccessBtn = unitCount <= 1 ? '<button id="allSuccessBtn" type="button">Tất cả nhớ</button>' : '';
+    $('answerArea').innerHTML = `<div class="rating-intro">Chấm từng phần cần học dựa trên lần thử vừa rồi. “Nhớ” là trạng thái lịch ôn, không phải đánh giá thành thạo.</div><p class="rating-status" aria-live="polite">${ratingStatus}</p><div class="word-bank" id="ratingParts">${partsHtml}</div><div id="selectedDefinition" class="selected-definition hidden"></div><div class="secondary-actions">${allSuccessBtn}${speakRetry}<label class="report-label"><input id="reportError" type="checkbox"> Card lỗi</label></div><button id="nextCardBtn" class="primary-btn" type="button" ${ratingsComplete ? '' : 'disabled'}>Lưu lần ôn</button>`;
     $('speakRetry')?.addEventListener('click', startRetry);
     $('ratingParts').querySelectorAll('[data-unit]').forEach((button) => {
       button.onclick = () => {
@@ -571,7 +576,8 @@
         }
       };
     });
-    $('allSuccessBtn').onclick = () => {
+    const allSuccessEl = $('allSuccessBtn');
+    if (allSuccessEl) allSuccessEl.onclick = () => {
       ratings = A.allSuccess(card);
       renderRatingArea();
     };
@@ -779,7 +785,8 @@
       const statuses = A.itemStatus(db, item.id, nowMs, engine);
       const cardCount = A.cardCountForUnit(db, item.id, engine);
       const seenContexts = A.seenContextCount(db, item.id);
-      const pill = seenContexts > 0 && cardCount > 1 ? `${cardCount} ngữ cảnh · đã gặp ${seenContexts}` : `${cardCount} ngữ cảnh`;
+      const encounters = window.FlashDayImmersion?.encounterCount?.(db, item.id) || 0;
+      const pill = `${cardCount} ngữ cảnh${seenContexts > 0 && cardCount > 1 ? ` · ôn ${seenContexts}` : ''}${encounters ? ` · gặp lại ${encounters} lần` : ''}`;
       const totalRatings = statuses.reduce((sum, status) => sum + status.ratings, 0);
       const dueNow = statuses.some((status) => status.dueAt != null && status.dueAt <= nowMs);
       const state = totalRatings === 0 ? 'new' : dueNow ? 'due' : 'learning';
@@ -895,6 +902,7 @@
         bespokeProgress: db.bespokeProgress,
         fsrsProgress: db.fsrsProgress,
         transferAttempts: db.transferAttempts || [],
+        encounters: db.encounters || [],
         scheduler: db.scheduler,
         schedulerSource: db.schedulerSource
       },

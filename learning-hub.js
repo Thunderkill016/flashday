@@ -209,7 +209,7 @@
     if(!sources.length){root.innerHTML='';return;}
     root.innerHTML=`<div class="source-recs-head"><span class="eyebrow">NEXT FOR YOU</span><strong>Tiếp tục học từ tiếng Anh thật</strong><span>Độ phù hợp đo từ trạng thái ôn tập thật của bạn — phần ngoài deck được giữ nguyên, không giả vờ hiểu.</span></div>`+
       sources.map(source=>{
-        const meta=`~${source.minutes} phút · deck phủ ${Math.round(source.coverage*100)}%`+(source.learningUnits.length?` · ${source.learningUnits.length} unit đang học`:'');
+        const meta=`~${source.minutes} phút · deck phủ ${Math.round(source.coverage*100)}%`+(source.learningUnits.length?` · ${source.learningUnits.length} unit đang học`:'')+(source.unmetLearning?` · ${source.unmetLearning} chưa gặp lại`:'');
         return `<button type="button" class="source-rec" data-source-key="${esc(source.key)}">
           <span class="source-rec-top"><b>${esc(source.title)}</b><span class="verdict-pill verdict-${source.verdict.key}">${esc(source.verdict.label)}</span></span>
           <span class="source-rec-meta">${esc(meta)}</span>
@@ -289,6 +289,13 @@
     readerCaptures=(db.captures||[]).filter(c=>IM.sourceKey(c)===key)
       .sort((a,b)=>(Number(a.subtitle?.index)||0)-(Number(b.subtitle?.index)||0)||(Number(a.mediaTimestamp)||0)-(Number(b.mediaTimestamp)||0));
     const summary=IM.assessSource(db,key,readerCaptures);
+    // The reader IS the immersion encounter — opening a source records every
+    // deck unit it contains so "your words reappear here" becomes real data.
+    const newEncounters=IM.collectEncounters(db,readerCaptures);
+    if(newEncounters.length){
+      store.transact(d=>{d.encounters=[...(d.encounters||[]),...newEncounters];});
+      window.dispatchEvent(new CustomEvent('flashday:learning-state-changed'));
+    }
     const prefs=readerPrefs();
     panel.dataset.theme=prefs.theme;
     panel.dataset.size=prefs.size;

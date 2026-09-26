@@ -230,13 +230,23 @@
     const unseen=F.newTasks(db,tasks);
     const nextDue=F.nextDueAt(db,tasks);
     if(unseen.length){
+      // The guard exists to avoid cramming brand-new memories on top of an
+      // imminent short-term step. It must NOT block opening another mode of a
+      // unit already encountered — that adds no new memory load and blocking
+      // it was a study dead end when unseen units remained behind the guard.
+      const fresh=[],continuation=[];
+      for(const task of unseen){
+        const seenUnit=ACTIVE_MODES.some(mode=>F.hasState(db,task.unitId,mode));
+        (seenUnit?continuation:fresh).push(task);
+      }
+      if(continuation.length)return chooseIntroductionTask(db,engine,continuation,nowMs);
       const guardMs=introductionGuardMs();
       const waitMs=nextDue==null?Infinity:Number(nextDue)-Number(nowMs);
-      if(guardMs>0&&waitMs>0&&waitMs<=guardMs){
+      if(fresh.length&&guardMs>0&&waitMs>0&&waitMs<=guardMs){
         const minutes=Math.max(1,Math.ceil(waitMs/60000));
         throw new Error(`FSRS có lượt ôn ngắn hạn sau khoảng ${minutes} phút. FlashDay tạm không mở Unit × kỹ năng mới để tránh dồn bài.`);
       }
-      return chooseIntroductionTask(db,engine,unseen,nowMs);
+      return chooseIntroductionTask(db,engine,fresh.length?fresh:unseen,nowMs);
     }
 
     if(nextDue!=null){
