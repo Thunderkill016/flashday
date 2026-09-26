@@ -272,20 +272,45 @@ if (!client) {
     if (error) showStatus(authErrorMessage(error), 'error');
   });
 
+  const inRecoveryFlow = () =>
+    mode === AUTH_MODE.UPDATE_PASSWORD || mode === AUTH_MODE.RECOVERY;
+
+  const returnedFromAuthHandler = /firebaseapp\.com|accounts\.google\.com/
+    .test(document.referrer || '');
+
   client.auth.getSession().then(({ data, error }) => {
     if (error) {
       showStatus(authErrorMessage(error), 'error');
       return;
     }
     signedInUser = data.session?.user || null;
-    const isRecovering = mode === AUTH_MODE.UPDATE_PASSWORD || mode === AUTH_MODE.RECOVERY;
-    if (signedInUser && !isRecovering) {
+    if (signedInUser && !inRecoveryFlow()) {
       window.location.assign(appUrl());
+      return;
+    }
+    // Came back from the auth handler but no session exists — the redirect
+    // state was likely lost (blocked sessionStorage, cross-tab handoff…).
+    // Give SIGNED_IN a grace window to fire before warning the learner.
+    if (returnedFromAuthHandler && !inRecoveryFlow()) {
+      window.setTimeout(() => {
+        if (!signedInUser) {
+          showStatus(
+            'Google đã trả về nhưng phiên chưa được tạo — trình duyệt có thể đang chặn lưu trữ phiên. Hãy bấm Google lần nữa hoặc dùng email/mật khẩu.',
+            'error'
+          );
+        }
+      }, 2500);
     }
   });
 
   client.auth.onAuthStateChange((event, session) => {
     signedInUser = session?.user || null;
+    // getRedirectResult() resolves asynchronously and can finish AFTER
+    // getSession() already observed a null session. Without this branch a
+    // slow Google round-trip signs the learner in but strands them here.
+    if (event === 'SIGNED_IN' && signedInUser && !inRecoveryFlow()) {
+      window.location.assign(appUrl());
+    }
   });
 }
 
