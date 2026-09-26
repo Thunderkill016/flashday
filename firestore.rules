@@ -41,12 +41,12 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // email_verified lives in the auth token, not the request body — a caller
-    // cannot claim it. The UI signs unverified users out, but that's UX;
-    // this is the enforcement: an unverified session cannot touch user data.
+    // NOTE: an email_verified Rules gate was tried and reverted — OAuth
+    // providers (Google) omit the claim entirely, so `== true` denied every
+    // Google session. Verified-email enforcement stays in the auth client
+    // (unverified email/password users are signed out before any data op).
     function isOwner(uid) {
-      return isAuthenticated() && request.auth.uid == uid
-        && request.auth.token.email_verified == true;
+      return isAuthenticated() && request.auth.uid == uid;
     }
 
     // The document's owner_id field must always pin to the path owner —
@@ -63,9 +63,12 @@ service cloud.firestore {
       return value == null || (value is string && value.size() <= maxLen);
     }
 
+    // String.matches() is a FULL-string match in rules — the pattern must
+    // consume the whole value, including the ".SSS" milliseconds and the "Z"
+    // suffix that Date#toISOString() always emits.
     function isIsoDateString(value) {
       return value is string && value.size() <= 40
-        && value.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}");
+        && value.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?(Z|[+-]\\d{2}:\\d{2})$");
     }
 
     function isSmallList(value) {
