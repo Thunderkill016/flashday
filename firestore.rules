@@ -32,6 +32,14 @@ rules_version = '2';
 //
 // users/{uid}/learning_progress/{uid}, users/{uid}/learner_profiles/{uid}
 //   owner-keyed singletons: owner_id == uid, payload: map, updated_at
+//
+// users/{uid}/lesson_events/{id}   (A1 rebuild — append-only evidence)
+//   id: string (= doc id), owner_id: string (= uid)
+//   lesson_id: string 1..60, content_version: int
+//   step: 'prepare'|'read'|'listen'|'write'|'speak'
+//   kind: 'drill'|'read'|'listen'|'write'|'speak'
+//   payload, support: small maps; submitted_at, created_at: ISO-8601
+//   CREATE + READ + DELETE only — updates are denied (append-only).
 // ===============================================================
 
 service cloud.firestore {
@@ -178,6 +186,22 @@ service cloud.firestore {
         && isIsoDateString(d.created_at);
     }
 
+    function validLessonEvent(docId) {
+      let d = request.resource.data;
+      return hasOnly(['id', 'owner_id', 'lesson_id', 'content_version', 'step',
+                      'kind', 'payload', 'support', 'submitted_at', 'created_at'])
+        && hasAll(['lesson_id', 'content_version', 'step', 'kind', 'payload',
+                   'support', 'submitted_at', 'created_at'])
+        && idMatchesPath(docId)
+        && validString(d.lesson_id, 1, 60)
+        && d.content_version is int
+        && d.step in ['prepare', 'read', 'listen', 'write', 'speak']
+        && d.kind in ['drill', 'read', 'listen', 'write', 'speak']
+        && isSmallMap(d.payload) && isSmallMap(d.support)
+        && isIsoDateString(d.submitted_at)
+        && isIsoDateString(d.created_at);
+    }
+
     function validProgress(docId) {
       let d = request.resource.data;
       return hasOnly(['id', 'owner_id', 'deck_id', 'payload', 'updated_at', 'created_at'])
@@ -229,6 +253,13 @@ service cloud.firestore {
       allow read: if isOwner(uid);
       allow create: if isOwner(uid) && ownerPinned(uid) && validReviewEvent(docId);
       allow update: if isOwner(uid) && ownerPinned(uid) && createdAtUnchanged() && validReviewEvent(docId);
+      allow delete: if isOwner(uid);
+    }
+
+    match /users/{uid}/lesson_events/{docId} {
+      allow read: if isOwner(uid);
+      allow create: if isOwner(uid) && ownerPinned(uid) && validLessonEvent(docId);
+      // Append-only: no update. Delete stays owner-scoped for data-wipe flows.
       allow delete: if isOwner(uid);
     }
 

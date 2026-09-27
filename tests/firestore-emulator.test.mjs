@@ -34,11 +34,12 @@ try {
     db: environment.authenticatedContext("alice").firestore(),
   };
   const path = "users/alice/learning_progress/alice";
+  // lessonEvents/fsrs are no longer merged into the payload — events have
+  // their own collection and fsrs is a rebuilt cache. The merge strips them.
   const makeRow = (id) => ({
     deck_id: "deck",
     updated_at: "2026-09-27T00:00:00.000Z",
     payload: {
-      lessonEvents: [{ id }],
       reviewLog: [{ id: `log-${id}` }],
       fsrs: { stale: id },
     },
@@ -61,11 +62,11 @@ try {
   ]);
   const stored = (await sdk.getDoc(sdk.doc(first.db, path))).data();
   assert.deepEqual(
-    stored.payload.lessonEvents.map((row) => row.id).sort(),
-    ["first", "second"],
+    stored.payload.reviewLog.map((row) => row.id).sort(),
+    ["log-first", "log-second"],
   );
-  assert.equal(stored.payload.reviewLog.length, 2);
-  assert.equal(stored.payload.fsrs, null);
+  assert.equal(stored.payload.lessonEvents, undefined);
+  assert.equal(stored.payload.fsrs, undefined);
   await writeProgressTransaction(
     first,
     sdk.doc(first.db, path),
@@ -74,8 +75,7 @@ try {
     mergeProgressPayload,
   );
   assert.equal(
-    (await sdk.getDoc(sdk.doc(first.db, path))).data().payload.lessonEvents
-      .length,
+    (await sdk.getDoc(sdk.doc(first.db, path))).data().payload.reviewLog.length,
     2,
   );
   await assert.rejects(
@@ -91,9 +91,9 @@ try {
     ),
     /vượt giới hạn/,
   );
+  // The rejected oversized write must not have clobbered the stored payload.
   assert.equal(
-    (await sdk.getDoc(sdk.doc(first.db, path))).data().payload.transferAttempts
-      .length,
+    (await sdk.getDoc(sdk.doc(first.db, path))).data().payload.reviewLog.length,
     2,
   );
   const bob = environment.authenticatedContext("bob").firestore();
@@ -101,6 +101,74 @@ try {
   await assertFails(sdk.setDoc(sdk.doc(bob, path), stored));
   await assertFails(
     sdk.getDoc(sdk.doc(environment.unauthenticatedContext().firestore(), path)),
+  );
+
+  // lesson_events: owner may create a valid append-only event; update is
+  // denied outright; cross-owner and malformed writes are denied.
+  const eventPath = "users/alice/lesson_events/ev-1";
+  const validEvent = {
+    id: "ev-1",
+    owner_id: "alice",
+    lesson_id: "a1-s1-l1",
+    content_version: 1,
+    step: "prepare",
+    kind: "drill",
+    payload: { correct: 3, total: 4 },
+    support: { modelRevealed: false },
+    submitted_at: "2026-09-27T00:00:00.000Z",
+    created_at: "2026-09-27T00:00:00.000Z",
+  };
+  await sdk.setDoc(sdk.doc(first.db, eventPath), validEvent);
+  assert.equal(
+    (await sdk.getDoc(sdk.doc(first.db, eventPath))).data().kind,
+    "drill",
+  );
+  await assertFails(
+    sdk.updateDoc(sdk.doc(first.db, eventPath), { kind: "read" }),
+  );
+  await assertFails(sdk.getDoc(sdk.doc(bob, eventPath)));
+  await assertFails(
+    sdk.setDoc(sdk.doc(bob, "users/bob/lesson_events/ev-1"), {
+      ...validEvent,
+      owner_id: "alice", // spoofed owner
+    }),
+  );
+  await assertFails(
+    sdk.setDoc(sdk.doc(bob, "users/bob/lesson_events/x"), {
+      ...validEvent,
+      owner_id: "bob",
+      id: "mismatch",
+    }),
+  );
+  await assertFails(
+    sdk.setDoc(sdk.doc(bob, "users/bob/lesson_events/ev-bad-kind"), {
+      ...validEvent,
+      id: "ev-bad-kind",
+      owner_id: "bob",
+      kind: "teleport",
+    }),
+  );
+  await assertFails(
+    sdk.setDoc(sdk.doc(bob, "users/bob/lesson_events/ev-extra"), {
+      ...validEvent,
+      id: "ev-extra",
+      owner_id: "bob",
+      sneaky: true,
+    }),
+  );
+  await assertFails(
+    sdk.setDoc(sdk.doc(bob, "users/bob/lesson_events/ev-missing"), {
+      id: "ev-missing",
+      owner_id: "bob",
+      lesson_id: "a1-s1-l1",
+      content_version: 1,
+      step: "read",
+      kind: "read",
+      payload: {},
+      support: {},
+      // submitted_at omitted
+      created_at: "2026-09-27T00:00:00.000Z",
+    }),
   );
 
   // Fixture documents are synthetic; admin seeding is confined to this emulator.
