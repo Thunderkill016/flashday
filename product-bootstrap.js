@@ -1,13 +1,19 @@
-import { createClient } from './firebase-client.mjs';
+import { createClient } from './src/auth/firebase-client.mjs';
+import { mergeProgressPayload } from './src/core/cloud.js';
 
 const config = __FLASHDAY_FIREBASE_CONFIG__;
 
+function announce(detail) {
+  // Stash for late-loading module scripts (the event fires during bootstrap's
+  // own evaluation, before sibling modules have listeners registered).
+  window.FlashDayBootstrap = detail;
+  window.dispatchEvent(new CustomEvent('flashday:supabase-ready', { detail }));
+}
+
 if (!config?.apiKey || !config?.projectId || !config?.appId) {
-  window.dispatchEvent(new CustomEvent('flashday:supabase-ready', {
-    detail: { client: null, error: 'Thiếu cấu hình cloud.' }
-  }));
+  announce({ client: null, error: 'Thiếu cấu hình cloud.' });
 } else {
-  const client = createClient(config, { mergeProgressPayload: window.FlashDayCloud?.mergeProgressPayload });
+  const client = createClient(config, { mergeProgressPayload });
   const HAD_SESSION_KEY = 'flashday:had-session';
   const markSession = (had) => {
     try { window.localStorage.setItem(HAD_SESSION_KEY, had ? '1' : ''); } catch (_e) {}
@@ -39,7 +45,5 @@ if (!config?.apiKey || !config?.projectId || !config?.appId) {
     }
   });
 
-  window.dispatchEvent(new CustomEvent('flashday:supabase-ready', {
-    detail: { client, error: null }
-  }));
+  announce({ client, error: null });
 }

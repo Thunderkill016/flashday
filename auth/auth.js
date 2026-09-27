@@ -1,9 +1,9 @@
-import { detectStorageBlocking } from '../cloud-compat.mjs';
+import { detectStorageBlocking } from '../src/auth/cloud-compat.mjs';
 import {
   authErrorMessage,
   createFlashdayClient,
   enterApp,
-} from '../flashday-auth.mjs';
+} from '../src/auth/flashday-auth.mjs';
 
 const $ = (id) => document.getElementById(id);
 const client = createFlashdayClient(__FLASHDAY_FIREBASE_CONFIG__);

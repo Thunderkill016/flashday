@@ -1,4 +1,4 @@
-import { detectStorageBlocking } from '../cloud-compat.mjs';
+import { detectStorageBlocking } from '../src/auth/cloud-compat.mjs';
 import {
   AUTH_MODE,
   MIN_PASSWORD_LENGTH,
@@ -10,7 +10,7 @@ import {
   enterApp,
   isPasswordLongEnough,
   requiresNewPasswordPolicy,
-} from '../flashday-auth.mjs';
+} from '../src/auth/flashday-auth.mjs';
 
 const $ = (id) => document.getElementById(id);
 
