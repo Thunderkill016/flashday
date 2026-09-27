@@ -26,17 +26,57 @@ function cardMap(db) {
   return db.fsrs;
 }
 
-// Idempotent: existing chunk keys are left untouched.
+// reviewLog entry kinds — 'enroll' records that a chunk entered the pool
+// (the durable fact; db.fsrs is just a replayable cache of it), 'rate' is a
+// grading event. Entries written before kinds existed normalize to 'rate'.
+function logId() {
+  try {
+    if (globalThis.crypto?.randomUUID) return crypto.randomUUID();
+  } catch (_error) {}
+  return `rv_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+// Idempotent: existing chunk keys are left untouched. Each NEW enrolment is
+// appended to db.reviewLog so a multi-device merge can replay the same state.
 export function enrollChunks(db, lesson, now = Date.now()) {
   const cards = cardMap(db);
+  if (!Array.isArray(db.reviewLog)) db.reviewLog = [];
   const enrolled = [];
   for (const chunk of Array.isArray(lesson?.chunks) ? lesson.chunks : []) {
     const key = chunkKey(lesson.id, chunk.id);
     if (cards[key]) continue;
     cards[key] = serializeCard(createEmptyCard(new Date(Number(now))));
+    db.reviewLog.push({ id: logId(), kind: 'enroll', chunkKey: key, at: Number(now) });
     enrolled.push(key);
   }
   return enrolled;
+}
+
+// Deterministic replay: enrollment creates the card, ratings advance it.
+// Sorting by (at, id) makes a merged two-device log replay identically to
+// sequential application. Returns a fresh fsrs card map (callers assign it).
+export function rebuildFsrsFromLog(reviewLog, enrolledKeys = []) {
+  const cards = {};
+  const enroll = (key, at) => {
+    if (key && !cards[key]) cards[key] = serializeCard(createEmptyCard(new Date(Number(at) || Date.now())));
+  };
+  for (const key of Array.isArray(enrolledKeys) ? enrolledKeys : []) enroll(key, Date.now());
+  const ordered = [...(Array.isArray(reviewLog) ? reviewLog : [])]
+    .filter((entry) => entry?.chunkKey)
+    .sort((a, b) => (Number(a.at) || 0) - (Number(b.at) || 0) || String(a.id || '').localeCompare(String(b.id || '')));
+  for (const entry of ordered) {
+    const kind = entry.kind === 'enroll' ? 'enroll' : 'rate';
+    if (kind === 'enroll') {
+      enroll(entry.chunkKey, entry.at);
+      continue;
+    }
+    const rating = ratingFromBespokeScore(entry.grade);
+    if (rating == null) continue;
+    const at = new Date(Number(entry.at) || Date.now());
+    const card = deserializeCard(cards[entry.chunkKey]) || createEmptyCard(at);
+    cards[entry.chunkKey] = serializeCard(scheduler.next(card, at, rating).card);
+  }
+  return cards;
 }
 
 export function dueChunks(db, now = Date.now()) {

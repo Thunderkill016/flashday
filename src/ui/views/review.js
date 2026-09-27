@@ -116,7 +116,10 @@ function renderCard(host) {
     btn.addEventListener('click', () => {
       ctx.store.transact((db) => {
         rateChunk(db, entry.key, grade, Date.now());
+        if (!Array.isArray(db.reviewLog)) db.reviewLog = [];
         db.reviewLog.push({
+          id: crypto.randomUUID?.() || `rv_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`,
+          kind: 'rate',
           chunkKey: entry.key,
           grade,
           response: answer.value,

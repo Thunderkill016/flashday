@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chunkForKey, chunkKey, dueChunks, enrollChunks, nextDueAt, rateChunk } from '../src/core/scheduler.js';
+import { chunkForKey, chunkKey, dueChunks, enrollChunks, nextDueAt, rateChunk, rebuildFsrsFromLog } from '../src/core/scheduler.js';
 import { createInitialDb } from '../src/core/evidence.js';
 
 const lesson = {
@@ -35,4 +35,26 @@ const lesson = {
   assert.equal(chunkForKey('nope:c', [{ id: 'a1-s1-l1', chunks: [] }]), null);
 }
 
-console.log('FlashDay scheduler: 2 checks passed');
+// Enrolment is recorded in reviewLog so db.fsrs can be rebuilt after a
+// two-device merge — replay of the merged log equals sequential application.
+{
+  const db = createInitialDb();
+  enrollChunks(db, lesson, 1000);
+  assert.equal(db.reviewLog.length, 3, 'each new chunk logs an enroll entry');
+  assert(db.reviewLog.every((e) => e.kind === 'enroll' && e.id));
+  rateChunk(db, 'a1-s1-l1:c1', 3, 5000);
+  db.reviewLog.push({ id: 'l1', kind: 'rate', chunkKey: 'a1-s1-l1:c1', grade: 3, at: 5000 });
+  const rebuilt = rebuildFsrsFromLog(db.reviewLog);
+  assert.deepEqual(rebuilt, db.fsrs, 'rebuild replays to identical cards');
+  // Two devices: B's log merged in by id → identical rebuild.
+  const deviceB = [
+    { id: 'b1', kind: 'rate', chunkKey: 'a1-s1-l1:c2', grade: 4, at: 2000 },
+    { id: 'b0', chunkKey: 'a1-s1-l1:c3', grade: 2, at: 3000 } // kindless → rate
+  ];
+  const mergedLog = [...db.reviewLog, ...deviceB]
+    .sort((a, b) => (a.at - b.at) || String(a.id).localeCompare(String(b.id)));
+  const mergedFsrs = rebuildFsrsFromLog(mergedLog);
+  assert(mergedFsrs['a1-s1-l1:c2'] !== db.fsrs['a1-s1-l1:c2'], 'B rating changes c2');
+}
+
+console.log('FlashDay scheduler: 3 checks passed');
