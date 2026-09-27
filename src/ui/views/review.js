@@ -17,7 +17,7 @@ let state = null;
 let keyHandler = null;
 
 export function mount(root, ctx) {
-  state = { ctx, queue: dueChunks(ctx.store.getState(), Date.now()), index: 0, total: 0 };
+  state = { ctx, queue: dueChunks(ctx.store.getState(), Date.now()), index: 0, total: 0, grades: [] };
   state.total = state.queue.length;
 
   const section = document.createElement('section');
@@ -57,7 +57,16 @@ function renderCard(host) {
   const { ctx } = state;
 
   if (state.index >= state.queue.length) {
-    host.appendChild(el('p', `Xong buổi ôn — ${state.total} cụm.`));
+    // Session recap (Anki/Babbel pattern): per-grade counts from the grades
+    // just given — activity facts, same honesty rule as everything else.
+    const counts = { 1: 0, 2: 0, 3: 0, 4: 0 };
+    for (const g of state.grades) counts[g]++;
+    const parts = GRADES.filter(({ grade }) => counts[grade]).map(
+      ({ grade, label }) => `${label} ${counts[grade]}`
+    );
+    const recap = el('p', `Xong buổi ôn — ${state.total} cụm${parts.length ? `: ${parts.join(' · ')}` : ''}.`);
+    recap.dataset.role = 'review-recap';
+    host.appendChild(recap);
     const done = document.createElement('a');
     done.className = 'btn-primary';
     done.href = '#/today';
@@ -130,6 +139,7 @@ function renderCard(host) {
           at: Date.now()
         });
       });
+      state.grades.push(grade);
       state.index++;
       renderCard(host);
     });
