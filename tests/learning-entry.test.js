@@ -61,14 +61,14 @@ const C=require('../flashday-cloud.js');
   const db=D.createInitialDb(undefined,1000);
   const before=db.items.length;
   const stateBefore=L.clusterState(db,'a1-meeting-change');
-  assert.equal(stateBefore.total,20, 'the meeting-change pilot must be a complete 20-Unit situation cluster');
-  assert.equal(stateBefore.installed,3, 'shared seed Units should count as available without being duplicated');
+  assert.equal(stateBefore.total,6, 'beginner path requires only its six core expressions');
+  assert.equal(stateBefore.installed,1, 'existing say-again is reused');
   const result=L.installGuidedCluster(db,'a1-meeting-change',D);
-  assert.equal(result.added.length,17);
-  assert.equal(result.reused.length,3);
-  assert.equal(db.items.length,before+17);
+  assert.equal(result.added.length,5);
+  assert.equal(result.reused.length,1);
+  assert.equal(db.items.length,before+5);
   assert.equal(result.state.complete,true);
-  assert.equal(L.modulesForCluster('a1-meeting-change').length,5);
+  assert.equal(L.modulesForCluster('a1-meeting-change').length,1);
 }
 
 {
@@ -432,4 +432,32 @@ console.log('FlashDay learning entry: guided/personal/transfer regressions passe
   L.submitUnitTransferAttempt(db,{id:'second',unitId:item.id,responseText:'Hello from Hue.',selfReviewed:true},due+1000);
   assert.equal(db.transferAttempts.length,2);
   assert.equal(L.dueUnitTransfer(db,due+1000),null);
+}
+
+// Revised beginner path must not erase older optional vocabulary or review history.
+{
+  const db=D.createInitialDb([],1000);
+  for(const id of ['a1-communication-repair','a1-simple-plans','a1-meeting-propose','a1-meeting-change','a1-meeting-confirm'])L.installGuidedModule(db,id,D);
+  const before=JSON.parse(JSON.stringify(db.items));
+  db.events.push({id:'legacy-review',unitIds:['something-came-up'],answeredAt:1234});
+  const result=L.installGuidedCluster(db,'a1-meeting-change',D);
+  assert.equal(result.added.length,1);
+  assert.equal(result.reused.length,5);
+  assert.deepEqual(db.items.slice(0,before.length),before);
+  assert.equal(db.events[0].unitIds[0],'something-came-up');
+  assert.equal(L.installGuidedCluster(db,'a1-meeting-change',D).added.length,0);
+  const core=L.modulesForCluster('a1-meeting-change').flatMap(m=>m.units);
+  assert(!core.some(u=>u.id==='something-came-up'));
+  assert(core.every(u=>u.exampleSentence&&u.exampleTranslation));
+  const lesson=L.LESSON_DIALOGUES['a1-meeting-change'];
+  assert.notEqual(lesson.sourceId,'lesson:a1-meeting-change','new text cannot reuse old reading evidence key');
+  assert.equal(lesson.contentVersion,2);
+  assert(lesson.lines.some(([line])=>line.includes('See you at four thirty')));
+  for(const quiz of [lesson.scenarioQuiz,L.clusterById('a1-meeting-change').preparation.practiceQuiz]){
+    for(const q of quiz){assert(q.options[q.answer]);assert(q.hint);}
+  }
+  const catalog=require('../starter-catalog').ITEMS;
+  const beginner=catalog.filter(item=>item.level==='A1');
+  assert.equal(beginner.length,2);
+  assert(beginner.every(item=>item.id.endsWith('-v2')&&item.goal&&item.lines.every(pair=>pair.length===2&&pair.every(Boolean))));
 }

@@ -53,6 +53,77 @@ chronologically unordered reviews, duplicate attempts, resume/review behavior,
 and exclusion of unrelated personal-unit attempts from guided-lesson evidence.
 The browser suite checks the resumed flow at 390px as well as account isolation.
 
+### Audit nội dung A1 — 2026-09-27
+
+**Kết luận: chưa đủ để công bố một chương trình giúp đạt A1.** Bản sửa dưới đây
+chỉ thu hẹp và cải thiện một bài đọc/viết có hỗ trợ hướng tới A1. Không có chứng
+nhận CEFR, thẩm định giáo viên độc lập hoặc kết quả học viên trong lần audit này.
+
+Nguồn đối chiếu (đọc ngày 2026-09-27):
+
+- [Council of Europe, CEFR Companion Volume 2020](https://rm.coe.int/common-european-framework-of-reference-for-languages-learning-teaching/16809ea0d4):
+  trang in 48, 54–55, 72–73, 78–79, 83–84, 89 và 189. A1 cho phép đọc lại
+  văn bản rất ngắn, nhận biết thông tin quen thuộc, trao đổi đơn giản với người
+  đối thoại hỗ trợ, và viết các câu đơn giản. Tin nhắn về nơi/giờ gặp thuộc phạm
+  vi đọc A1; điều đó không tự chứng minh khả năng thương lượng lịch bằng lời nói.
+- [British Council: A1 Elementary](https://learnenglish.britishcouncil.org/level/understand-your-level/a1-elementary):
+  mô tả tổng quan nhu cầu hằng ngày, thông tin cá nhân và giao tiếp chậm/rõ.
+- [British Council: A1 speaking](https://learnenglish.britishcouncil.org/free-resources/speaking/a1):
+  ví dụ thiết kế có chuẩn bị, ngôn ngữ trong ngữ cảnh, luyện và kiểm hiểu.
+  Chỉ tham khảo cách tổ chức; không sao chép bài hoặc coi đây là chứng nhận FlashDay.
+
+CEFR không được dùng ở đây để suy ra số trang web, số Unit hoặc số câu tối thiểu
+của một khóa học. Sáu cụm cốt lõi và các tiêu chí bài tập dưới đây là quyết định
+biên soạn của FlashDay, không phải ngưỡng A1 chính thức.
+
+#### Phạm vi đã kiểm tra và thay đổi
+
+| Nội dung hiện có                                     | Vấn đề trước audit                                                                                                                           | Xử lý trong bản sửa                                                                                                                                                       |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Guided cluster hẹn gặp: 5 module, 20 Unit            | Mục tiêu bao gồm hiểu, đổi lịch và phối hợp; 20 cụm phải nhập trước khi vận dụng; có `something came up`, `reschedule`, mệnh đề dài chưa dạy | Đường bắt buộc còn 6 cụm trong `a1-meeting-basics`; mục tiêu chỉ đọc giờ/nơi và viết lời xác nhận. Bộ cũ giữ nguyên ID/lịch sử, không bắt buộc; không tự gán lại thành A2 |
+| Hội thoại dẫn nhập                                   | 9 lượt, nhiều lần đổi giờ và thành ngữ trước khi có hướng dẫn                                                                                | 6 lượt, một lần đổi 2:00 → 4:30, từ/giờ giải thích trước; source ID `:v2` tách bằng chứng bài cũ                                                                          |
+| Worked example và mission                            | Ví dụ dài, yêu cầu 2–3 câu trong khi chỉ kiểm giờ                                                                                            | Mẫu ngắn từng bước, yêu cầu 1–2 câu; chất lượng toàn câu vẫn tự đối chiếu, không chấm đạt A1                                                                              |
+| Hai catalog A1: cà phê, hỏi đường                    | Câu dài, thành ngữ và nhiều yêu cầu trong một lượt; không có mục tiêu đọc cụ thể                                                             | Viết lại mỗi bài thành 6 lượt ngắn, thêm mục tiêu, ID `-v2`. Đây vẫn là bài đọc bổ sung, chưa là lesson trọn vẹn                                                          |
+| Hai catalog A2 và một B1                             | Nhãn nội bộ chưa được thẩm định; không phải coverage A1                                                                                      | Giữ nội dung; UI ghi rõ level ước lượng. Không dùng chúng để tính độ bao phủ A1                                                                                           |
+| Seed deck, transcript demo, nội dung người dùng nhập | Cụm đơn lẻ/nguồn tự nhập không phải giáo trình được phân bậc                                                                                 | Không dùng số card, độ quen từ hay nhãn nguồn để kết luận trình độ                                                                                                        |
+
+#### Cấu trúc bài đã thực hiện
+
+1. Nêu điều kiện đầu vào: nhận số 1–12; có bảng hỗ trợ `four thirty`, ngày và nơi.
+2. Giải thích `at` + giờ, `on` + ngày; xin nhắc lại; ví dụ chọn giờ cuối cùng.
+3. Ba câu luyện có gợi ý: chọn giới từ, xin nhắc lại, đổi giờ trong câu mẫu.
+   Feedback giải thích khi sai và cho thử lại. Records ghi `supported-language-practice`,
+   tách khỏi kiểm hiểu hội thoại; không nâng level hoặc điểm tình huống.
+4. Đọc hội thoại trong reader, được đọc lại và xem nghĩa; ba câu kiểm thông tin
+   về giờ ban đầu, giờ cuối và nơi gặp. 3/3 chỉ là đúng ba câu này trong lần này.
+5. Viết 1–2 câu đáp tin nhắn của nhiệm vụ. Gate kiểm giờ; checklist tự so nội dung và nghĩa.
+   Tick đã nói không chứng minh phát âm, khả năng nghe hoặc tương tác.
+6. Bộ ôn và vận dụng trễ hiện có tiếp tục dùng; không đổi chúng thành chứng chỉ.
+
+#### Ma trận khoảng trống của chương trình
+
+| Năng lực cần có bằng chứng               | Hiện có                          | Còn thiếu trước khi tuyên bố bao phủ A1                                         |
+| ---------------------------------------- | -------------------------------- | ------------------------------------------------------------------------------- |
+| Đọc thông tin quen thuộc, tin nhắn ngắn  | Hẹn gặp; hai bài đọc bổ sung     | Nhiều ngữ cảnh, bảng giờ/giá, biển báo và câu hỏi độc lập                       |
+| Nghe thông tin đơn giản, chậm/rõ         | TTS hỗ trợ luyện câu             | Audio đã kiểm nghe, bài nghe không hiện transcript trước, câu hỏi thông tin     |
+| Tự giới thiệu, hỏi/đáp thông tin cá nhân | Chưa có bài dẫn dắt              | Bài giới thiệu, nơi ở, người quen, đồ dùng, nhu cầu hằng ngày                   |
+| Tương tác đơn giản có hỗ trợ             | Mẫu xin nhắc lại; tự khai đã nói | Nhiệm vụ hai vai, phản hồi của người nghe và kiểm tra mức dễ hiểu               |
+| Viết thông tin cá nhân/tin nhắn đơn giản | Một lời xác nhận tự đối chiếu    | Biểu mẫu, mô tả ngắn, tin nhắn trong tình huống chưa luyện và rubric người chấm |
+| Chuyển thông tin cơ bản cho người khác   | Chưa có nhiệm vụ riêng           | Truyền lại thông tin ngắn như giờ/nơi trong ngữ cảnh cụ thể                     |
+| Đánh giá và vận dụng                     | Quiz, lịch sử, vận dụng trễ      | Nhiệm vụ mới ở nhiều bối cảnh và đánh giá độc lập từng kỹ năng                  |
+
+Các nhóm chủ đề để tổ chức bài tiếp theo: giới thiệu bản thân; người/đồ vật quen
+thuộc; sinh hoạt và giờ; mua đồ/giá; địa điểm/chỉ dẫn; tin nhắn/biểu mẫu.
+Đây là đề xuất phân nhóm để lấp khoảng trống, không phải danh sách chương bắt buộc
+của CEFR. Không mở rộng số bài trước khi mỗi bài có mục tiêu, hướng dẫn, ví dụ,
+luyện có hỗ trợ, phản hồi và nhiệm vụ mới khớp nhau.
+
+Điều kiện kết thúc vòng sửa hiện tại: nội dung mới hiện trên UI, quiz hỗ trợ có
+feedback/retry và lưu riêng, import không xóa Unit hoặc records cũ, tests đầy đủ
+qua. Điều kiện công bố khóa A1 vẫn **chưa đạt**: ma trận còn trống; cần rà soát bởi
+người có chuyên môn giảng dạy và đánh giá nghe/nói/đọc/viết độc lập. Test kỹ thuật
+chỉ chứng minh phần mềm thực thi thiết kế, không xác nhận độ khó hay hiệu quả học.
+
 FlashDay helps Vietnamese-speaking learners retain and retrieve English that
 they can use. Its purpose is not to make a learner finish a card queue; it is
 to help them understand, say, read and write useful English in ordinary

@@ -23,6 +23,68 @@ try {
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await page.goto(`${origin}app/?preview`);
+    const preparation = page.locator("[data-preparation-quiz]");
+    assert.equal(
+      await preparation
+        .locator(".quiz-opt")
+        .first()
+        .evaluate((node) => getComputedStyle(node).borderTopWidth),
+      "1px",
+      "lesson options must remain visibly selectable outside the reader",
+    );
+    assert.equal(
+      await page.locator(".lesson-preparation").evaluate((node) => node.open),
+      true,
+    );
+    assert.match(
+      await page
+        .locator("[data-cluster-card] .cluster-note")
+        .first()
+        .innerText(),
+      /chưa phải khóa A1/,
+    );
+    assert.match(
+      await page.locator("[data-guided-cluster]").innerText(),
+      /6 Unit|5 Unit/,
+    );
+    for (const question of await preparation.locator(".sq-q").all())
+      await question.locator(".quiz-opt").first().click();
+    await preparation.locator(".sq-submit").click();
+    assert.match(await preparation.locator(".sq-result").innerText(), /1\/3/);
+    assert.equal(await preparation.locator(".sq-hint:not(.hidden)").count(), 2);
+    await preparation.locator(".sq-retry").click();
+    for (const [index, answer] of [1, 2, 0].entries())
+      await preparation
+        .locator(".sq-q")
+        .nth(index)
+        .locator(".quiz-opt")
+        .nth(answer)
+        .click();
+    await preparation.locator(".sq-submit").click();
+    assert.match(await preparation.locator(".sq-result").innerText(), /3\/3/);
+    const prepRecords = await page.evaluate(
+      () =>
+        JSON.parse(
+          localStorage.getItem(window.FlashDayData.dbKey(localStorage)),
+        ).comprehensionChecks,
+    );
+    assert.deepEqual(
+      prepRecords.map((r) => r.correct),
+      [1, 3],
+    );
+    assert(
+      prepRecords.every(
+        (r) =>
+          r.activity === "supported-language-practice" &&
+          r.contentVersion === 2 &&
+          r.sourceKey.endsWith(":v2:preparation"),
+      ),
+    );
+    assert.equal(
+      await page.locator(".lesson-evidence").count(),
+      0,
+      "supported language practice must not masquerade as scenario comprehension",
+    );
     await page.locator("[data-guided-cluster]").click();
     await page.locator("[data-guided-cluster]:disabled").waitFor();
     await page.locator(".lesson-scenario summary").click();

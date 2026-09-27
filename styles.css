@@ -317,9 +317,9 @@ svg { display: block; }
 .guided-cluster h4, .transfer-mission h4 { margin: 2px 0 6px; font-size: 20px; line-height: 1.25; }
 .guided-cluster p, .transfer-mission p { color: var(--fd-text-secondary); }
 .cluster-progress, .transfer-status { flex: 0 0 auto; max-width: 156px; color: var(--fd-text-secondary); font-size: 12px; font-weight: 700; line-height: 1.4; text-align: right; }
-.guided-example, .guided-steps { margin: 14px 0 0; padding: 14px 0 0; border-top: 1px solid var(--fd-border); }
-.guided-example summary, .guided-steps summary { color: var(--fd-text-primary); cursor: pointer; font-size: 14px; font-weight: 800; }
-.guided-example ol, .guided-steps ol { display: grid; gap: 10px; margin: 14px 0 0; padding-left: 22px; color: var(--fd-text-secondary); font-size: 14px; }
+.guided-example, .guided-steps, .lesson-preparation { margin: 14px 0 0; padding: 14px 0 0; border-top: 1px solid var(--fd-border); }
+.guided-example summary, .guided-steps summary, .lesson-preparation summary { color: var(--fd-text-primary); cursor: pointer; font-size: 14px; font-weight: 800; }
+.guided-example ol, .guided-steps ol, .lesson-preparation ol, .lesson-preparation ul { display: grid; gap: 10px; margin: 14px 0 0; padding-left: 22px; color: var(--fd-text-secondary); font-size: 14px; }
 .guided-example li { padding-left: 2px; }
 .guided-example li b { color: var(--fd-text-primary); }
 .guided-example li small, .guided-steps li span { display: block; margin-top: 2px; color: var(--fd-text-tertiary); }
@@ -333,11 +333,14 @@ svg { display: block; }
 .lesson-evidence { margin: 10px 0 0; color: var(--fd-text-tertiary); font-size: 12px; line-height: 1.5; }
 .lesson-scenario { margin: 14px 0 0; padding: 14px 0 0; border-top: 1px solid var(--fd-border); }
 .lesson-scenario summary { color: var(--fd-text-primary); cursor: pointer; font-size: 14px; font-weight: 800; }
-.lesson-quiz { margin-top: 12px; display: grid; gap: 14px; }
+/* Shared quiz controls need theme tokens outside the source reader too. */
+.lesson-quiz { --rbg-line: var(--fd-border-interactive); --rtext: var(--fd-text-primary); --rtext-sub: var(--fd-text-secondary); --radius-md: var(--fd-radius-md); --teal-400: var(--fd-accent); --teal-500: var(--fd-accent); margin-top: 12px; display: grid; gap: 14px; }
 .sq-hint { margin: 6px 0 0; color: var(--fd-error); font-size: 12px; }
 .sq-result { margin-top: 4px; }
 .transfer-finaltime input { max-width: 180px; }
 .model-caveat { margin: 6px 0 10px; color: var(--fd-text-tertiary); font-size: 12px; font-style: italic; }
+.lesson-preparation h5 { margin: 18px 0 8px; font-size: 14px; color: var(--fd-text-primary); }
+.lesson-preparation p { margin: 12px 0; font-size: 14px; line-height: 1.6; color: var(--fd-text-secondary); }
 .cluster-note { margin: 16px 0; color: var(--fd-text-tertiary) !important; font-size: 13px; }
 .transfer-missions { display: grid; gap: 12px; margin-top: 16px; }
 .transfer-mission { background: var(--fd-canvas); }

@@ -25,17 +25,28 @@
 
   const GUIDED_CLUSTERS=Object.freeze([
     {
-      id:'a1-meeting-change',level:'A1',title:'Hẹn gặp và đổi kế hoạch',
-      canDo:'Tôi có thể hiểu một kế hoạch đơn giản, đề xuất giờ hẹn, báo có thay đổi và xác nhận lại thời gian mới.',
-      moduleIds:['a1-communication-repair','a1-simple-plans','a1-meeting-propose','a1-meeting-change','a1-meeting-confirm'],
+      id:'a1-meeting-change',level:'A1',title:'Đọc tin hẹn gặp và xác nhận giờ',
+      canDo:'Với câu ngắn và được đọc lại, tôi có thể tìm giờ, nơi hẹn và viết một lời xác nhận đơn giản.',
+      moduleIds:['a1-meeting-basics'],
+      levelBasis:'Mục tiêu A1 · biên soạn nội bộ, chưa thẩm định độc lập',
+      scopeNote:'Một bài đọc và viết có hỗ trợ; chưa phải khóa A1 đầy đủ hay bài kiểm tra nghe/nói.',
+      preparation:{
+        prerequisite:'Bạn cần nhận ra số 1–12. Nếu chưa quen, dùng bảng giờ dưới đây và đọc lại từng dòng; không cần làm nhanh.',
+        glossary:['two = 2; four = 4; six = 6; seven = 7','four thirty = 4:30; thirty = 30 phút','Sunday = Chủ nhật; cafe = quán cà phê; market = chợ','near = gần; meet = gặp; sorry = xin lỗi'],
+        patterns:['Hỏi giờ: What time? — Mấy giờ?','Đề xuất: How about six? / Can we meet at seven?','Xác nhận: OK. See you at seven. — Đồng ý. Hẹn gặp lúc bảy giờ.','Dùng at trước giờ: at seven; dùng on trước ngày: on Sunday.','Giờ cũ và giờ mới khác nhau: đọc lời đồng ý cuối cùng. Không chọn số đầu tiên chỉ vì thấy nó trước.'],
+        worked:['Đề xuất: How about six? → 6:00.','Đổi giờ: Can we meet at seven? → hỏi 7:00.','Đồng ý: OK. See you at seven. → giờ cuối là 7:00.'],
+        practiceQuiz:[
+          {q:'Điền chỗ trống: See you ___ seven.',options:['on','at','in'],answer:1,hint:'Trong mẫu này, at đứng trước giờ; on đứng trước ngày.'},
+          {q:'Bạn chưa nghe rõ giờ hẹn. Chọn câu xin nhắc lại.',options:['No problem.','See you at seven.','Could you say that again?'],answer:2,hint:'Could you say that again? là lời xin người kia nói lại.'},
+          {q:'Đổi câu mẫu See you at six. thành hẹn lúc 8 giờ.',options:['See you at eight.','See you on eight.','See you at six.'],answer:0,hint:'Giữ See you at và thay six bằng eight (8).'}
+        ]
+      },
       workedExample:{
         label:'Mẫu hội thoại ngắn',
         turns:[
-          {speaker:'Linh',text:'Are you free on Saturday?',translation:'Bạn rảnh thứ Bảy không?'},
-          {speaker:'Alex',text:'How about six?',translation:'Sáu giờ thì sao?'},
-          {speaker:'Linh',text:'That works for me.',translation:'Giờ đó hợp với tôi.'},
-          {speaker:'Linh',text:'Sorry, something came up. Can we move it to seven?',translation:'Xin lỗi, tôi có việc đột xuất. Mình chuyển sang bảy giờ được không?'},
-          {speaker:'Alex',text:'No problem. See you at seven.',translation:'Không sao. Hẹn gặp lúc bảy giờ.'}
+          {speaker:'Linh',text:'How about six?',translation:'Sáu giờ thì sao?'},
+          {speaker:'Alex',text:'Sorry. Can we meet at seven?',translation:'Xin lỗi. Mình gặp lúc bảy giờ được không?'},
+          {speaker:'Linh',text:'No problem. See you at seven.',translation:'Không sao. Hẹn gặp lúc bảy giờ.'}
         ]
       },
       audioNote:'Bản pilot này dùng text và TTS để luyện; chưa có audio nguồn được kiểm duyệt cho từng Unit.'
@@ -43,6 +54,104 @@
   ]);
 
   const GUIDED_MODULES=Object.freeze([
+    {
+      "id": "a1-meeting-basics",
+      "clusterId": "a1-meeting-change",
+      "order": 0,
+      "level": "A1",
+      "title": "Sáu câu dùng trong bài",
+      "canDo": "Hỏi giờ, đề xuất giờ, xin nhắc lại và xác nhận giờ gặp.",
+      "units": [
+        {
+          "id": "say-again",
+          "type": "expression",
+          "target": "Could you say that again?",
+          "meaning": "Bạn có thể nói lại được không?",
+          "forms": [],
+          "accepted": [
+            "Can you say that again?",
+            "Could you repeat that?",
+            "Can you repeat that?"
+          ],
+          "contexts": ["Bạn không nghe rõ người đối diện."],
+          "tags": ["survival", "conversation"],
+          "intent": "Yêu cầu người khác lặp lại lời vừa nói.",
+          "canDo": "Tôi có thể lịch sự xin nghe lại khi chưa hiểu.",
+          "exampleSentence": "Could you say that again?",
+          "exampleTranslation": "Bạn có thể nói lại được không?"
+        },
+        {
+          "id": "what-time",
+          "type": "expression",
+          "target": "What time?",
+          "meaning": "Mấy giờ?",
+          "forms": [],
+          "accepted": [],
+          "contexts": ["Bạn biết sẽ gặp nhau nhưng chưa biết giờ."],
+          "tags": ["daily", "plans"],
+          "intent": "Hỏi thời gian của một kế hoạch.",
+          "canDo": "Tôi có thể hỏi giờ của một kế hoạch đơn giản.",
+          "exampleSentence": "What time?",
+          "exampleTranslation": "Mấy giờ?"
+        },
+        {
+          "id": "how-about-six",
+          "type": "expression",
+          "target": "How about six?",
+          "meaning": "Sáu giờ thì sao?",
+          "forms": [],
+          "accepted": [],
+          "contexts": ["Bạn muốn đề xuất gặp lúc sáu giờ."],
+          "tags": ["daily", "plans"],
+          "intent": "Đề xuất một lựa chọn thời gian.",
+          "canDo": "Tôi có thể đề xuất một giờ hẹn đơn giản.",
+          "exampleSentence": "How about six?",
+          "exampleTranslation": "Sáu giờ thì sao?"
+        },
+        {
+          "id": "can-we-meet-at-seven",
+          "type": "expression",
+          "target": "Can we meet at seven?",
+          "meaning": "Mình gặp lúc bảy giờ được không?",
+          "forms": [],
+          "accepted": [],
+          "contexts": ["Bạn muốn gặp bạn mình lúc bảy giờ."],
+          "tags": ["daily", "plans"],
+          "intent": "Hỏi về một giờ gặp.",
+          "canDo": "Tôi có thể hỏi một giờ gặp bằng câu ngắn.",
+          "exampleSentence": "Can we meet at seven?",
+          "exampleTranslation": "Mình gặp lúc bảy giờ được không?"
+        },
+        {
+          "id": "no-problem",
+          "type": "expression",
+          "target": "No problem.",
+          "meaning": "Không sao.",
+          "forms": [],
+          "accepted": [],
+          "contexts": ["Người kia xin thay đổi kế hoạch và bạn đồng ý."],
+          "tags": ["daily", "plans"],
+          "intent": "Trấn an và đồng ý với thay đổi nhỏ.",
+          "canDo": "Tôi có thể phản hồi thân thiện khi người khác đổi kế hoạch.",
+          "exampleSentence": "No problem.",
+          "exampleTranslation": "Không sao."
+        },
+        {
+          "id": "see-you-at-seven",
+          "type": "chunk",
+          "target": "See you at seven.",
+          "meaning": "Hẹn gặp lúc bảy giờ.",
+          "forms": [],
+          "accepted": [],
+          "contexts": ["Hai người vừa chốt giờ hẹn mới là bảy giờ."],
+          "tags": ["daily", "plans"],
+          "intent": "Xác nhận giờ gặp mới.",
+          "canDo": "Tôi có thể xác nhận lại một giờ hẹn đã đổi.",
+          "exampleSentence": "See you at seven.",
+          "exampleTranslation": "Hẹn gặp lúc bảy giờ."
+        }
+      ]
+    },
     {
       id:'a1-communication-repair',clusterId:'a1-meeting-change',order:1,level:'A1',title:'Khi chưa hiểu',
       canDo:'Tôi có thể báo rằng mình chưa hiểu và lịch sự xin người khác nói lại hoặc nói chậm hơn.',
@@ -97,10 +206,10 @@
 
   const TRANSFER_MISSIONS=Object.freeze([
     {
-      id:'a1-meeting-change-transfer',clusterId:'a1-meeting-change',level:'A1',title:'Đổi giờ hẹn vào phút chót',
-      canDo:'Tôi có thể phản hồi một thay đổi và chốt lại giờ hẹn mới bằng 2–3 câu đơn giản.',
+      id:'a1-meeting-change-transfer',clusterId:'a1-meeting-change',level:'A1',title:'Viết lời xác nhận giờ hẹn',
+      canDo:'Tôi có thể phản hồi một thay đổi và chốt lại giờ hẹn mới bằng 1–2 câu ngắn.',
       setup:'Bạn và Alex đã hẹn gặp lúc 6 giờ ở quán cà phê. Bây giờ Alex nhắn:',
-      incomingMessage:'Sorry, something came up. Can we move it to seven?',
+      incomingMessage:'Sorry. Can we meet at seven?',
       instructions:'Trả lời bằng tiếng Anh: phản hồi tin đổi lịch và xác nhận lại giờ cuối cùng là 7 giờ (bài này luyện xác nhận — đề xuất giờ khác là một nhiệm vụ riêng). Bạn có thể viết hoặc nói thành tiếng.',
       // The can-do is "confirm the FINAL time the scenario agreed on" —
       // declared time must equal expectedFinalTime AND appear in the
@@ -108,7 +217,7 @@
       // without am/pm, so '7 pm' and '7 am' both satisfy it. A mission that
       // specifies meridiem must set meridiemStrict:true.
       requireFinalTimeConfirm:true,expectedFinalTime:'7:00',meridiemStrict:false,
-      modelAnswer:['No problem. Seven works for me.', 'Great. See you at seven.'],
+      modelAnswer:['OK. See you at seven.', 'No problem. See you at seven.'],
       selfCheck:['Bạn có phản hồi về việc đổi lịch không?', 'Bạn có nói rõ giờ cuối cùng không?', 'Câu trả lời có phù hợp với tình huống, không chỉ chép một từ đơn lẻ?']
     }
   ]);
@@ -283,25 +392,23 @@
   // check and word mining all apply unchanged.
   const LESSON_DIALOGUES=Object.freeze({
     'a1-meeting-change':{
-      sourceId:'lesson:a1-meeting-change',
+      sourceId:'lesson:a1-meeting-change:v2',
+      contentVersion:2,
       title:'Hẹn cà phê cuối tuần — hội thoại dẫn nhập',
       lines:[
-        ['Hey, are you free this Sunday?','Này, Chủ nhật này bạn rảnh không?'],
-        ['I think so. What did you have in mind?','Chắc là rảnh. Bạn định làm gì?'],
-        ['Want to get coffee at that new place near the market?','Đi uống cà phê ở quán mới gần chợ không?'],
-        ['Sounds good. How about two?','Nghe được. Hai giờ thì sao?'],
-        ['Two is a bit early for me. Can we do four?','Hai giờ hơi sớm với tôi. Bốn giờ được không?'],
-        ['Four works for me.','Bốn giờ hợp với tôi.'],
-        ['Oh wait — sorry, something came up. Can we move it to four thirty?','Ối khoan — xin lỗi, tôi có việc đột xuất. Mình dời sang bốn giờ rưỡi được không?'],
-        ['No problem. So — see you at four thirty, at the new cafe.','Không sao. Vậy hẹn gặp lúc bốn giờ rưỡi, ở quán mới nhé.'],
-        ['See you then. Let me know when you get there.','Hẹn gặp bạn. Nhắn tôi khi bạn tới nhé.']
+        ['Linh: Coffee on Sunday? At the new cafe near the market?', 'Linh: Chủ nhật đi uống cà phê nhé? Ở quán mới gần chợ nhé?'],
+        ['Alex: Yes. What time?', 'Alex: Được. Mấy giờ?'],
+        ['Linh: How about two?', 'Linh: Hai giờ thì sao?'],
+        ['Alex: Sorry. Can we meet at four thirty?', 'Alex: Xin lỗi. Mình gặp lúc bốn giờ rưỡi được không?'],
+        ['Linh: OK. See you at four thirty.', 'Linh: Đồng ý. Hẹn gặp lúc bốn giờ rưỡi.'],
+        ['Alex: See you at the cafe.', 'Alex: Hẹn gặp ở quán cà phê.']
       ],
       // Situation comprehension — separate from the line-by-line quiz: does
       // the learner know what was agreed, not just what each line means?
       scenarioQuiz:[
         {q:'Ban đầu hai người định gặp mấy giờ?',options:['2:00','4:00','4:30','7:00'],answer:0,hint:'“How about two?” là đề xuất đầu tiên — 2:00.'},
-        {q:'Giờ cuối cùng hai người chốt là mấy giờ?',options:['2:00','4:00','4:30','7:00'],answer:2,hint:'“Can we move it to four thirty?” rồi “see you at four thirty” → 4:30.'},
-        {q:'Hai người hẹn gặp ở đâu?',options:['Quán cà phê mới gần chợ','Công viên','Trường học','Nhà Alex'],answer:0,hint:'“that new place near the market” — quán mới gần chợ.'}
+        {q:'Giờ cuối cùng hai người chốt là mấy giờ?',options:['2:00','4:00','4:30','7:00'],answer:2,hint:'“Can we meet at four thirty?” rồi “See you at four thirty” → 4:30.'},
+        {q:'Hai người hẹn gặp ở đâu?',options:['Quán cà phê mới gần chợ','Công viên','Trường học','Nhà Alex'],answer:0,hint:'“the new cafe near the market” — quán mới gần chợ.'}
       ]
     }
   });
@@ -438,7 +545,7 @@
   function missionById(id){return TRANSFER_MISSIONS.find(mission=>mission.id===id)||null;}
   function modulesForCluster(clusterId){
     return GUIDED_MODULES
-      .filter(module=>module.clusterId===clusterId)
+      .filter(module=>clusterById(clusterId)?.moduleIds.includes(module.id))
       .sort((left,right)=>Number(left.order||0)-Number(right.order||0));
   }
 
