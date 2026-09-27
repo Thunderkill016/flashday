@@ -18,12 +18,21 @@ const OWNER_KEY = 'flashday:db-owner';
 const L1 = 'a1-s1-l1';
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// With the lazy app bundle, view mount is async — wait for real content inside
+// #view, not the static empty div, before asserting anything below it.
+const VIEW_READY = '#view:not(:empty)';
+async function goto(page, url) {
+  await page.goto(url);
+  await page.locator(VIEW_READY).waitFor();
+}
+async function reload(page) {
+  await page.reload();
+  await page.locator(VIEW_READY).waitFor();
+}
+
 let browser;
 let passed = 0;
-const check = (name) => {
-  passed++;
-  console.log(`  ✓ ${name}`);
-};
+const check = (name) => { passed++; console.log(`  ✓ ${name}`); };
 
 try {
   browser = await chromium.launch({ executablePath, headless: true });
@@ -34,7 +43,7 @@ try {
     const page = await context.newPage();
     const errors = [];
     page.on('pageerror', (error) => errors.push(error.message));
-    await page.goto(`${origin}app/?preview`);
+    await goto(page, `${origin}app/?preview`);
     for (const label of ['Học', 'Ôn', 'Hồ sơ']) {
       assert.equal(await page.locator('.app-tab', { hasText: label }).count(), 1, `tab ${label}`);
     }
@@ -48,11 +57,11 @@ try {
     assert.equal(await h1('Hồ sơ').textContent(), 'Hồ sơ');
     await page.locator('.app-tab', { hasText: 'Học' }).click();
     assert.equal(await h1('Hôm nay').textContent(), 'Hôm nay');
-    await page.goto(`${origin}app/?preview#/path`);
+    await goto(page, `${origin}app/?preview#/path`);
     assert.equal(await h1('Lộ trình').textContent(), 'Lộ trình');
-    await page.goto(`${origin}app/?preview#/summary/${L1}`);
+    await goto(page, `${origin}app/?preview#/summary/${L1}`);
     assert.equal(await h1('Kết quả buổi học').textContent(), 'Kết quả buổi học');
-    await page.goto(`${origin}app/?preview#/lesson/${L1}/listen`);
+    await goto(page, `${origin}app/?preview#/lesson/${L1}/listen`);
     assert.equal(await page.locator('.runner-pane[data-step]').count(), 5);
     let visible = 0;
     for (let i = 0; i < 5; i++) if (await page.locator('.runner-pane[data-step]').nth(i).isVisible()) visible++;
@@ -68,10 +77,10 @@ try {
   {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
     const page = await context.newPage();
-    await page.goto(`${origin}app/?preview#/lesson/${L1}/write`);
+    await goto(page, `${origin}app/?preview#/lesson/${L1}/write`);
     await page.locator('.runner-pane[data-step="write"] .write-area').fill('I am Linh from Hue.');
     await sleep(1200); // debounced draft save
-    await page.reload();
+    await reload(page);
     await page.waitForSelector('.runner-pane[data-step="write"]:not([hidden])');
     assert.equal(await page.locator('.runner-pane[data-step="write"] .write-area').inputValue(), 'I am Linh from Hue.');
     await context.close();
@@ -82,26 +91,18 @@ try {
   {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
     const page = await context.newPage();
-    await page.goto(`${origin}app/?preview#/lesson/${L1}/read`);
+    await goto(page, `${origin}app/?preview#/lesson/${L1}/read`);
     const readPane = page.locator('.runner-pane[data-step="read"]');
     const stamp = await readPane.locator('.quiz').getAttribute('data-quiz-mount');
     await readPane.locator('.quiz-question').nth(0).locator('.quiz-option').nth(0).click();
     await readPane.locator('.quiz-question').nth(1).locator('.quiz-option').nth(1).click();
     await sleep(1200);
-    await page.evaluate(() => {
-      window.location.hash = `#/lesson/${'a1-s1-l1'}/listen`;
-    });
+    await page.evaluate(() => { window.location.hash = `#/lesson/${'a1-s1-l1'}/listen`; });
     await page.waitForSelector('.runner-pane[data-step="listen"]:not([hidden])');
-    await page.evaluate(() => {
-      window.location.hash = `#/lesson/${'a1-s1-l1'}/read`;
-    });
+    await page.evaluate(() => { window.location.hash = `#/lesson/${'a1-s1-l1'}/read`; });
     await page.waitForSelector('.runner-pane[data-step="read"]:not([hidden])');
     const pane = page.locator('.runner-pane[data-step="read"]');
-    assert.equal(
-      await pane.locator('.quiz').getAttribute('data-quiz-mount'),
-      stamp,
-      'quiz DOM must be the same mounted node'
-    );
+    assert.equal(await pane.locator('.quiz').getAttribute('data-quiz-mount'), stamp, 'quiz DOM must be the same mounted node');
     assert.equal(await pane.locator('.quiz-question').nth(0).locator('input').nth(0).isChecked(), true);
     assert.equal(await pane.locator('.quiz-question').nth(1).locator('input').nth(1).isChecked(), true);
     await context.close();
@@ -112,7 +113,7 @@ try {
   {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
     const page = await context.newPage();
-    await page.goto(`${origin}app/?preview#/lesson/${L1}/read`);
+    await goto(page, `${origin}app/?preview#/lesson/${L1}/read`);
     const pane = page.locator('.runner-pane[data-step="read"]');
     // s1-l1 read answers are [0, 1, 0] — pick all-wrong first.
     await pane.locator('.quiz-question').nth(0).locator('.quiz-option').nth(1).click();
@@ -122,11 +123,7 @@ try {
     assert.equal(await pane.locator('.quiz-hint:not([hidden])').count(), 3, 'hints show for wrong answers');
     assert.equal(await pane.locator('.quiz-retry').isVisible(), true);
     await pane.locator('.quiz-retry').click();
-    assert.equal(
-      await pane.locator('.quiz-question').nth(0).locator('input').nth(0).isEnabled(),
-      true,
-      'options re-enabled'
-    );
+    assert.equal(await pane.locator('.quiz-question').nth(0).locator('input').nth(0).isEnabled(), true, 'options re-enabled');
     // answer correctly
     await pane.locator('.quiz-question').nth(0).locator('.quiz-option').nth(0).click();
     await pane.locator('.quiz-question').nth(1).locator('.quiz-option').nth(1).click();
@@ -146,24 +143,17 @@ try {
   {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
     const page = await context.newPage();
-    await page.goto(`${origin}app/?preview#/lesson/${L1}/write`);
+    await goto(page, `${origin}app/?preview#/lesson/${L1}/write`);
     await page.locator('.runner-pane[data-step="write"] .write-area').fill('old draft text');
     await sleep(1200);
-    await page.evaluate(
-      ({ key, lessonId }) => {
-        const session = JSON.parse(localStorage.getItem(key));
-        session.drafts[lessonId].contentVersion = 99;
-        localStorage.setItem(key, JSON.stringify(session));
-      },
-      { key: SESSION_KEY, lessonId: L1 }
-    );
-    await page.reload();
+    await page.evaluate(({ key, lessonId }) => {
+      const session = JSON.parse(localStorage.getItem(key));
+      session.drafts[lessonId].contentVersion = 99;
+      localStorage.setItem(key, JSON.stringify(session));
+    }, { key: SESSION_KEY, lessonId: L1 });
+    await reload(page);
     await page.waitForSelector('[data-role="stale-notice"]');
-    assert.equal(
-      await page.locator('.runner-pane[data-step="write"] .write-area').inputValue(),
-      '',
-      'stale draft must not replay answers'
-    );
+    assert.equal(await page.locator('.runner-pane[data-step="write"] .write-area').inputValue(), '', 'stale draft must not replay answers');
     await context.close();
     check('stale draft → notice, empty textarea');
   }
@@ -172,12 +162,12 @@ try {
   {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
     const page = await context.newPage();
-    await page.goto(`${origin}app/?preview#/lesson/${L1}/write`);
+    await goto(page, `${origin}app/?preview#/lesson/${L1}/write`);
     await page.locator('.runner-pane[data-step="write"] .write-area').fill('alice draft');
     await sleep(1200);
     // claimDbNamespace semantics: owner marker routes reads to the uid slot.
     await page.evaluate((ownerKey) => localStorage.setItem(ownerKey, 'other-uid'), OWNER_KEY);
-    await page.reload();
+    await reload(page);
     await page.waitForSelector('.runner-pane[data-step]:not([hidden])');
     const writePane = page.locator('.runner-pane[data-step="write"]');
     if (await writePane.isVisible()) {
@@ -194,7 +184,7 @@ try {
   {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
     const page = await context.newPage();
-    await page.goto(`${origin}app/?preview#/lesson/${L1}/write`);
+    await goto(page, `${origin}app/?preview#/lesson/${L1}/write`);
     const pane = page.locator('.runner-pane[data-step="write"]');
     await pane.locator('.write-area').fill('Hi I am Linh from Hue');
     assert.equal(await pane.locator('[data-role="model-toggle"]').isEnabled(), true, 'Xem mẫu enabled at ≥3 words');
@@ -215,8 +205,7 @@ try {
   {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
     const page = await context.newPage();
-    await page.goto(`${origin}app/?preview#/lesson/a1-s1-l5/prepare`);
-    await page.locator('.runner-pane[data-step="read"]').waitFor();
+    await goto(page, `${origin}app/?preview#/lesson/a1-s1-l5/prepare`);
     assert.equal(await page.locator('.step-pill').count(), 4, 'checkpoint hides the prepare step');
     assert.equal(await page.locator('.runner-pane[data-step="read"]').isVisible(), true);
     assert.equal(await page.locator('.runner-pane[data-step="prepare"]').count(), 0);
@@ -240,7 +229,7 @@ try {
   {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
     const page = await context.newPage();
-    await page.goto(`${origin}app/?preview#/lesson/${L1}/read`);
+    await goto(page, `${origin}app/?preview#/lesson/${L1}/read`);
     const readPane = page.locator('.runner-pane[data-step="read"]');
     assert.equal(await readPane.locator('.quiz-retry').isVisible(), false, 'Làm lại must be hidden before submit');
     // submit → retry visible
@@ -250,15 +239,9 @@ try {
     await readPane.locator('.quiz-submit').click();
     assert.equal(await readPane.locator('.quiz-retry').isVisible(), true);
 
-    await page.evaluate(() => {
-      window.location.hash = '#/lesson/a1-s1-l1/write';
-    });
+    await page.evaluate(() => { window.location.hash = '#/lesson/a1-s1-l1/write'; });
     const writePane = page.locator('.runner-pane[data-step="write"]');
-    assert.equal(
-      await writePane.locator('[data-role="write-save"]').isVisible(),
-      false,
-      'Lưu lần thử hidden before Xem mẫu'
-    );
+    assert.equal(await writePane.locator('[data-role="write-save"]').isVisible(), false, 'Lưu lần thử hidden before Xem mẫu');
     // empty text → Xem mẫu stays disabled
     assert.equal(await writePane.locator('[data-role="model-toggle"]').isEnabled(), false);
     await writePane.locator('.write-area').fill('Hi I am Linh');
@@ -281,10 +264,10 @@ try {
   {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
     const page = await context.newPage();
-    await page.goto(`${origin}app/?preview#/today`);
+    await goto(page, `${origin}app/?preview#/today`);
     assert.match(await page.locator('#view').textContent(), /Chưa có thẻ đến hạn/);
     // submit drills on s1-l1 (answers: drills 1-4 correct = 0,2,0,0 — any answers enroll chunks)
-    await page.goto(`${origin}app/?preview#/lesson/${L1}/prepare`);
+    await goto(page, `${origin}app/?preview#/lesson/${L1}/prepare`);
     const pane = page.locator('.runner-pane[data-step="prepare"]');
     for (let q = 0; q < 4; q++) {
       await pane.locator('.quiz-question').nth(q).locator('.quiz-option').nth(0).click();
@@ -295,14 +278,14 @@ try {
       return Object.keys(db.fsrs || {}).length;
     }, DB_KEY);
     assert.equal(enrolled, 8, 'drill submit enrolls all 8 chunks');
-    await page.goto(`${origin}app/?preview#/today`);
+    await goto(page, `${origin}app/?preview#/today`);
     assert.match(await page.locator('#view').textContent(), /8 cụm đến hạn/, 'new FSRS cards are due immediately');
     // path pill for s1-l1 now "Đang luyện"
-    await page.goto(`${origin}app/?preview#/path`);
+    await goto(page, `${origin}app/?preview#/path`);
     const pill = page.locator('.path-lessons li', { hasText: 'Chào hỏi và giới thiệu' }).locator('.path-status');
     assert.equal(await pill.textContent(), 'Đang luyện');
     // summary: untouched steps show "Chưa làm" links
-    await page.goto(`${origin}app/?preview#/summary/${L1}`);
+    await goto(page, `${origin}app/?preview#/summary/${L1}`);
     const todoLinks = page.locator('.summary-steps a', { hasText: 'Chưa làm' });
     assert.equal(await todoLinks.count(), 4, 'read/listen/write/speak untouched');
     await context.close();
@@ -314,14 +297,14 @@ try {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
     const page = await context.newPage();
     // enroll via drills first
-    await page.goto(`${origin}app/?preview#/lesson/${L1}/prepare`);
+    await goto(page, `${origin}app/?preview#/lesson/${L1}/prepare`);
     const pane = page.locator('.runner-pane[data-step="prepare"]');
     for (let q = 0; q < 4; q++) {
       await pane.locator('.quiz-question').nth(q).locator('.quiz-option').nth(0).click();
     }
     await pane.locator('.quiz-submit').click();
 
-    await page.goto(`${origin}app/?preview#/review`);
+    await goto(page, `${origin}app/?preview#/review`);
     assert.equal(await page.locator('.review-counter').textContent(), '1/8');
     assert.equal(await page.locator('.review-target').isVisible(), false, 'answer hidden before reveal');
     await page.locator('[data-role="reveal"]').click();
@@ -333,7 +316,7 @@ try {
       return (db.reviewLog || []).filter((e) => e.kind !== 'enroll').length;
     }, DB_KEY);
     assert.equal(logLen, 1, 'grade appends a reviewLog entry (enroll entries are separate)');
-    await page.reload();
+    await reload(page);
     assert.equal(await page.locator('.review-counter').textContent(), '1/7', 'graded card no longer due');
     await context.close();
     check('review reveal → grade → persisted scheduling');
