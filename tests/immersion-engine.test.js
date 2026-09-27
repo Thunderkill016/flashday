@@ -202,3 +202,13 @@ const mixed = (unitId) => (unitId === 'u1' ? 'known' : 'learning');
 }
 
 console.log('FlashDay immersion engine: 13 checks passed');
+
+// Explicit source meaning governs highlighting, coverage and encounter credit.
+{
+  const db={items:[{id:'money',target:'bank',meaning:'ngân hàng'},{id:'river',target:'bank',meaning:'bờ sông'}],encounters:[]};
+  const capture=SC.normalizeCapture({id:'sense-source',sentence:'We sat by the bank.',linkedUnitIds:['river']});
+  assert.deepEqual(IM.assessCapture(db,capture).unitIds,['river']);
+  assert.deepEqual(IM.collectEncounters(db,[capture],{nowMs:1000}).map(row=>row.unitId),['river']);
+  assert.deepEqual(IM.annotatedParts(db,capture.sentence,{capture}).filter(part=>part.unitId).map(part=>part.unitId),['river']);
+  assert.deepEqual(IM.assessCapture(db,{...capture,linkedUnitIds:[]}).unitIds,[]);
+}

@@ -5,6 +5,31 @@
 **Status: research-backed product direction, not a claim that FlashDay already
 delivers language proficiency.**
 
+### Implementation checkpoint — 2026-09-27
+
+The meeting-change cluster remains a practice pilot, not a proficiency assessment.
+The final-time gate checks the scenario time and explicit time mentions; overall
+sentence quality and spoken attempts remain self-check evidence. Quiz feedback
+survives progress updates, and attempts are retained separately from best scores.
+
+Unit identity now includes the learner-selected meaning. Equal spellings with
+multiple meanings are not automatically assigned a sense. Source links, cards,
+encounters and FSRS histories follow the selected Unit ID; existing IDs stay intact.
+
+`npm run verify:full` runs syntax/Node checks, production build, browser regression
+at 390px and 1280px, and Firestore emulator tests. Browser cases use fresh local
+preview data, including a synthetic two-meaning source. Emulator cases cover
+concurrent observation writes, owner isolation, idempotency and cursor pagination.
+These are engineering checks, not real-learner outcome evidence or production
+OAuth acceptance. CI runs the same gate with Java 21 and Chromium.
+
+Cloud observations merge inside a Firestore transaction. Scheduler payloads are
+rebuildable caches, not durable evidence. The existing singleton has a conservative
+750 KiB JSON guard: exceeding it rejects cloud sync explicitly and preserves local
+data. Splitting long histories into individual documents remains future capacity
+work. Existing owner update/delete policy for review events is unchanged; the app's
+append-only convention is not a server-enforced immutable ledger.
+
 FlashDay helps Vietnamese-speaking learners retain and retrieve English that
 they can use. Its purpose is not to make a learner finish a card queue; it is
 to help them understand, say, read and write useful English in ordinary

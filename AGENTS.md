@@ -8,13 +8,23 @@ already spoke.
 ## Build / verify / deploy
 
 ```bash
-npm run verify          # typecheck + tests + vite build (the release gate)
+npm run verify          # syntax checks + Node tests + vite build
+npm run test:browser    # isolated local preview: quiz, mission gate, mobile layout
+npm run test:firestore  # Java 21 required; isolated demo project emulator
+npm run verify:full     # verify + browser + Firestore regression gates
 npm run build           # emits dist/
 firebase deploy --only hosting --project flashday-22ae1
 firebase deploy --only firestore:rules --project flashday-22ae1
 ```
 
 If `firebase` is not on PATH, use `npx --yes firebase-tools deploy …`.
+
+Browser tests use installed Google Chrome when available, otherwise Playwright Chromium
+(`npx playwright install chromium`). Set `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to
+use another Chromium binary. Tests start their own local Vite server and fresh
+preview contexts; they do not log in or write production learner data.
+Firestore tests use the pinned Firebase CLI through npx and only the
+`demo-flashday-test` emulator project. Java 21 is required; CI installs it.
 
 Deploys to TWO hosting sites (firebase.json `hosting` is an array):
 

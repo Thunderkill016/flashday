@@ -142,11 +142,18 @@
     };
   }
 
+  function itemsForCapture(c,items){
+    const selected=new Set(c.linkedUnitIds||[]);
+    const selectedTargets=new Set((items||[]).filter(item=>selected.has(item.id)).map(item=>String(item.target).trim().toLowerCase()));
+    return (items||[]).filter(item=>selected.has(item.id)||!selectedTargets.has(String(item.target).trim().toLowerCase()));
+  }
+
   function toBespokeCard(rawCapture,items){
     const c=normalizeCapture(rawCapture);
     if(!c.sentence||!c.nativeSentence)return null;
     const source=sourceSnapshot(c);
-    const card=CI.cardFromSentence(c.sentence,c.nativeSentence,items||[],{id:`capture:${c.id}`,notes:c.note?[c.note]:[],source});
+    const candidates=itemsForCapture(c,items);
+    const card=CI.cardFromSentence(c.sentence,c.nativeSentence,candidates,{id:`capture:${c.id}`,notes:c.note?[c.note]:[],source});
     if(!card)return null;
     // Preserve Bespoke-compatible fields plus source media provenance.
     card.phonetic=c.pronunciation||card.phonetic||null;
@@ -176,5 +183,5 @@
     db.captures.push(capture);return capture;
   }
 
-  return {normalizeSubtitle,normalizeCapture,isCardReady,toBespokeCard,cardsFromCaptures,addCapture,sourceSnapshot,stableId,normalizeSourceKind,inferSourceKind,normalizeLevel};
+  return {itemsForCapture,normalizeSubtitle,normalizeCapture,isCardReady,toBespokeCard,cardsFromCaptures,addCapture,sourceSnapshot,stableId,normalizeSourceKind,inferSourceKind,normalizeLevel};
 });

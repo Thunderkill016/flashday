@@ -37,7 +37,7 @@ const D=require('../flashday-data.js');
   const item=D.addItem(db,{target:'  take care  ',meaning:'chăm sóc',type:'chunk',forms:['takes care']});
   assert.strictEqual(item.target,'take care');
   assert.deepStrictEqual(item.forms,['takes care']);
-  assert.throws(()=>D.addItem(db,{target:'TAKE   CARE',meaning:'x'}),/đã tồn tại/i);
+  assert.throws(()=>D.addItem(db,{target:'TAKE   CARE',meaning:'chăm sóc'}),/đã tồn tại/i);
 }
 
 {
@@ -78,3 +78,18 @@ const D=require('../flashday-data.js');
 }
 
 console.log('FlashDay data layer: 5 checks passed');
+
+// Two senses retain separate Unit IDs and review history across migration.
+{
+  const db=D.createInitialDb([]);
+  const finance=D.addItem(db,{target:'bank',meaning:'ngân hàng',type:'word_sense'});
+  const river=D.addItem(db,{target:'bank',meaning:'bờ sông',type:'word_sense'});
+  assert.notEqual(finance.id,river.id);
+  assert.throws(()=>D.addItem(db,{target:' BANK ',meaning:' NGÂN HÀNG ',type:'word_sense'}));
+  assert.throws(()=>D.addItem(db,{id:finance.id,target:'river',meaning:'sông'}));
+  db.events.push({id:'review-finance',unitIds:[finance.id],ratings:{[finance.id]:3}});
+  const migrated=D.migrateDb(db);
+  assert.equal(migrated.items.length,2);
+  assert.deepEqual(migrated.events[0].unitIds,[finance.id]);
+  assert.equal(migrated.events[0].ratings[river.id],undefined);
+}

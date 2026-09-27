@@ -23,6 +23,13 @@
 
   function clone(value){return JSON.parse(JSON.stringify(value));}
   function normalizeKey(value){return String(value||'').toLowerCase().trim().replace(/\s+/g,' ');}
+  // A spelling can carry multiple meanings. Keep identity explicit and
+  // conservative: equivalent glosses can be selected by the learner in mining.
+  function sameMeaning(left,right){
+    return normalizeKey(left?.target)===normalizeKey(right?.target)
+      &&normalizeKey(left?.meaning)===normalizeKey(right?.meaning);
+  }
+
   function uid(prefix='id'){return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,8)}`;}
 
   function createInitialDb(items=SEED_ITEMS,now=Date.now()){
@@ -54,7 +61,8 @@
   function addItem(db,raw){
     const target=String(raw?.target||'').trim(),meaning=String(raw?.meaning||'').trim();
     if(!target||!meaning)throw new Error('Target và meaning là bắt buộc.');
-    if((db.items||[]).some(item=>normalizeKey(item.target)===normalizeKey(target)))throw new Error('Unit này đã tồn tại.');
+    if((db.items||[]).some(item=>sameMeaning(item,{target,meaning})))throw new Error('Từ/cụm với nghĩa này đã tồn tại.');
+    if(raw.id&&(db.items||[]).some(item=>String(item.id)===String(raw.id)))throw new Error('ID Unit này đã tồn tại.');
     const item={
       id:String(raw.id||uid('unit')),target,meaning,type:String(raw.type||'chunk'),
       forms:Array.isArray(raw.forms)?raw.forms.filter(Boolean).map(String):[],
@@ -117,5 +125,5 @@
     try{storage.removeItem(DB_OWNER_KEY);}catch(_error){}
   }
 
-  return {SEED_ITEMS,HYBRID_SCHEDULER,HYBRID_SOURCE,DB_BASE_KEY,DB_OWNER_KEY,dbKey,claimDbNamespace,releaseDbNamespace,createInitialDb,migrateDb,addItem,isPristineDb,normalizeKey,uid,clone};
+  return {SEED_ITEMS,HYBRID_SCHEDULER,HYBRID_SOURCE,DB_BASE_KEY,DB_OWNER_KEY,dbKey,claimDbNamespace,releaseDbNamespace,createInitialDb,migrateDb,addItem,isPristineDb,normalizeKey,sameMeaning,uid,clone};
 });

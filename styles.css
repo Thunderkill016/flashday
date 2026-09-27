@@ -227,7 +227,7 @@ svg { display: block; }
 .cap-cell label { display: flex; justify-content: space-between; gap: 8px; color: var(--fd-text-secondary); font-size: 14px; font-weight: 600; }
 
 .capture-form { padding: 40px; border: 1px solid var(--fd-border); border-radius: var(--fd-radius-card); background: var(--fd-surface); box-shadow: var(--fd-shadow-card); }
-.field { display: grid; gap: 8px; margin-bottom: 24px; }
+.field { display: grid; min-width: 0; gap: 8px; margin-bottom: 24px; }
 .field label { color: var(--fd-text-primary); font-size: 15px; font-weight: 700; }
 .field input, .field textarea, .field select { min-height: 52px; padding: 16px; border: 1px solid var(--fd-border-interactive); border-radius: var(--fd-radius-md); line-height: 1.6; background: var(--fd-surface); font-weight: 500; font-size: 16px; transition: border-color 0.2s, box-shadow 0.2s; }
 .field input:focus, .field textarea:focus { border-color: var(--fd-focus); outline: none; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1); }
@@ -256,6 +256,8 @@ svg { display: block; }
 .guided-module-meta { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; color: var(--fd-text-secondary); font-size: 12px; font-weight: 700; }
 .module-action { min-height: 42px; padding: 0 16px; border: 1px solid var(--fd-border-interactive); border-radius: 999px; background: var(--fd-primary); color: var(--fd-primary-text); font-weight: 700; cursor: pointer; }
 .profile-save { margin-top: 14px; justify-self: start; }
+/* Native file inputs must shrink inside the mobile import grid. */
+.field input[type="file"] { width: 100%; min-width: 0; max-width: 100%; }
 .field input[type="file"]::file-selector-button {
   min-height: 36px; padding: 0 14px; margin-right: 12px;
   border: 1px solid var(--fd-border-interactive); border-radius: var(--radius-sm);
@@ -847,7 +849,7 @@ mark.token-new { border-bottom: 2px solid var(--memory-new); padding: 0 1px; }
 .level-pill { flex-shrink: 0; padding: 2px 8px; border-radius: var(--radius-pill); border: 1px solid var(--fd-accent); color: var(--fd-accent); font-size: 11px; font-weight: 600; }
 .catalog-card-meta { font-size: 12px; color: var(--fd-text-tertiary); }
 .url-fetch-row { display: flex; gap: 8px; }
-.url-fetch-row input { flex: 1; }
+.url-fetch-row input { flex: 1; min-width: 0; width: 0; }
 .url-fetch-row .ghost-btn { flex-shrink: 0; }
 
 /* Memory search — filter row above the unit list. */

@@ -15,7 +15,7 @@ assert(source.includes('persistIncrementalDb'), 'runtime must use incremental cl
 assert(!source.includes('function persistCurrentDb'), 'legacy full-database sync must stay removed');
 assert(source.includes('mergeLearnerDb'), 'cloud hydration must merge local and remote learner data');
 assert(source.includes('rebuildProgressFromEvents'), 'merged review history must rebuild Bespoke cache');
-assert(source.includes('.range(from, from + CLOUD_PAGE_SIZE - 1)'), 'cloud history fetch must paginate');
+assert(source.includes('.pageAfter(cursor, CLOUD_PAGE_SIZE)'), 'cloud history fetch must paginate');
 assert(source.includes('ignoreDuplicates: true'), 'append-only review upload must be idempotent');
 assert(source.includes('D.isPristineDb(db)'), 'fresh demo seeds must not pollute an existing remote account');
 assert(source.includes("'browser-tts'"), 'listening stimulus provenance must distinguish browser TTS');
@@ -82,15 +82,8 @@ assert(source.includes("$('memorySearch').oninput = renderMemory"), 'search inpu
 assert(cloud.includes('mergeCaptures'), 'captures must merge by updatedAt, not blanket remote-wins');
 assert(learningHub.includes('row.updatedAt=Date.now()'), 'in-place capture edits must stamp updatedAt');
 
-// Regression: submitting the scenario quiz used to re-render the whole cluster
-// card, wiping the just-rendered score/hints/"Làm lại". Post-save paths must
-// patch the progress strip in place via updateLessonProgress — the full
-// renderGuidedModules() is allowed exactly once (definition + mount call).
-assert.strictEqual(learningHub.split('renderGuidedModules()').length - 1, 2,
-  'renderGuidedModules must only run at init — post-save paths update progress in place');
-assert(learningHub.includes('function updateLessonProgress'), 'in-place lesson progress updater must exist');
-assert(learningHub.split('updateLessonProgress()').length - 1 >= 5,
-  'all post-save paths (unit transfer, mission, source quiz, scenario quiz) must update progress in place');
+// Quiz DOM lifetime is exercised by learning-browser.test.mjs: source-call
+// counts cannot prove that feedback survives a save or that retry works.
 // Regression: reveal and submit must share checkFinalTimeConfirm — if either
 // path re-implemented the gate, "Xem mẫu" and the saved record could disagree.
 assert(learningHub.includes('L.checkFinalTimeConfirm('), 'reveal gate must share the final-time check');
@@ -100,4 +93,4 @@ assert(learningEntry.split('checkFinalTimeConfirm(').length - 1 >= 2, 'submit ga
 assert(learningEntry.includes("expectedFinalTime:'7:00'"), 'confirm mission must pin the scenario final time');
 assert(learningEntry.includes('meridiemStrict'), 'strict AM/PM matching must be available per-mission');
 
-console.log('FlashDay app P0 contract: 42 checks passed');
+console.log('FlashDay app P0 contracts passed');

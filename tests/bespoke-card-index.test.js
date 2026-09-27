@@ -177,3 +177,28 @@ function ok(){checks++;}
 }
 
 console.log(`Bespoke/source capture: ${checks} repo-driven checks passed`);
+
+// Same spelling is not the same memory: both senses need independently tagged cards.
+{
+  const money={id:'bank-money',target:'bank',meaning:'ngân hàng',forms:[]};
+  const river={id:'bank-river',target:'bank',meaning:'bờ sông',forms:[]};
+  const items=[money,river];
+  const fallback=CI.importFlashDayItems(items);
+  assert.equal(fallback.size(money.id),1);
+  assert.equal(fallback.size(river.id),1);
+  assert.notEqual(fallback.cards(money.id)[0].id,fallback.cards(river.id)[0].id);
+  assert.deepEqual(CI.tagKnownUnits('I went to the bank.',items),[]);
+  money.exampleSentence='I went to the bank.';money.exampleTranslation='Tôi đến ngân hàng.';
+  river.exampleSentence='I went to the bank.';river.exampleTranslation='Tôi đến bờ sông.';
+  const contexts=CI.importFlashDayItems(items);
+  assert.deepEqual(B.unitIds(contexts.cards(money.id)[0]),[money.id]);
+  assert.deepEqual(B.unitIds(contexts.cards(river.id)[0]),[river.id]);
+  assert.equal(contexts.cards(river.id)[0].native_sentence,river.exampleTranslation);
+}
+
+{
+  const items=[{id:'bank-money',target:'bank',meaning:'ngân hàng'},
+    {id:'bank-river',target:'bank',meaning:'bờ sông'}];
+  const card=SC.toBespokeCard({sentence:'We sat by the bank.',nativeSentence:'Chúng tôi ngồi bên bờ sông.',linkedUnitIds:['bank-river']},items);
+  assert.deepEqual(B.unitIds(card),['bank-river']);
+}

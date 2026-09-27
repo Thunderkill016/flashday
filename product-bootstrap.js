@@ -7,7 +7,7 @@ if (!config?.apiKey || !config?.projectId || !config?.appId) {
     detail: { client: null, error: 'Thiếu cấu hình cloud.' }
   }));
 } else {
-  const client = createClient(config);
+  const client = createClient(config, { mergeProgressPayload: window.FlashDayCloud?.mergeProgressPayload });
   const HAD_SESSION_KEY = 'flashday:had-session';
   const markSession = (had) => {
     try { window.localStorage.setItem(HAD_SESSION_KEY, had ? '1' : ''); } catch (_e) {}

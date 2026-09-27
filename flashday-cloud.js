@@ -195,6 +195,18 @@
     return Array.from(merged.values());
   }
 
+  // Merge only durable observations across devices. Scheduler state is a cache
+  // rebuilt from review_events and must not overwrite another device's truth.
+  function mergeProgressPayload(remote={},local={}) {
+    return {
+      ...clone(remote),...clone(local),
+      transferAttempts:mergeById(remote.transferAttempts,local.transferAttempts),
+      comprehensionChecks:mergeById(remote.comprehensionChecks,local.comprehensionChecks),
+      encounters:mergeEncounters(remote.encounters,local.encounters),
+      bespokeProgress:null,fsrsProgress:null
+    };
+  }
+
   function mergeLearnerDb(localDb = {}, remote = {}, progressPayload = {}) {
     const remoteItems = (remote.units || []).map(itemFromRow);
     const remoteCards = (remote.cards || []).map((row) => row?.payload).filter(Boolean);
@@ -297,6 +309,7 @@
     mergeCaptures,
     mergeLearningProfile,
     mergeLearnerDb,
+    mergeProgressPayload,
     knownIds,
     emptyKnownIds,
     unknownById,

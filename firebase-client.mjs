@@ -31,6 +31,8 @@ import {
   paginateRows,
   rowDocId,
   sortRows,
+  readFirestorePage,
+  writeProgressTransaction,
 } from './cloud-compat.mjs';
 
 // Postgres `on delete cascade` for decks -> child tables is emulated here:
@@ -50,7 +52,7 @@ const FIRESTORE_BATCH_LIMIT = 450;
 const VERIFICATION_RESEND_COOLDOWN_MS = 60_000;
 let lastVerificationResend = 0;
 
-export function createClient(config) {
+export function createClient(config, { mergeProgressPayload } = {}) {
   const app = initializeApp(config);
   const auth = getAuth(app);
 
@@ -404,6 +406,11 @@ export function createClient(config) {
       return this;
     }
 
+    pageAfter(cursor, size) {
+      this._page = { cursor, size };
+      return this;
+    }
+
     single() {
       this._single = true;
       return this;
@@ -444,9 +451,17 @@ export function createClient(config) {
     async _select() {
       const scoped = await userCollection(this._table);
       if (scoped.error) return fail(scoped.error);
-      const snapshot = await scoped.fs.getDocs(
-        scoped.fs.query(scoped.ref, ...this._wheres(scoped.fs))
-      );
+      if (this._page) {
+        if (this._orders.length || this._range) throw new Error('Cursor paging uses document order');
+        return readFirestorePage(scoped.fs, scoped.ref, this._wheres(scoped.fs), this._page.cursor, this._page.size);
+      }
+      if (this._range?.from > 0) throw new Error('Use pageAfter for subsequent pages');
+      const constraints = this._wheres(scoped.fs);
+      for (const order of this._orders) constraints.push(scoped.fs.orderBy(order.column, order.ascending ? 'asc' : 'desc'));
+      const cap = this._range ? this._range.to + 1 : this._limit;
+      if (cap != null) constraints.push(scoped.fs.limit(cap));
+      else if (this._single || this._maybeSingle) constraints.push(scoped.fs.limit(2));
+      const snapshot = await scoped.fs.getDocs(scoped.fs.query(scoped.ref, ...constraints));
       let rows = snapshot.docs.map((entry) => entry.data());
       rows = sortRows(matchRows(rows, this._filters), this._orders);
       rows = paginateRows(rows, this._range, this._limit);
@@ -472,6 +487,10 @@ export function createClient(config) {
       for (const row of this._rows) {
         const id = rowDocId(row, scoped.user.uid) || crypto.randomUUID();
         const target = fs.doc(scoped.ref, id);
+        if (this._table === 'learning_progress') {
+          written.push(await writeProgressTransaction(fs, target, row, scoped.user.uid, mergeProgressPayload));
+          continue;
+        }
         // Merged upserts must preserve the original created_at — the security
         // rules treat it as write-once.
         const existing = merge ? await fs.getDoc(target) : null;

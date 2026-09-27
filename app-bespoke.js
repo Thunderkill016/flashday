@@ -926,18 +926,17 @@
 
   async function fetchAllDeckRows(table, deckId, orderColumn) {
     const rows = [];
-    for (let from = 0; ; from += CLOUD_PAGE_SIZE) {
-      const { data, error } = await supabaseClient
-        .from(table)
-        .select('*')
-        .eq('deck_id', deckId)
-        .order(orderColumn, { ascending: true })
-        .range(from, from + CLOUD_PAGE_SIZE - 1);
-      if (error) throw new Error(error.message);
-      const page = data || [];
+    let cursor = null;
+    for (;;) {
+      const result = await supabaseClient.from(table).select('*')
+        .eq('deck_id', deckId).pageAfter(cursor, CLOUD_PAGE_SIZE);
+      if (result.error) throw new Error(result.error.message);
+      const page = result.data || [];
       rows.push(...page);
       if (page.length < CLOUD_PAGE_SIZE) break;
+      cursor = result.cursor;
     }
+    rows.sort((left,right)=>String(left[orderColumn]||'').localeCompare(String(right[orderColumn]||'')));
     return rows;
   }
 
@@ -1187,6 +1186,7 @@
         SC.addCapture(db, {
           sentence,
           nativeSentence,
+          linkedUnitIds: [item.id],
           url,
           mediaTimestamp: timestamp,
           subtitleFileName: fileName,

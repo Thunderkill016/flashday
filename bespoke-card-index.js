@@ -164,6 +164,8 @@
     candidates.sort((a,b)=>a.index-b.index||b.length-a.length);
     const tags=[];let cursor=0;
     for(const hit of candidates){
+      // Identical spans with different Unit IDs are ambiguous senses.
+      if(candidates.some(other=>other.unit_id!==hit.unit_id&&other.index===hit.index&&other.length===hit.length))continue;
       if(hit.index<cursor)continue;
       tags.push({occurance:hit.occurance,unit_id:hit.unit_id,index:hit.index});cursor=hit.index+hit.length;
     }
@@ -193,8 +195,10 @@
   }
 
   function addUniqueCard(index,seenSentences,card){
-    if(!card||seenSentences.has(card.sentence))return false;
-    index.add(card);seenSentences.add(card.sentence);return true;
+    if(!card)return false;
+    const key=JSON.stringify([card.sentence,card.native_sentence,[...B.unitIds(card)].sort()]);
+    if(seenSentences.has(key))return false;
+    index.add(card);seenSentences.add(key);return true;
   }
 
   function importFlashDayItems(items,extraCards=[]){
@@ -210,14 +214,17 @@
     for(const item of items||[]){
       const sentence=item.source?.sentence?.trim();
       const native=item.source?.native_sentence||item.source?.translation||'';
-      if(sentence&&native&&!seenSentences.has(sentence)){
-        const sourceCard=cardFromSentence(sentence,native,items,{source:item.source,notes:item.source?.note?[item.source.note]:[]});
+      // The example belongs to this explicit meaning; exclude other meanings
+      // of its spelling, while retaining unrelated units in the same sentence.
+      const contextItems=(items||[]).filter(other=>other.id===item.id||String(other.target).trim().toLowerCase()!==String(item.target).trim().toLowerCase());
+      if(sentence&&native){
+        const sourceCard=cardFromSentence(sentence,native,contextItems,{id:`flashday:${item.id}:source`,source:item.source,notes:item.source?.note?[item.source.note]:[]});
         addUniqueCard(index,seenSentences,sourceCard);
       }
       const example=String(item.exampleSentence||'').trim();
       const exampleNative=String(item.exampleTranslation||'').trim();
-      if(example&&exampleNative&&!seenSentences.has(example)){
-        const exampleCard=cardFromSentence(example,exampleNative,items,{
+      if(example&&exampleNative){
+        const exampleCard=cardFromSentence(example,exampleNative,contextItems,{
           id:`flashday:${item.id}:example`,
           source:{type:'curated-example',label:'Ví dụ lộ trình'}
         });

@@ -125,3 +125,42 @@ export function paginateRows(rows, range, limit) {
   if (limit != null) return rows.slice(0, limit);
   return rows;
 }
+
+// Leave headroom for Firestore field/path encoding below its 1 MiB document cap.
+// This is a conservative app guard, not an exact Firestore size calculator.
+export const PROGRESS_MAX_JSON_BYTES = 750 * 1024;
+
+export async function writeProgressTransaction(fs, target, row, ownerId, mergePayload) {
+  if (typeof mergePayload !== 'function') throw new Error('Progress merge policy is required');
+  return fs.runTransaction(fs.db, async transaction => {
+    const snapshot = await transaction.get(target);
+    const remote = snapshot.exists() ? snapshot.data() : {};
+    const record = {
+      ...row,
+      id: target.id,
+      owner_id: ownerId,
+      created_at: remote.created_at || row.created_at || new Date().toISOString(),
+      payload: mergePayload(remote.payload || {}, row.payload || {})
+    };
+    if (new TextEncoder().encode(JSON.stringify(record)).length > PROGRESS_MAX_JSON_BYTES) {
+      throw new Error('Tiến độ vượt giới hạn đồng bộ. Dữ liệu local vẫn được giữ; chưa lưu lên tài khoản.');
+    }
+    transaction.set(target, record);
+    return record;
+  });
+}
+
+// Each page reads only its own documents. A document snapshot is the cursor,
+// so equal timestamps cannot skip or duplicate rows between pages.
+export async function readFirestorePage(fs, ref, constraints, cursor, pageSize) {
+  if (!Number.isInteger(pageSize) || pageSize < 1) throw new Error('Invalid page size');
+  const query = [...constraints, fs.orderBy(fs.documentId())];
+  if (cursor) query.push(fs.startAfter(cursor));
+  query.push(fs.limit(pageSize));
+  const snapshot = await fs.getDocs(fs.query(ref, ...query));
+  return {
+    data: snapshot.docs.map(document => document.data()),
+    cursor: snapshot.docs.at(-1) || null,
+    error: null
+  };
+}

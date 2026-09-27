@@ -377,4 +377,30 @@ const C=require('../flashday-cloud.js');
   assert.equal(SC.cardsFromCaptures(noTranslation.captures,noTranslation.items).length,0,'no translation → no fabricated card');
 }
 
-console.log('FlashDay learning entry: 50 guided/personal/transfer checks passed');
+
+// Preserve minutes and meridiem through extraction and the actual mission gate.
+{
+  const mission=L.TRANSFER_MISSIONS[0];
+  for(const [text,expected] of [
+    ['7:30pm','19:30'],['7:05pm','19:05'],['7:30 pm','19:30'],
+    ['12:05am','0:05'],['12:05pm','12:05'],['19:30','19:30']
+  ]){
+    assert.deepEqual(L.extractClockTimes(`See you at ${text}.`),[expected]);
+    assert.equal(L.checkFinalTimeConfirm(mission,{declaredFinalTime:'7',responseText:`See you at ${text}.`}).ok,false);
+    assert.equal(L.confirmsTime(`See you at ${text}.`,expected,true),true);
+  }
+  for(const text of ['7:99pm','25:30pm','7:5pm','13:30pm']){
+    assert.deepEqual(L.extractClockTimes(`See you at ${text}.`),[]);
+  }
+  assert.equal(L.checkFinalTimeConfirm(mission,{declaredFinalTime:'7',responseText:'See you at 7:00pm.'}).ok,true);
+}
+
+console.log('FlashDay learning entry: guided/personal/transfer regressions passed');
+
+// Surface matching must abstain when the learner has multiple meanings.
+{
+  const items=[{id:'bank-money',target:'bank',meaning:'ngân hàng'},
+    {id:'bank-river',target:'bank',meaning:'bờ sông'}];
+  assert.deepEqual(L.matchUnitsInText(items,'I went to the bank.'),[]);
+  assert.deepEqual(L.matchUnitsInText([items[0]],'I went to the bank.').map(item=>item.unitId),['bank-money']);
+}

@@ -177,19 +177,28 @@
   // naming the agreed time, a real confirmation pattern in the can-do.
   const TIME_VERBS=new Set(['works','work','is','suits','fine','good','ok','okay','better']);
 
-  // Pull every clock-time mention out of free text. canonicalTokens strips
-  // ':' so '8:30' arrives as '8','30' — a 2-digit token right after an hour
-  // is minutes. Time position = after at/to/for/until…, before
-  // o'clock/am/pm/sharp, before a minute word, before a confirming verb
-  // ("seven works"), or an explicit am/pm/digit-minutes. Bare numbers do
-  // NOT count: "I have 7 cats" and "My phone is 12345" state no time.
-  // A 2+-digit token ≥60 right after an hour ('7:99' → '7','99') marks the
-  // whole mention malformed — nothing is extracted, not a truncated 7:00.
+  // Preserve explicit clocks (including attached meridiem); other numbers
+  // require a time position or confirmation pattern. Invalid explicit clocks
+  // are consumed whole, never truncated into a valid-looking bare hour.
   function extractClockTimes(text){
-    const tokens=canonTokens(text||'');
+    // Preserve explicit clock expressions before word normalization: splitting
+    // 7:05pm would turn the minutes into a second hour and lose the meridiem.
+    const tokens=String(text||'').toLowerCase().match(/\d+[:.h]\d+(?:\s*(?:am|pm)\b)?|[a-z0-9']+/g)||[];
     const times=[];
     for(let i=0;i<tokens.length;i++){
       const t=tokens[i];
+      const clock=t.match(/^(\d+)[:.h](\d+)\s*(am|pm)?$/);
+      if(clock){
+        let hour=Number(clock[1]);
+        const minute=Number(clock[2]);
+        const meridiem=clock[3];
+        // Consume malformed clocks as a whole; never fall back to their hour.
+        if(hour>23||clock[2].length!==2||minute>59||meridiem&&(hour<1||hour>12))continue;
+        if(meridiem==='pm'&&hour<12)hour+=12;
+        if(meridiem==='am'&&hour===12)hour=0;
+        times.push(normTime(hour,minute));
+        continue;
+      }
       const dm=t.match(/^(\d{1,2})(am|pm)?$/);
       if(dm){
         let h=+dm[1];
@@ -414,7 +423,9 @@
         matches.push({unitId:String(item.id),target:String(item.target||''),meaning:String(item.meaning||'')});
       }
     }
-    return matches;
+    // Text presence alone cannot disambiguate two meanings of one spelling.
+    // Leave those captures unlinked until the learner selects a meaning.
+    return matches.filter(match=>matches.filter(other=>normalizePhrase(other.target)===normalizePhrase(match.target)).length===1);
   }
 
   function normalizeSourceKind(value){
@@ -449,7 +460,8 @@
     const byId=(db.items||[]).find(item=>String(item.id)===String(draft.id));
     if(byId)return byId;
     const target=normalizePhrase(draft.target);
-    return (db.items||[]).find(item=>normalizePhrase(item.target)===target)||null;
+    return (db.items||[]).find(item=>normalizePhrase(item.target)===target
+      &&String(item.meaning||'').trim().toLowerCase()===String(draft.meaning||'').trim().toLowerCase())||null;
   }
 
   function moduleState(db,moduleId){

@@ -73,3 +73,11 @@ assert.notEqual(taskKey('u1', 'listen'), taskKey('u1', 'speak'));
 }
 
 console.log('FlashDay FSRS v6: 12 Unit-mode scheduling checks passed');
+
+// Reviews of one meaning must not advance another meaning of the same word.
+{
+  const db={events:[],fsrsProgress:null};
+  applyRatings(db,'write',{'bank-money':Rating.Good},1_000_000);
+  assert.equal(taskState(db,'bank-money','write',1_000_000).isNew,false);
+  assert.equal(taskState(db,'bank-river','write',1_000_000).isNew,true);
+}

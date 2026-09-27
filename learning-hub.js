@@ -682,6 +682,27 @@
       ${needsSentenceTranslation?`<div class="field"><label for="wcSentenceTranslation">Dịch cả câu trên (để tạo card có ngữ cảnh)</label><input id="wcSentenceTranslation" placeholder="ví dụ: Tôi đang trên đường tới."></div><p class="field-note" style="margin:0">Không có bản dịch câu → unit chỉ có card cụm từ, chưa ôn trong ngữ cảnh.</p>`:''}
       <div class="secondary-actions"><button id="wcSave" class="primary-btn" type="button">Lưu unit</button><button id="wcCancel" class="ghost-btn" type="button">Huỷ</button></div>
     </div>`;
+    const knownMeanings=document.createElement('div');
+    knownMeanings.className='wc-known-meanings';
+    $('wcMeaning').parentElement.after(knownMeanings);
+    const renderKnownMeanings=()=>{
+      const target=$('wcTarget').value;
+      const existing=(store.refresh().items||[]).filter(item=>D.normalizeKey(item.target)===D.normalizeKey(target));
+      knownMeanings.replaceChildren();
+      if(!existing.length)return;
+      const note=document.createElement('p');
+      note.className='field-note';
+      note.textContent='Chọn nghĩa đã có để liên kết, hoặc nhập nghĩa khác để tạo Unit riêng.';
+      knownMeanings.append(note);
+      for(const item of existing){
+        const button=document.createElement('button');
+        button.type='button';button.className='ghost-btn';button.textContent=item.meaning;
+        button.onclick=()=>{$('wcMeaning').value=item.meaning;};
+        knownMeanings.append(button);
+      }
+    };
+    $('wcTarget').addEventListener('input',renderKnownMeanings);
+    renderKnownMeanings();
     $('wcMeaning').focus();
     // Instant-meaning lookup (the LingQ/LR/Migaku table-stakes gap). Machine
     // glosses are labeled as such and only become the meaning after the
@@ -709,7 +730,7 @@
         let linkedExisting=false;
         store.transact((db)=>{
           let unitId;
-          const existing=(db.items||[]).find(i=>D.normalizeKey(i.target)===D.normalizeKey(target));
+          const existing=(db.items||[]).find(i=>D.sameMeaning(i,{target,meaning}));
           if(existing){
             // Re-mining a known unit in a new context attaches the context —
             // LingQ-style — instead of failing on "already exists".
@@ -788,7 +809,7 @@
       </div>
       ${videoId?`<div class="reader-player"><div id="readerPlayerEl"></div></div>`:''}
       <div class="source-reader-body">${readerCaptures.map((c,lineIndex)=>{
-        const parts=IM.annotatedParts(db,c.sentence||'');
+        const parts=IM.annotatedParts(db,c.sentence||'',{capture:c});
         const marked=parts.map(part=>part.unitId
           ?`<mark class="token-${part.knowledge}" title="${esc((db.items||[]).find(i=>i.id===part.unitId)?.meaning||'')}">${esc(part.text)}</mark>`
           :wordSpans(part.text)).join('');

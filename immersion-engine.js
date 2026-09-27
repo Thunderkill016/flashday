@@ -73,7 +73,7 @@
     const c=SC.normalizeCapture(capture);
     const sentence=c.sentence||'';
     const total=meaningfulChars(sentence);
-    const tags=CI.tagKnownUnits(sentence,db.items||[]);
+    const tags=CI.tagKnownUnits(sentence,SC.itemsForCapture(c,db.items||[]));
     let known=0,learning=0,fresh=0;
     const learningUnits=new Set(),newUnits=new Set(),knownUnits=new Set();
     for(const tag of tags){
@@ -193,7 +193,7 @@
     const seen=new Set((db.encounters||[]).map(e=>`${e.unitId}|${e.captureId}|${encounterDay(Number(e.at)||0)}`));
     const out=[];
     for(const c of captures||[]){
-      for(const tag of CI.tagKnownUnits(c.sentence||'',db.items||[])){
+      for(const tag of CI.tagKnownUnits(c.sentence||'',SC.itemsForCapture(c,db.items||[]))){
         const key=`${tag.unit_id}|${c.id}|${day}`;
         if(seen.has(key))continue;
         seen.add(key);
@@ -212,8 +212,8 @@
 
   // Parts of a sentence annotated by unit — the reader highlights what the
   // learner already knows differently from what is still being acquired.
-  function annotatedParts(db,sentence,{nowMs=Date.now(),taskState=null}={}){
-    const tags=CI.tagKnownUnits(sentence,db.items||[]);
+  function annotatedParts(db,sentence,{nowMs=Date.now(),taskState=null,capture=null}={}){
+    const tags=CI.tagKnownUnits(sentence,SC.itemsForCapture(capture||{},db.items||[]));
     const parts=[];let cursor=0;
     for(const tag of tags){
       const start=Number.isInteger(tag.index)?tag.index:sentence.indexOf(tag.occurance,cursor);
