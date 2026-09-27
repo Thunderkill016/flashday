@@ -51,6 +51,7 @@ try {
     for (let i = 0; i < 5; i++) if (await page.locator('.runner-pane[data-step]').nth(i).isVisible()) visible++;
     assert.equal(visible, 1, 'exactly one step pane visible');
     assert.equal(await page.locator('.runner-pane[data-step="listen"]').isVisible(), true);
+    assert.equal(await page.locator('#cloudStatus').textContent(), 'Chỉ lưu trên thiết bị');
     assert.deepEqual(errors, [], `pageerrors at ${width}px: ${errors.join(' | ')}`);
     await context.close();
     check(`shell smoke at ${width}px`);
@@ -284,9 +285,9 @@ try {
     assert.equal(await page.locator('.review-counter').textContent(), '2/8');
     const logLen = await page.evaluate((key) => {
       const db = JSON.parse(localStorage.getItem(key) || '{}');
-      return (db.reviewLog || []).length;
+      return (db.reviewLog || []).filter((e) => e.kind !== 'enroll').length;
     }, DB_KEY);
-    assert.equal(logLen, 1, 'grade appends a reviewLog entry');
+    assert.equal(logLen, 1, 'grade appends a reviewLog entry (enroll entries are separate)');
     await page.reload();
     assert.equal(await page.locator('.review-counter').textContent(), '1/7', 'graded card no longer due');
     await context.close();

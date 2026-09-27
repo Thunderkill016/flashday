@@ -164,13 +164,11 @@ console.log('cloud-compat tests passed');
   const target = { id: 'owner' };
   await Promise.all(['device-a','device-b'].map(id => writeProgressTransaction(fs,target,{
     created_at:'2099-01-01T00:00:00.000Z',
-    payload:{lessonEvents:[{id}],reviewLog:[{id:`log-${id}`}],
-      fsrs:{stale:id}}
+    payload:{reviewLog:[{id:`log-${id}`}],fsrs:{stale:id}}
   },'owner',mergeProgressPayload)));
   assert.ok(conflicts > 0, 'fixture must exercise a conflicting transaction retry');
-  assert.deepEqual(stored.payload.lessonEvents.map(a=>a.id).sort(),['device-a','device-b']);
-  assert.equal(stored.payload.reviewLog.length,2);
-  assert.equal(stored.payload.fsrs,null);
+  assert.deepEqual(stored.payload.reviewLog.map(a=>a.id).sort(),['log-device-a','log-device-b']);
+  assert.equal(stored.payload.fsrs,undefined,'fsrs cache is stripped from the payload');
   assert.equal(stored.created_at,'2026-01-01T00:00:00.000Z');
   const before = structuredClone(stored);
   await assert.rejects(writeProgressTransaction(fs,target,{payload:{huge:'x'.repeat(PROGRESS_MAX_JSON_BYTES)}},'owner',mergeProgressPayload),/vượt giới hạn/);

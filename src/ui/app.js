@@ -6,6 +6,7 @@ import { createPersistentStore } from '../core/store.js';
 import { createInitialDb, hydrateDb } from '../core/evidence.js';
 import { createSession } from '../core/session.js';
 import { claimDbNamespace, dbKey, releaseDbNamespace } from '../core/namespace.js';
+import { createCloudSync } from '../core/cloud.js';
 import * as todayView from './views/today.js';
 import * as runnerView from './views/runner.js';
 import * as summaryView from './views/summary.js';
@@ -34,6 +35,34 @@ const ctx = {
   session,
   navigate(hash) { window.location.hash = hash; }
 };
+
+// Small honest sync pill in the header. Preview mode and signed-out states
+// both read "Chỉ lưu trên thiết bị" — nothing pretends to reach the cloud.
+const cloudStatusEl = document.getElementById('cloudStatus');
+const CLOUD_STATUS_TEXT = {
+  saving: 'Đang lưu…',
+  saved: 'Đã lưu vào tài khoản',
+  offline: 'Chưa đồng bộ',
+  error: 'Lỗi đồng bộ — thử lại',
+  local: 'Chỉ lưu trên thiết bị'
+};
+function setCloudPill(status) {
+  if (!cloudStatusEl) return;
+  cloudStatusEl.textContent = CLOUD_STATUS_TEXT[status] || CLOUD_STATUS_TEXT.local;
+  cloudStatusEl.dataset.state = status;
+}
+// Created lazily once the bootstrap hands us a client — preview/no-config
+// sessions stay on the "Chỉ lưu trên thiết bị" pill and never sync.
+let cloudSync = null;
+function cloud() {
+  if (!cloudSync && ctx.client) {
+    cloudSync = createCloudSync({ client: ctx.client, store, storage, onStatus: setCloudPill });
+  }
+  return cloudSync;
+}
+setCloudPill('local');
+
+window.addEventListener('flashday:cloud-hydrated', () => render());
 
 // The product bootstrap creates the shared client and owns the /app/ route
 // guard; when config is missing (or for local preview) we run unauthenticated.
@@ -99,6 +128,8 @@ function wireAuth() {
       // fires periodically and must not wipe an in-progress lesson.
       if (applySession(sessionEvent)) render();
     } else if (event === 'SIGNED_OUT') {
+      cloudSync?.disconnect();
+      setCloudPill('local');
       releaseDbNamespace(storage);
       ctx.user = null;
       store.refresh();
@@ -116,8 +147,11 @@ function applySession(sess) {
     ctx.user = { id: uid, email: sess.user.email || '' };
     store.refresh();
     session.load();
+    cloud()?.connect(ctx.user);
   } else {
+    cloudSync?.disconnect();
     ctx.user = null;
+    setCloudPill('local');
   }
   return true;
 }

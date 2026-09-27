@@ -89,6 +89,24 @@ input:focus-visible {
   font-size: 12px;
   color: var(--text-secondary);
 }
+.cloud-status {
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
+  font-size: 12px;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle);
+}
+.cloud-status[data-state='saving'] { color: var(--text-secondary); }
+.cloud-status[data-state='saved'] {
+  color: var(--feedback-success, #4ade80);
+  border-color: var(--feedback-success, #4ade80);
+}
+.cloud-status[data-state='offline'],
+.cloud-status[data-state='error'] {
+  color: var(--feedback-error);
+  border-color: var(--feedback-error);
+}
 
 .app-view {
   max-width: 720px;

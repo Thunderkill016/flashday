@@ -17,17 +17,17 @@ import {
 }
 
 {
-  // learning_progress merge: append-only records union; scheduler cache is
-  // invalidated so each device rebuilds FSRS from the merged event history.
+  // learning_progress merge: reviewLog unions by id; lessonEvents live in
+  // their own collection and fsrs is a rebuilt cache — both are stripped
+  // from the payload rather than merged.
   const merged = mergeProgressPayload(
-    { lessonEvents: [{ id: 'remote-ev', submittedAt: 1000 }], fsrs: { stale: 'remote' } },
-    { lessonEvents: [{ id: 'local-ev', submittedAt: 2000 }], fsrs: { stale: 'local' } }
+    { lessonEvents: [{ id: 'remote-ev' }], fsrs: { stale: 'remote' }, reviewLog: [{ id: 'r1' }], profile: { updatedAt: 1 } },
+    { lessonEvents: [{ id: 'local-ev' }], fsrs: { stale: 'local' }, reviewLog: [{ id: 'l1' }], profile: { updatedAt: 2 } }
   );
-  assert.deepEqual(
-    merged.lessonEvents.map((event) => event.id).sort(),
-    ['local-ev', 'remote-ev']
-  );
-  assert.equal(merged.fsrs, null, 'merged history invalidates the scheduler cache');
+  assert.equal(merged.lessonEvents, undefined, 'events stay out of the payload');
+  assert.equal(merged.fsrs, undefined, 'fsrs cache is stripped, not merged');
+  assert.deepEqual(merged.reviewLog.map((e) => e.id).sort(), ['l1', 'r1']);
+  assert.equal(merged.profile.updatedAt, 2, 'newer profile wins');
   assert.deepEqual(mergeProgressPayload({}, {}).learningProfile, null);
 }
 
