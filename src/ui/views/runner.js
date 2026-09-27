@@ -19,7 +19,31 @@ const STEP_LABELS = {
   speak: 'Nói'
 };
 
-const STEP_KIND = { prepare: 'drill', read: 'read', listen: 'listen', write: 'write', speak: 'speak' };
+const STEP_KIND = {
+  prepare: 'drill',
+  read: 'read',
+  listen: 'listen',
+  write: 'write',
+  speak: 'speak'
+};
+const LEARNER_SPEECH_RATE = 0.85;
+
+export function pickEnglishVoice(voices) {
+  const priority = (voice) => {
+    const lang = voice.lang?.replace('_', '-').toLowerCase();
+    if (lang === 'en-us') return 0;
+    if (lang === 'en-gb') return 1;
+    if (/^en-/.test(lang || '')) return 2;
+    return 3;
+  };
+  return (
+    [...voices]
+      .filter((voice) => priority(voice) < 3)
+      .sort(
+        (a, b) => priority(a) - priority(b) || a.name.localeCompare(b.name, 'en') || a.lang.localeCompare(b.lang, 'en')
+      )[0] || null
+  );
+}
 
 let state = null;
 
@@ -41,7 +65,9 @@ export function mount(root, ctx) {
   const restore = restoreDraft(draft, lesson.contentVersion);
 
   state = {
-    ctx, lesson, steps,
+    ctx,
+    lesson,
+    steps,
     active: null,
     panes: {},
     draft: restore.status === 'applied' ? draft : null,
@@ -184,16 +210,18 @@ function scheduleDraftSave() {
   if (state.draftSaveTimer) clearTimeout(state.draftSaveTimer);
   state.draftSaveTimer = setTimeout(() => {
     const result = ctx.session.save();
-    status.textContent = result.ok
-      ? 'Đã lưu nháp trên thiết bị'
-      : 'Không lưu được bản nháp trên thiết bị';
+    status.textContent = result.ok ? 'Đã lưu nháp trên thiết bị' : 'Không lưu được bản nháp trên thiết bị';
     status.dataset.tone = result.ok ? 'ok' : 'error';
   }, 400);
 }
 
 function patchDraft(patch) {
   const { ctx, lesson } = state;
-  state.draft = ctx.session.setDraft(lesson.id, { contentVersion: lesson.contentVersion, step: state.active, ...patch });
+  state.draft = ctx.session.setDraft(lesson.id, {
+    contentVersion: lesson.contentVersion,
+    step: state.active,
+    ...patch
+  });
   scheduleDraftSave();
 }
 
@@ -256,10 +284,7 @@ const buildStep = {
   prepare(pane, ctx, lesson) {
     const pattern = document.createElement('div');
     pattern.className = 'pattern-card';
-    pattern.append(
-      text('h3', lesson.pattern.name),
-      text('p', lesson.pattern.rule)
-    );
+    pattern.append(text('h3', lesson.pattern.name), text('p', lesson.pattern.rule));
     const examples = document.createElement('ul');
     examples.className = 'pattern-examples';
     for (const [en, vi] of lesson.pattern.examples) {
@@ -329,7 +354,9 @@ const buildStep = {
       initialAnswers: draftAnswers('read'),
       onAnswerChange: (answers) => patchDraft({ answers: { ...state.draft?.answers, read: answers } }),
       onSubmit: (result) => {
-        recordEvent('read', result, { translationViewed: Boolean(draftSupport().translationViewed) });
+        recordEvent('read', result, {
+          translationViewed: Boolean(draftSupport().translationViewed)
+        });
         continueLink(pane, 'read');
       }
     });
@@ -353,6 +380,28 @@ const buildStep = {
     playBtn.className = 'btn-primary';
     playBtn.textContent = 'Nghe (giọng máy)';
 
+    const rateLabel = document.createElement('label');
+    const rateToggle = document.createElement('input');
+    rateToggle.type = 'checkbox';
+    rateToggle.checked = true;
+    rateLabel.append(rateToggle, ' Nghe chậm (0,85×)');
+
+    const voiceStatus = text('p', '', 'runner-notice');
+    voiceStatus.setAttribute('aria-live', 'polite');
+    const synthesis = window.speechSynthesis;
+    const showFallback = () => {
+      playBtn.disabled = true;
+      rateToggle.disabled = true;
+      transcript.hidden = false;
+      voiceStatus.textContent = 'Thiết bị không có giọng đọc tiếng Anh — bạn có thể đọc lời thoại thay thế.';
+      patchDraft({ support: { ...draftSupport(), transcriptViewed: true } });
+    };
+    const refreshVoice = () => {
+      const voice = pickEnglishVoice(synthesis.getVoices());
+      voiceStatus.textContent = voice ? `Giọng đọc: ${voice.name} (${voice.lang})` : 'Đang tìm giọng đọc tiếng Anh…';
+      return voice;
+    };
+
     const transcriptBtn = document.createElement('button');
     transcriptBtn.type = 'button';
     transcriptBtn.className = 'btn-secondary';
@@ -365,30 +414,30 @@ const buildStep = {
       patchDraft({ support: { ...draftSupport(), transcriptViewed: true } });
     });
 
-    controls.append(playBtn, transcriptBtn);
-    pane.appendChild(controls);
+    controls.append(playBtn, rateLabel, transcriptBtn);
+    pane.append(controls, voiceStatus);
 
     if (!('speechSynthesis' in window)) {
-      playBtn.disabled = true;
-      transcript.hidden = false;
-      pane.appendChild(text('p', 'Thiết bị không có giọng đọc tiếng Anh — bạn có thể đọc lời thoại thay thế.', 'runner-notice'));
-      patchDraft({ support: { ...draftSupport(), transcriptViewed: true } });
+      showFallback();
     } else {
+      refreshVoice();
+      synthesis.addEventListener?.('voiceschanged', refreshVoice);
       playBtn.addEventListener('click', () => {
-        const voices = window.speechSynthesis.getVoices();
-        const voice = voices.find((v) => /^en[-_](US|GB)/i.test(v.lang)) || voices.find((v) => /^en/i.test(v.lang));
+        const voice = refreshVoice();
+        if (!voice) {
+          showFallback();
+          return;
+        }
         const utter = new SpeechSynthesisUtterance(lesson.listening.text);
-        if (voice) utter.voice = voice;
-        utter.lang = voice?.lang || 'en-US';
-        utter.onend = () => { plays.count += 1; };
-        utter.onerror = () => {
-          playBtn.disabled = true;
-          transcript.hidden = false;
-          pane.appendChild(text('p', 'Thiết bị không có giọng đọc tiếng Anh — bạn có thể đọc lời thoại thay thế.', 'runner-notice'));
-          patchDraft({ support: { ...draftSupport(), transcriptViewed: true } });
+        utter.voice = voice;
+        utter.lang = voice.lang;
+        utter.rate = rateToggle.checked ? LEARNER_SPEECH_RATE : 1;
+        utter.onend = () => {
+          plays.count += 1;
         };
-        window.speechSynthesis.cancel();
-        window.speechSynthesis.speak(utter);
+        utter.onerror = showFallback;
+        synthesis.cancel();
+        synthesis.speak(utter);
       });
     }
 
@@ -398,11 +447,15 @@ const buildStep = {
       initialAnswers: draftAnswers('listen'),
       onAnswerChange: (answers) => patchDraft({ answers: { ...state.draft?.answers, listen: answers } }),
       onSubmit: (result) => {
-        recordEvent('listen', {
-          ...result,
-          completedPlays: plays.count,
-          transcriptViewed: Boolean(draftSupport().transcriptViewed)
-        }, { transcriptViewed: Boolean(draftSupport().transcriptViewed) });
+        recordEvent(
+          'listen',
+          {
+            ...result,
+            completedPlays: plays.count,
+            transcriptViewed: Boolean(draftSupport().transcriptViewed)
+          },
+          { transcriptViewed: Boolean(draftSupport().transcriptViewed) }
+        );
         continueLink(pane, 'listen');
       }
     });
@@ -432,7 +485,14 @@ const buildStep = {
       saveBtn.disabled = false; // a changed answer is a new attempt
       if (debounce) clearTimeout(debounce);
       debounce = setTimeout(() => {
-        patchDraft({ write: { [lesson.id]: { ...(state.draft?.write?.[lesson.id] || {}), responseText: textarea.value } } });
+        patchDraft({
+          write: {
+            [lesson.id]: {
+              ...(state.draft?.write?.[lesson.id] || {}),
+              responseText: textarea.value
+            }
+          }
+        });
       }, 400);
     });
     pane.append(textarea, modelBtn);
@@ -444,7 +504,14 @@ const buildStep = {
       declaredInput.placeholder = 'vd: 7:00 hoặc "seven"';
       declaredInput.value = draftWrite.declaredFinalTime || '';
       declaredInput.addEventListener('input', () => {
-        patchDraft({ write: { [lesson.id]: { ...(state.draft?.write?.[lesson.id] || {}), declaredFinalTime: declaredInput.value } } });
+        patchDraft({
+          write: {
+            [lesson.id]: {
+              ...(state.draft?.write?.[lesson.id] || {}),
+              declaredFinalTime: declaredInput.value
+            }
+          }
+        });
       });
       pane.append(text('label', 'Giờ cuối cùng bạn chốt', 'gate-label'), declaredInput);
     }
@@ -478,7 +545,9 @@ const buildStep = {
         const box = document.createElement('input');
         box.type = 'checkbox';
         box.dataset.check = String(i);
-        box.addEventListener('change', () => { saveBtn.disabled = false; });
+        box.addEventListener('change', () => {
+          saveBtn.disabled = false;
+        });
         label.append(box, document.createTextNode(item));
         checklist.appendChild(label);
       });
@@ -503,11 +572,12 @@ const buildStep = {
           responseText: textarea.value
         });
         if (!check.ok) {
-          gateNote.textContent = check.reason === 'unparsed'
-            ? 'Nhập giờ bạn chốt (vd: 7:00 hoặc "seven").'
-            : check.reason === 'mismatch'
-              ? 'Giờ chưa khớp tình huống — kiểm tra lại.'
-              : 'Câu trả lời cần nhắc đúng giờ đã chốt.';
+          gateNote.textContent =
+            check.reason === 'unparsed'
+              ? 'Nhập giờ bạn chốt (vd: 7:00 hoặc "seven").'
+              : check.reason === 'mismatch'
+                ? 'Giờ chưa khớp tình huống — kiểm tra lại.'
+                : 'Câu trả lời cần nhắc đúng giờ đã chốt.';
           gateNote.hidden = false;
           return;
         }
@@ -515,12 +585,16 @@ const buildStep = {
       }
       saveBtn.disabled = true; // stays disabled until text/checklist changes
       const checklist = [...modelArea.querySelectorAll('[data-check]')].map((box) => box.checked);
-      recordEvent('write', {
-        responseText: textarea.value,
-        declaredFinalTime: declaredInput?.value || undefined,
-        checklist,
-        selfReviewed: true
-      }, { modelRevealed: true });
+      recordEvent(
+        'write',
+        {
+          responseText: textarea.value,
+          declaredFinalTime: declaredInput?.value || undefined,
+          checklist,
+          selfReviewed: true
+        },
+        { modelRevealed: true }
+      );
       continueLink(pane, 'write');
     });
     stepNav(pane, 'write');
@@ -546,7 +620,10 @@ const buildStep = {
     const listener = document.createElement('div');
     listener.className = 'listener-choice';
     let listenerValue = draftSpeak.listener || 'self';
-    [['self', 'Tự luyện một mình'], ['partner', 'Có người nghe']].forEach(([value, labelText]) => {
+    [
+      ['self', 'Tự luyện một mình'],
+      ['partner', 'Có người nghe']
+    ].forEach(([value, labelText]) => {
       const label = document.createElement('label');
       label.className = 'checklist-item';
       const radio = document.createElement('input');
@@ -554,7 +631,9 @@ const buildStep = {
       radio.name = `listener-${lesson.id}`;
       radio.value = value;
       radio.checked = listenerValue === value;
-      radio.addEventListener('change', () => { listenerValue = value; });
+      radio.addEventListener('change', () => {
+        listenerValue = value;
+      });
       label.append(radio, document.createTextNode(labelText));
       listener.appendChild(label);
     });
@@ -569,12 +648,26 @@ const buildStep = {
       saveBtn.disabled = false;
       if (debounce) clearTimeout(debounce);
       debounce = setTimeout(() => {
-        patchDraft({ speak: { [lesson.id]: { ...(state.draft?.speak?.[lesson.id] || {}), responseText: textarea.value } } });
+        patchDraft({
+          speak: {
+            [lesson.id]: {
+              ...(state.draft?.speak?.[lesson.id] || {}),
+              responseText: textarea.value
+            }
+          }
+        });
       }, 400);
     });
     spokeBox.addEventListener('change', () => {
       modelBtn.disabled = !spokeBox.checked;
-      patchDraft({ speak: { [lesson.id]: { ...(state.draft?.speak?.[lesson.id] || {}), spoke: spokeBox.checked } } });
+      patchDraft({
+        speak: {
+          [lesson.id]: {
+            ...(state.draft?.speak?.[lesson.id] || {}),
+            spoke: spokeBox.checked
+          }
+        }
+      });
     });
 
     const modelBtn = document.createElement('button');
@@ -613,7 +706,9 @@ const buildStep = {
         const box = document.createElement('input');
         box.type = 'checkbox';
         box.dataset.check = String(i);
-        box.addEventListener('change', () => { saveBtn.disabled = false; });
+        box.addEventListener('change', () => {
+          saveBtn.disabled = false;
+        });
         label.append(box, document.createTextNode(item));
         checklist.appendChild(label);
       });
@@ -632,12 +727,16 @@ const buildStep = {
       speakNote.hidden = true;
       saveBtn.disabled = true;
       const checklist = [...modelArea.querySelectorAll('[data-check]')].map((box) => box.checked);
-      recordEvent('speak', {
-        responseText: textarea.value,
-        spoke: spokeBox.checked,
-        listener: listenerValue,
-        checklist
-      }, { modelRevealed: true });
+      recordEvent(
+        'speak',
+        {
+          responseText: textarea.value,
+          spoke: spokeBox.checked,
+          listener: listenerValue,
+          checklist
+        },
+        { modelRevealed: true }
+      );
       continueLink(pane, 'speak');
     });
     stepNav(pane, 'speak');
@@ -649,5 +748,8 @@ function setTranslationsVisible(list, visible) {
 }
 
 function wordCount(text) {
-  return String(text || '').trim().split(/\s+/).filter(Boolean).length;
+  return String(text || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean).length;
 }
