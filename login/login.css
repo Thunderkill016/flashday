@@ -1,12 +1,14 @@
-/* NEO-BRUTALIST DARK MODE LOGIN PAGE — shared tokens */
-@import '../tokens.css';
+/* Quiet authentication surface using shared brand tokens. */
+@import "../tokens.css";
 
 :root {
-  --muted: rgba(255,255,255,0.6);
-  --border: rgba(255,255,255,0.15);
+  --muted: rgba(255, 255, 255, 0.6);
+  --border: rgba(255, 255, 255, 0.15);
 }
 
-*, *::before, *::after {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
 }
 
@@ -24,14 +26,23 @@ body {
   justify-content: center;
   align-items: center;
   background-color: var(--ink-950);
-  background-image: 
-    radial-gradient(circle at 15% 50%, rgba(232, 255, 101, 0.05), transparent 25%),
-    radial-gradient(circle at 85% 30%, rgba(255, 255, 255, 0.03), transparent 25%);
+  background-image:
+    radial-gradient(
+      circle at 15% 50%,
+      rgba(232, 255, 101, 0.05),
+      transparent 25%
+    ),
+    radial-gradient(
+      circle at 85% 30%,
+      rgba(255, 255, 255, 0.03),
+      transparent 25%
+    );
   position: relative;
 }
 
 .noise-overlay {
-  position: fixed; inset: 0;
+  position: fixed;
+  inset: 0;
   background: url('data:image/svg+xml;utf8,%3Csvg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg"%3E%3Cfilter id="noiseFilter"%3E%3CfeTurbulence type="fractalNoise" baseFrequency="0.65" numOctaves="3" stitchTiles="stitch"/%3E%3C/filter%3E%3Crect width="100%25" height="100%25" filter="url(%23noiseFilter)"/%3E%3C/svg%3E');
   opacity: 0.03;
   mix-blend-mode: soft-light;
@@ -47,7 +58,7 @@ body {
   max-width: 440px;
   border-radius: 16px;
   border: 2px solid var(--border);
-  box-shadow: 8px 8px 0 var(--flash);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
   padding: 40px;
   display: flex;
   flex-direction: column;
@@ -91,7 +102,7 @@ body {
   font-weight: 800;
   color: #ffffff;
   margin: 0 0 8px;
-  text-transform: uppercase;
+  text-transform: none;
 }
 .auth-sub {
   font-size: 14px;
@@ -118,10 +129,10 @@ body {
   color: var(--muted);
   cursor: pointer;
   transition: 0.2s;
-  text-transform: uppercase;
+  text-transform: none;
 }
 .auth-tab:hover {
-  background: rgba(255,255,255,0.05);
+  background: rgba(255, 255, 255, 0.05);
 }
 .auth-tab.active {
   background: var(--flash);
@@ -144,11 +155,11 @@ body {
   font-size: 14px;
   cursor: pointer;
   transition: 0.2s;
-  text-transform: uppercase;
+  text-transform: none;
 }
 .btn-provider:hover {
-  background: rgba(255,255,255,0.05);
-  border-color: rgba(255,255,255,0.3);
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.3);
 }
 .icon-provider {
   width: 18px;
@@ -163,11 +174,11 @@ body {
   color: var(--muted);
   font-size: 12px;
   font-weight: 600;
-  text-transform: uppercase;
+  text-transform: none;
 }
 .auth-divider::before,
 .auth-divider::after {
-  content: '';
+  content: "";
   flex: 1;
   border-bottom: 2px solid var(--border);
 }
@@ -189,7 +200,7 @@ body {
   font-size: 12px;
   font-weight: 700;
   color: #ffffff;
-  text-transform: uppercase;
+  text-transform: none;
 }
 
 .input-wrapper {
@@ -225,7 +236,7 @@ body {
   border-color: var(--flash);
 }
 .input-group input::placeholder {
-  color: rgba(255,255,255,0.3);
+  color: rgba(255, 255, 255, 0.3);
 }
 
 .password-toggle {
@@ -246,18 +257,24 @@ body {
 }
 .password-toggle:hover {
   color: #ffffff;
-  background: rgba(255,255,255,0.1);
+  background: rgba(255, 255, 255, 0.1);
 }
-.icon-eye-off { display: none; }
-.password-toggle[aria-pressed="true"] .icon-eye { display: none; }
-.password-toggle[aria-pressed="true"] .icon-eye-off { display: block; }
+.icon-eye-off {
+  display: none;
+}
+.password-toggle[aria-pressed="true"] .icon-eye {
+  display: none;
+}
+.password-toggle[aria-pressed="true"] .icon-eye-off {
+  display: block;
+}
 
 .btn-submit {
   width: 100%;
   background: var(--flash);
   color: var(--ink-950);
   border: 2px solid var(--flash);
-  box-shadow: 4px 4px 0 rgba(232,255,101,0.3);
+  box-shadow: 4px 4px 0 rgba(232, 255, 101, 0.3);
   padding: 14px 24px;
   border-radius: 12px;
   font-family: var(--font-display);
@@ -266,15 +283,15 @@ body {
   cursor: pointer;
   transition: 0.2s;
   margin-top: 8px;
-  text-transform: uppercase;
+  text-transform: none;
 }
 .btn-submit:hover {
   transform: translate(-2px, -2px);
-  box-shadow: 6px 6px 0 rgba(232,255,101,0.5);
+  box-shadow: 6px 6px 0 rgba(232, 255, 101, 0.5);
 }
 .btn-submit:active {
   transform: translate(2px, 2px);
-  box-shadow: 2px 2px 0 rgba(232,255,101,0.5);
+  box-shadow: 2px 2px 0 rgba(232, 255, 101, 0.5);
 }
 .btn-submit:disabled {
   opacity: 0.5;
@@ -293,10 +310,12 @@ body {
   cursor: pointer;
   padding: 0;
   text-decoration: none;
-  text-transform: uppercase;
+  text-transform: none;
   transition: 0.2s;
 }
-.auth-link:hover { color: #ffffff; }
+.auth-link:hover {
+  color: #ffffff;
+}
 
 .auth-status {
   margin-top: 24px;
@@ -307,27 +326,29 @@ body {
   text-align: center;
 }
 .auth-status[data-tone="error"] {
-  background: rgba(255,106,94,0.1);
-  color: #FF6A5E;
-  border: 1px solid rgba(255,106,94,0.3);
+  background: rgba(255, 106, 94, 0.1);
+  color: #ff6a5e;
+  border: 1px solid rgba(255, 106, 94, 0.3);
 }
 .auth-status[data-tone="success"] {
-  background: rgba(199,244,91,0.1);
-  color: #C7F45B;
-  border: 1px solid rgba(199,244,91,0.3);
+  background: rgba(199, 244, 91, 0.1);
+  color: #c7f45b;
+  border: 1px solid rgba(199, 244, 91, 0.3);
 }
 .auth-status[data-tone="info"] {
-  background: rgba(255,255,255,0.05);
+  background: rgba(255, 255, 255, 0.05);
   color: #ffffff;
   border: 1px solid var(--border);
 }
 
-.hidden { display: none !important; }
+.hidden {
+  display: none !important;
+}
 
 @media (max-width: 480px) {
   .auth-box-brutal {
     padding: 32px 24px;
-    box-shadow: 6px 6px 0 var(--flash);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);
   }
 }
 

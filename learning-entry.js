@@ -26,7 +26,7 @@
   const GUIDED_CLUSTERS=Object.freeze([
     ...curriculum.clusters.filter(lesson=>lesson.id!=='a1-review'),
     {
-      id:'a1-meeting-change',level:'A1',title:'Đọc tin hẹn gặp và xác nhận giờ',
+      id:'a1-meeting-change',level:'A1',stage:'5 · Đi lại và hẹn gặp',kind:'lesson',title:'Đọc tin hẹn gặp và xác nhận giờ',
       canDo:'Với câu ngắn và được đọc lại, tôi có thể tìm giờ, nơi hẹn và viết một lời xác nhận đơn giản.',
       moduleIds:['a1-meeting-basics'],
       levelBasis:'Mục tiêu A1 · biên soạn nội bộ, chưa thẩm định độc lập',
@@ -36,6 +36,7 @@
         glossary:['two = 2; four = 4; six = 6; seven = 7','four thirty = 4:30; thirty = 30 phút','Sunday = Chủ nhật; cafe = quán cà phê; market = chợ','near = gần; meet = gặp; sorry = xin lỗi'],
         patterns:['Hỏi giờ: What time? — Mấy giờ?','Đề xuất: How about six? / Can we meet at seven?','Xác nhận: OK. See you at seven. — Đồng ý. Hẹn gặp lúc bảy giờ.','Dùng at trước giờ: at seven; dùng on trước ngày: on Sunday.','Giờ cũ và giờ mới khác nhau: đọc lời đồng ý cuối cùng. Không chọn số đầu tiên chỉ vì thấy nó trước.'],
         worked:['Đề xuất: How about six? → 6:00.','Đổi giờ: Can we meet at seven? → hỏi 7:00.','Đồng ý: OK. See you at seven. → giờ cuối là 7:00.'],
+        coaching:{mistake:'Không lấy giờ đề xuất đầu tiên làm giờ đã chốt. Đọc câu đồng ý cuối cùng.',pronunciation:'Phân biệt six và seven; đọc lại giờ người nghe hiểu rồi xác nhận.',recall:'Ngày sau dùng tin hẹn mới có một lần đổi giờ; nhắn lại giờ cuối và nơi gặp trước khi xem mẫu.'},
         practiceQuiz:[
           {q:'Điền chỗ trống: See you ___ seven.',options:['on','at','in'],answer:1,hint:'Trong mẫu này, at đứng trước giờ; on đứng trước ngày.'},
           {q:'Bạn chưa nghe rõ giờ hẹn. Chọn câu xin nhắc lại.',options:['No problem.','See you at seven.','Could you say that again?'],answer:2,hint:'Could you say that again? là lời xin người kia nói lại.'},
@@ -53,7 +54,7 @@
       audioNote:'Bản pilot này dùng text và TTS để luyện; chưa có audio nguồn được kiểm duyệt cho từng Unit.'
     }
     ,...curriculum.clusters.filter(lesson=>lesson.id==='a1-review')
-  ]);
+  ].sort((a,b)=>curriculum.courseOrder.indexOf(a.id)-curriculum.courseOrder.indexOf(b.id)));
 
   const GUIDED_MODULES=Object.freeze([
     ...curriculum.modules,
@@ -840,7 +841,7 @@
   }
 
   return {
-    A1_FOUNDATIONS:curriculum.foundations,PROFILE_VERSION,CEFR_LEVELS,SKILLS,GUIDED_CLUSTERS,GUIDED_MODULES,TRANSFER_MISSIONS,LESSON_DIALOGUES,
+    A1_FOUNDATIONS:curriculum.foundations,A1_STAGES:curriculum.stages,PROFILE_VERSION,CEFR_LEVELS,SKILLS,GUIDED_CLUSTERS,GUIDED_MODULES,TRANSFER_MISSIONS,LESSON_DIALOGUES,
     normalizeLevel,normalizeProfile,ensureProfile,setSkillLevel,setOverallLevel,effectiveLevel,
     assessContent,normalizePhrase,identityForms,phraseAppears,matchUnitsInText,normalizeSourceKind,
     moduleById,clusterById,missionById,modulesForCluster,moduleState,clusterState,installGuidedModule,installGuidedCluster,

@@ -148,8 +148,10 @@
       const isActive = button.dataset.view === name;
       button.classList.toggle('active', isActive);
       button.setAttribute('aria-selected', String(isActive));
+      button.tabIndex = isActive ? 0 : -1;
     });
-    ['review', 'memory', 'capture'].forEach((view) => $(view + 'View').classList.toggle('hidden', view !== name));
+    ['review', 'memory', 'capture', 'library'].forEach((view) => $(view + 'View').classList.toggle('hidden', view !== name));
+    document.querySelector('.skip-link')?.setAttribute('href', `#${name}View`);
     if (name === 'memory') renderMemory();
     if (name === 'review' && !current) nextCard();
   }
@@ -1165,7 +1167,15 @@
   $('sourceChip').onclick = toggleSource;
   $('audioPrimary').onclick = speakTarget;
   document.querySelectorAll('.tab').forEach((button) => {
+    button.tabIndex = button.classList.contains('active') ? 0 : -1;
     button.onclick = () => setView(button.dataset.view);
+    button.onkeydown = (event) => {
+      const tabs = [...document.querySelectorAll('.tabs .tab')];
+      const index = tabs.indexOf(button);
+      const target = event.key === 'ArrowRight' ? (index + 1) % tabs.length : event.key === 'ArrowLeft' ? (index - 1 + tabs.length) % tabs.length : event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : null;
+      if (target === null) return;
+      event.preventDefault(); tabs[target].click(); tabs[target].focus();
+    };
   });
   $('resetBtn').onclick = resetLearning;
   $('authBtn').onclick = openAuthDialog;

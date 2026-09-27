@@ -160,61 +160,93 @@
   function renderGuidedModules(){
     const root=$('guidedModules');if(!root)return;
     const db=store.refresh();
-    root.innerHTML=`<details class="lesson-foundations"><summary>Tra cứu nền tảng: chữ cái, số, ngày, mẫu câu</summary>${L.A1_FOUNDATIONS.map((entry,index)=>`<details><summary>${esc(entry.title)}</summary><p>${esc(entry.text)}</p><p>${esc(entry.note)}</p><button type="button" class="ghost-btn" data-foundation-audio="${index}">Nghe mẫu giọng máy</button></details>`).join('')}</details><p id="coursePracticeSummary" class="cluster-note" aria-live="polite">${esc(coursePracticeLabel(db))}</p><label class="field" for="a1LessonSelect">Lộ trình A1 — chọn bài<select id="a1LessonSelect">${L.GUIDED_CLUSTERS.map((cluster,index)=>`<option value="${esc(cluster.id)}" ${cluster.id===selectedClusterId?'selected':''}>${index+1}. ${esc(cluster.title.replace(/^\d+\. /,''))}</option>`).join('')}</select></label><p class="cluster-note">Học từng bài: chuẩn bị → đọc/nghe → luyện câu → viết/nói → ôn lại. Các bài đã làm là lịch sử hoạt động, không phải chứng nhận A1.</p>`+L.GUIDED_CLUSTERS.filter(cluster=>cluster.id===selectedClusterId).map(cluster=>{
+    root.innerHTML=`<aside class="course-navigation" aria-label="Điều hướng bài học">
+      <label class="field" for="a1LessonSelect">Chọn bài học<select id="a1LessonSelect">${L.A1_STAGES.map(stage=>`<optgroup label="${esc(stage.title)}">${L.GUIDED_CLUSTERS.filter(cluster=>stage.lessonIds.includes(cluster.id)).map(cluster=>`<option value="${esc(cluster.id)}" ${cluster.id===selectedClusterId?'selected':''}>${L.GUIDED_CLUSTERS.indexOf(cluster)+1}. ${esc(cluster.title.replace(/^\d+\. /,''))}</option>`).join('')}</optgroup>`).join('')}</select></label>
+      <div class="lesson-pagination"><button type="button" class="ghost-btn" data-lesson-offset="-1" ${selectedClusterId===L.GUIDED_CLUSTERS[0].id?'disabled':''}>← Bài trước</button><button type="button" class="ghost-btn" data-lesson-offset="1" ${selectedClusterId===L.GUIDED_CLUSTERS.at(-1).id?'disabled':''}>Bài sau →</button></div>
+      <details class="lesson-foundations"><summary>Tra cứu kiến thức nền</summary><p class="field-note">Chữ cái, số, ngày và mẫu câu.</p>${L.A1_FOUNDATIONS.map((entry,index)=>`<details><summary>${esc(entry.title)}</summary><p>${esc(entry.text)}</p><p>${esc(entry.note)}</p><button type="button" class="ghost-btn" data-foundation-audio="${index}">Nghe mẫu giọng máy</button></details>`).join('')}</details>
+      <details class="course-evidence"><summary>Hoạt động đã ghi nhận</summary><p id="coursePracticeSummary" class="cluster-note" aria-live="polite">${esc(coursePracticeLabel(db))}</p></details>
+      <p class="course-hint">Mỗi bài một tình huống.<br>Học chậm, nghe lại và thử bằng câu của bạn.</p>
+    </aside>`+L.GUIDED_CLUSTERS.filter(cluster=>cluster.id===selectedClusterId).map(cluster=>{
       const state=L.clusterState(db,cluster.id);
       const modules=L.modulesForCluster(cluster.id);
       const remaining=Math.max(0,state.total-state.installed);
-      const buttonLabel=state.complete?'Đã thêm vào bộ học':remaining===state.total?`Thêm ${state.total} Unit vào bộ học`:`Thêm ${remaining} Unit còn lại`;
-      const example=(cluster.workedExample?.turns||[]).map(turn=>`<li><b>${esc(turn.speaker)}:</b> ${esc(turn.text)}<small>${esc(turn.translation)}</small></li>`).join('');
+      const buttonLabel=state.complete?'Đã thêm vào bộ ôn':remaining===state.total?`Thêm ${state.total} cụm vào bộ ôn`:`Thêm ${remaining} cụm còn lại`;
       const lp=lessonProgress(db,cluster.id);
       const {lesson,lessonImported,lessonChecked,missionTries,evidence}=lp;
+      // Comprehension must refer to the displayed reading, not a different preparation example.
+      const readingLines=lesson?.lines||(cluster.workedExample?.turns||[]).map(turn=>[`${turn.speaker?turn.speaker+': ':''}${turn.text}`,turn.translation]);
+      const example=readingLines.map(([text,translation])=>`<li><span data-reading-line>${esc(text)}</span><small>${esc(translation)}</small></li>`).join('');
       const prep=cluster.preparation;
       return `<article class="guided-cluster" data-cluster-card="${esc(cluster.id)}">
         <div class="guided-cluster-head">
-          <div><span class="eyebrow">${esc(cluster.levelBasis||cluster.level)}</span><h4>${esc(cluster.title)}</h4><p>${esc(cluster.canDo)}</p></div>
+          <div><span class="eyebrow">BÀI ${L.GUIDED_CLUSTERS.findIndex(item=>item.id===cluster.id)+1} / ${L.GUIDED_CLUSTERS.length} · A1</span><h4>${esc(cluster.title)}</h4><p>${esc(cluster.canDo)}</p></div>
           <span class="cluster-progress">${state.practiced}/${state.total} đã từng ôn</span>
         </div>
-        <p class="cluster-note">${esc(cluster.scopeNote||'')}</p>
+        <nav class="lesson-jump" aria-label="Các phần của bài"><button type="button" data-lesson-step="prepare" aria-pressed="true">1. Chuẩn bị</button><button type="button" data-lesson-step="read" aria-pressed="false">2. Đọc</button><button type="button" data-lesson-step="listen" aria-pressed="false">3. Nghe</button><button type="button" data-lesson-step="use" aria-pressed="false">4. Viết & nói</button></nav>
+        <div class="lesson-study-action"><button class="module-action" type="button" data-guided-cluster="${esc(cluster.id)}" ${state.complete?'disabled':''}>${esc(buttonLabel)}</button><span>Thêm một lần để luyện viết, nói và ôn lại.</span></div>
         ${prep?`<details class="lesson-preparation" open>
-          <summary>① Chuẩn bị và tập câu ngắn</summary>
+          <summary>Chuẩn bị · Hiểu cách dùng</summary>
           <p>${esc(prep.prerequisite)}</p>
           <h5>Từ cần biết</h5><ul>${prep.glossary.map(text=>`<li>${esc(text)}</li>`).join('')}</ul>
           <h5>Cách dùng</h5><ul>${prep.patterns.map(text=>`<li>${esc(text)}</li>`).join('')}</ul>
+          ${cluster.stage?`<p class="field-note">Chặng ${esc(cluster.stage)}${cluster.kind==='review'?' · Thử trước khi mở hướng dẫn; quay lại xem khi cần hỗ trợ.':''}</p>`:''}
           <h5>Ví dụ từng bước</h5><ol>${prep.worked.map(text=>`<li>${esc(text)}</li>`).join('')}</ol>
+          ${prep.coaching?`<details class="lesson-coaching"><summary>Lỗi thường gặp & cách nói rõ</summary><p>${esc(prep.coaching.mistake)}</p><p>${esc(prep.coaching.pronunciation)}</p><p>Tự giải thích: vì sao câu sửa đúng hơn? Nêu một câu khác theo cùng mẫu.</p></details>`:''}
           <p>Luyện có gợi ý: được xem phần hướng dẫn. Kết quả này không đánh giá trình độ A1.</p>
           <div class="lesson-quiz" data-preparation-quiz="${esc(cluster.id)}"></div>
         </details>`:''}
-        ${lesson?`<div class="lesson-flow">
+        <details class="guided-example">
+          <summary>Đọc · ${esc(lesson?.title||cluster.title)}</summary>
+          <p class="field-note">Đọc từng câu, rồi trả lời phần kiểm hiểu bên dưới.</p>
+          <button type="button" class="ghost-btn" data-reading-translation aria-pressed="false">Hiện nghĩa tiếng Việt</button>
+          <ol>${example}</ol>
+        </details>
+        ${lesson?`<div class="lesson-flow" aria-label="Hoạt động của bài">
           <span class="lesson-step${lessonChecked?' done':lessonImported?' active':''}">${lessonChecked?'Đã làm kiểm hiểu':'1 · Đọc hội thoại & kiểm hiểu'}</span>
           <span class="lesson-step${state.complete?' done':state.installed?' active':''}">2 · Unit vào bộ ôn</span>
           <span class="lesson-step${missionTries?' done':''}">${missionTries?'Đã thử vận dụng':'3 · Viết / nói vận dụng'}</span>
         </div>
         ${evidence.length?`<p class="lesson-evidence">Bằng chứng: ${esc(evidence.join(' · '))} — luyện tập tự đối chiếu, chưa phải đánh giá đạt.</p>`:''}
-        <button class="module-action lesson-open" type="button" data-lesson-open="${esc(cluster.id)}">${lessonImported?'Đọc lại hội thoại dẫn nhập':'② Đọc hội thoại — rồi làm 3 câu tình huống bên dưới'}</button>
+        <button class="module-action lesson-open" type="button" data-lesson-open="${esc(cluster.id)}">Mở trong trình đọc để lưu từ →</button>
         ${lesson.scenarioQuiz?.length?`<details class="lesson-scenario">
-          <summary>Kiểm hiểu tình huống — ${lesson.scenarioQuiz.length} câu về thông tin trong bài</summary>
+          <summary>Kiểm hiểu · ${lesson.scenarioQuiz.length} câu</summary>
           <div class="lesson-quiz" data-scenario-quiz="${esc(cluster.id)}"></div>
         </details>`:''}`:''}
         ${lesson?.listening?`<details class="lesson-listening">
-          <summary>③ Luyện nghe — giọng máy, có thể nghe lại</summary>
+          <summary>Nghe · Một đoạn mới</summary>
           <p>Nghe một đoạn mới rồi trả lời. Lời thoại chỉ hiện khi bạn yêu cầu; lần thử có xem lời được ghi là có hỗ trợ. Giọng máy chưa được thẩm định như bài thi nghe.</p>
           <button type="button" class="ghost-btn" data-listen-play>Nghe đoạn mới</button>
           <button type="button" class="ghost-btn" data-listen-transcript>Xem lời và nghĩa (có hỗ trợ)</button>
           <p data-listen-status role="status"></p><p data-listen-text class="hidden"></p>
           <div class="lesson-quiz" data-listening-quiz="${esc(cluster.id)}"></div>
         </details>`:''}
-        <details class="guided-example">
-          <summary>${esc(cluster.workedExample?.label||'Xem ví dụ')}</summary>
-          <ol>${example}</ol>
-        </details>
         <details class="guided-steps">
           <summary>Cụm câu cần luyện · ${state.installed}/${state.total} có sẵn</summary>
           <ol>${modules.map(module=>`<li><strong>${esc(module.title)}</strong><span>${esc(module.canDo)}</span></li>`).join('')}</ol>
         </details>
-        <p class="cluster-note">${esc(cluster.audioNote||'')}</p>
-        <button class="module-action" type="button" data-guided-cluster="${esc(cluster.id)}" ${state.complete?'disabled':''}>${esc(buttonLabel)}</button>
+        ${prep?.coaching?`<details class="lesson-revisit"><summary>Ôn lại ngày sau · Đổi tình huống</summary><p>${esc(prep.coaching.recall)}</p><p>Thử không nhìn mẫu trước; nếu cần, mở lại phần hướng dẫn. Đây là gợi ý tự luyện, không tự ghi thành một lần đạt hay bằng chứng đánh giá. Dùng mục Ôn tập để luyện các cụm đã lưu.</p></details>`:''}
+        <details class="lesson-notes"><summary>Về nội dung và cách ghi nhận tiến độ</summary><p class="cluster-note">${esc(cluster.scopeNote||'')}</p><p class="cluster-note">${esc(cluster.audioNote||'')}</p></details>
       </article>`;
     }).join('');
+    root.querySelectorAll('[data-lesson-offset]').forEach(button=>button.onclick=()=>{
+      const index=L.GUIDED_CLUSTERS.findIndex(cluster=>cluster.id===selectedClusterId)+Number(button.dataset.lessonOffset);
+      const next=L.GUIDED_CLUSTERS[index];if(!next)return;
+      $('a1LessonSelect').value=next.id;$('a1LessonSelect').dispatchEvent(new Event('change'));
+    });
+    root.querySelector('[data-reading-translation]')?.addEventListener('click',event=>{
+      const button=event.currentTarget;const visible=button.getAttribute('aria-pressed')!=='true';
+      button.setAttribute('aria-pressed',String(visible));button.textContent=visible?'Ẩn nghĩa tiếng Việt':'Hiện nghĩa tiếng Việt';
+      button.closest('.guided-example').classList.toggle('show-translations',visible);
+    });
+    root.querySelectorAll('[data-lesson-step]').forEach(button=>button.onclick=()=>{
+      const step=button.dataset.lessonStep;
+      for(const node of root.querySelectorAll('[data-lesson-step]'))node.setAttribute('aria-pressed',String(node===button));
+      const sections={prepare:'.lesson-preparation',read:'.guided-example',listen:'.lesson-listening'};
+      for(const [key,selector] of Object.entries(sections)){const section=root.querySelector(selector);if(section)section.open=key===step;}
+      const quiz=root.querySelector('.lesson-scenario');if(quiz)quiz.open=step==='read';
+      const target=step==='use'?$('transferMissions'):root.querySelector(sections[step]);
+      target?.scrollIntoView({block:'start'});
+    });
     root.querySelectorAll('[data-foundation-audio]').forEach(button=>button.onclick=()=>speakSentence(L.A1_FOUNDATIONS[Number(button.dataset.foundationAudio)].text));
     $('a1LessonSelect').onchange=(event)=>{
       window.speechSynthesis?.cancel();
@@ -290,14 +322,14 @@
       <button class="module-action transfer-reveal" type="button" data-unit-reveal ${due.previousAttempt?'':'disabled'}>Xem câu mẫu sau khi đã thử</button>
       <div class="transfer-model hidden" id="unitTransferModel"><strong>Mẫu từ câu đã học — chỉ để đối chiếu</strong><p class="model-caveat">Tự đối chiếu theo checklist — đây là bài luyện, chưa phải đánh giá đạt.</p>${due.item.exampleSentence?`<p>${esc(due.item.exampleSentence)}</p>`:''}${due.item.exampleTranslation?`<p><em>${esc(due.item.exampleTranslation)}</em></p>`:''}<ul><li>Câu mới có dùng đúng cụm không?</li><li>Ngữ cảnh có khác câu gốc không?</li></ul><label class="transfer-check"><input type="checkbox" data-unit-self-review> Tôi đã so sánh câu của mình với mẫu</label><button class="primary-btn transfer-save" type="button" data-unit-save>Lưu — đã tự đối chiếu</button></div>
     </article>`:'';
-    root.innerHTML=unitHtml+L.TRANSFER_MISSIONS.filter(mission=>mission.clusterId===selectedClusterId).map(mission=>{
+    root.innerHTML=`<div class="practice-heading"><span class="eyebrow">THỬ DÙNG ĐIỀU VỪA HỌC</span><h3>Viết & nói</h3><p>Thử trước, xem mẫu sau. Bạn có thể quay lại sửa và luyện thêm.</p></div>`+unitHtml+L.TRANSFER_MISSIONS.filter(mission=>mission.clusterId===selectedClusterId).map(mission=>{
       const cluster=L.clusterById(mission.clusterId);
       const clusterState=L.clusterState(db,mission.clusterId);
       const state=L.missionState(db,mission.id);
       const isReady=clusterState.complete;
       return `<article class="transfer-mission" data-transfer-mission="${esc(mission.id)}">
         <div class="transfer-heading"><div><span class="eyebrow">TRANSFER · ${esc(mission.level)}</span><h4>${esc(mission.title)}</h4><p>${esc(mission.canDo)}</p></div><span class="transfer-status">${esc(formatAttempt(state.latest))}</span></div>
-        ${isReady?`<p class="mission-setup">${esc(mission.setup)}</p><blockquote>${esc(mission.incomingMessage)}</blockquote><p class="mission-instructions">${esc(mission.instructions)}</p>${mission.requireFinalTimeConfirm?`<label class="field transfer-finaltime" for="finalTime-${esc(mission.id)}">Giờ cuối cùng bạn chốt<input type="text" id="finalTime-${esc(mission.id)}" maxlength="40" placeholder="vd: 7, 7:30, seven" autocomplete="off"></label>`:''}<label class="field transfer-field" for="transferResponse-${esc(mission.id)}">Câu trả lời của bạn<textarea id="transferResponse-${esc(mission.id)}" maxlength="1600" placeholder="Write 1–2 short sentences in English…"></textarea></label><label class="transfer-check"><input type="checkbox" data-transfer-spoke="${esc(mission.id)}"> Tôi đã nói câu trả lời thành tiếng</label><button class="module-action transfer-reveal" type="button" data-transfer-reveal="${esc(mission.id)}" disabled>Xem mẫu sau khi đã thử</button><div class="transfer-model hidden" id="transferModel-${esc(mission.id)}"><strong>Mẫu để đối chiếu</strong><p class="model-caveat">Tự đối chiếu theo checklist — đây là bài luyện, chưa phải đánh giá đạt.</p>${mission.modelAnswer.map(line=>`<p>${esc(line)}</p>`).join('')}<ul>${mission.selfCheck.map(item=>`<li>${esc(item)}</li>`).join('')}</ul><label class="transfer-check"><input type="checkbox" data-transfer-self-review="${esc(mission.id)}"> Tôi đã so sánh lần thử với mẫu</label><button class="primary-btn transfer-save" type="button" data-transfer-save="${esc(mission.id)}">Lưu lần thử</button></div>`:`<p class="mission-locked">Thêm đủ ${clusterState.total} Unit của “${esc(cluster?.title||'lộ trình này')}” trước. Nhiệm vụ này không dùng để chấm điểm card.</p>`}
+        ${isReady?`<p class="mission-setup">${esc(mission.setup)}</p><blockquote>${esc(mission.incomingMessage)}</blockquote><p class="mission-instructions">${esc(mission.instructions)}</p>${mission.requireFinalTimeConfirm?`<label class="field transfer-finaltime" for="finalTime-${esc(mission.id)}">Giờ cuối cùng bạn chốt<input type="text" id="finalTime-${esc(mission.id)}" maxlength="40" placeholder="vd: 7, 7:30, seven" autocomplete="off"></label>`:''}<label class="field transfer-field" for="transferResponse-${esc(mission.id)}">Câu trả lời của bạn<textarea id="transferResponse-${esc(mission.id)}" maxlength="1600" placeholder="Write 1–2 short sentences in English…"></textarea></label><label class="transfer-check"><input type="checkbox" data-transfer-spoke="${esc(mission.id)}"> Tôi đã nói câu trả lời thành tiếng</label><button class="module-action transfer-reveal" type="button" data-transfer-reveal="${esc(mission.id)}" disabled>Xem mẫu sau khi đã thử</button><div class="transfer-model hidden" id="transferModel-${esc(mission.id)}"><strong>Mẫu để đối chiếu</strong><p class="model-caveat">Tự đối chiếu theo checklist — đây là bài luyện, chưa phải đánh giá đạt.</p>${mission.modelAnswer.map(line=>`<p>${esc(line)}</p>`).join('')}<ul>${mission.selfCheck.map(item=>`<li>${esc(item)}</li>`).join('')}</ul><label class="transfer-check"><input type="checkbox" data-transfer-self-review="${esc(mission.id)}"> Tôi đã so sánh lần thử với mẫu</label><button class="primary-btn transfer-save" type="button" data-transfer-save="${esc(mission.id)}">Lưu lần thử</button></div>`:`<p class="mission-locked">Thêm ${clusterState.total} cụm của “${esc(cluster?.title||'lộ trình này')}” trước. Dùng nút “Thêm cụm vào bộ ôn” ở đầu bài.</p>`}
       </article>`;
     }).join('');
     root.querySelectorAll('[data-transfer-mission]').forEach(card=>bindTransferMission(card));
@@ -334,7 +366,7 @@
           const back=document.createElement('button');
           back.type='button';back.className='ghost-btn transfer-return';
           back.textContent=`Đọc lại “${cap.sourceTitle||'nguồn'}” — gặp lại ${due.item.target||''} trong ngữ cảnh`;
-          back.onclick=()=>{document.querySelector('[data-view="capture"]')?.click();openSource(srcKey);};
+          back.onclick=()=>{document.querySelector('[data-view="library"]')?.click();openSource(srcKey);};
           $('transferMissions').appendChild(back);
         }
       }catch(error){
@@ -437,7 +469,8 @@
     const db=store.refresh();
     const sources=IM.assessSources(db);
     const importShell=$('importShell');
-    if(importShell)importShell.open=!sources.length;
+    // Imports are secondary to choosing a lesson or a suggested reading.
+    if(importShell&&!sources.length)importShell.open=false;
     if(!sources.length){
       root.innerHTML=`<div class="source-recs-empty">
         <strong>Chưa có nguồn nào.</strong>
@@ -884,6 +917,7 @@
   // by knowledge level so seeing a word mid-sentence doubles as a noticing
   // moment, not just decoration.
   function openSource(key){
+    document.querySelector('[data-view="library"]')?.click();
     const panel=$('sourceReader');if(!panel||!IM)return;
     if(readerSourceKey===key){closeReader();return;}
     // Switching sources flushes the old source's queued encounters while its
@@ -1072,7 +1106,7 @@
     if(!payload)return;
     sessionStorage.removeItem('flashday-learning-hub-return');
     window.setTimeout(()=>{
-      document.querySelector('[data-view="capture"]')?.click();
+      document.querySelector(payload.openSource?'[data-view="library"]':'[data-view="capture"]')?.click();
       // Success message lands where the learner now is — the reader — not
       // inside the import form, which auto-collapses once the library fills.
       if(payload.openSource){

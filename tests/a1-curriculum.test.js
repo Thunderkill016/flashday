@@ -4,15 +4,85 @@ const D = require("../flashday-data");
 const curriculum = require("../a1-curriculum");
 assert.equal(
   L.GUIDED_CLUSTERS.length,
-  13,
-  "12 topic lessons plus a review; editorial scope, not a CEFR threshold",
+  30,
+  "26 teaching lessons and 4 cumulative reviews; editorial scope, not a CEFR threshold",
 );
 assert.equal(L.GUIDED_CLUSTERS.at(-1).id, "a1-review");
-assert.equal(new Set(L.GUIDED_CLUSTERS.map((c) => c.id)).size, 13);
+assert.equal(new Set(L.GUIDED_CLUSTERS.map((c) => c.id)).size, 30);
+assert.equal(L.A1_STAGES.length, 6);
+assert.deepEqual(
+  L.A1_STAGES.flatMap((stage) => stage.lessonIds),
+  L.GUIDED_CLUSTERS.map((c) => c.id),
+);
+assert.equal(L.GUIDED_CLUSTERS.filter((c) => c.kind === "review").length, 4);
+assert.equal(
+  new Set(L.TRANSFER_MISSIONS.map((m) => m.id)).size,
+  L.TRANSFER_MISSIONS.length,
+);
+for (const id of [
+  "a1-classroom",
+  "a1-possessions",
+  "a1-jobs",
+  "a1-frequency",
+  "a1-abilities",
+  "a1-now",
+  "a1-weather",
+  "a1-dates",
+  "a1-plans",
+  "a1-quantities",
+  "a1-signs",
+  "a1-past-places",
+  "a1-past-actions",
+  "a1-postcard",
+]) {
+  const cluster = L.clusterById(id);
+  assert(cluster?.stage, `missing authored domain: ${id}`);
+  const lesson = L.LESSON_DIALOGUES[id];
+  assert.notEqual(
+    lesson.listening.text,
+    lesson.lines.map((line) => line[0]).join(" "),
+    "listening must use a different text",
+  );
+}
+// Existing observation identities must survive catalog expansion and reordering.
+assert.equal(
+  L.LESSON_DIALOGUES["a1-introductions"].sourceId,
+  "lesson:a1-introductions:v1",
+);
+assert(L.missionById("a1-meeting-change-transfer"));
+assert(
+  L.moduleById("a1-introductions-core").units.some(
+    (unit) => unit.id === "a1-introductions-unit-1",
+  ),
+);
+// Frozen editorial facts guard high-risk distractors: updated order, date ambiguity,
+// negation and owner/subject distinctions. They are not a CEFR validation score.
+for (const [id, question, expected] of [
+  ["a1-checkpoint-services", 0, "2"],
+  ["a1-checkpoint-services", 1, "Nhỏ"],
+  ["a1-checkpoint-services", 2, "4 đô"],
+  ["a1-dates", 2, "6 giờ tối"],
+  ["a1-signs", 0, "Thứ Hai 10 giờ sáng"],
+  ["a1-possessions", 0, "Lan"],
+  ["a1-past-places", 2, "Hôm nay"],
+  ["a1-plans", 2, "Không, định học ở nhà"],
+]) {
+  const q = L.LESSON_DIALOGUES[id].scenarioQuiz[question];
+  assert.equal(
+    q.options[q.answer],
+    expected,
+    `${id}: authored fact regression`,
+  );
+}
 const db = D.createInitialDb([], 1000);
 const profile = JSON.stringify(db.learningProfile);
 for (const cluster of L.GUIDED_CLUSTERS) {
   const lesson = L.LESSON_DIALOGUES[cluster.id];
+  assert(cluster.preparation.coaching?.mistake);
+  assert(cluster.preparation.coaching?.pronunciation);
+  assert(cluster.preparation.coaching?.recall);
+  assert(cluster.stage);
+
   assert(lesson?.sourceId && lesson.lines.length >= 1);
   assert(lesson.listening.text && lesson.listening.translation);
   assert.equal(

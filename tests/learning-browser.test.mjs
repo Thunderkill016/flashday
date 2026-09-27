@@ -23,7 +23,25 @@ try {
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await page.goto(`${origin}app/?preview`);
+    await page.locator("#tab-capture").focus();
+    await page.keyboard.press("End");
+    assert.equal(await page.locator("#memoryView").isVisible(), true);
+    await page.keyboard.press("Home");
+    assert.equal(await page.locator("#captureView").isVisible(), true);
     await page.locator("#a1LessonSelect").selectOption("a1-meeting-change");
+    assert.equal(await page.locator("#libraryView").isVisible(), false);
+    assert.equal(await page.locator("#a1LessonSelect").isVisible(), true);
+    await page.locator('[data-lesson-step="read"]').click();
+    assert.equal(
+      await page.locator(".guided-example small").first().isVisible(),
+      false,
+    );
+    await page.locator("[data-reading-translation]").click();
+    assert.equal(
+      await page.locator(".guided-example small").first().isVisible(),
+      true,
+    );
+    await page.locator('[data-lesson-step="prepare"]').click();
     const preparation = page.locator("[data-preparation-quiz]");
     assert.equal(
       await preparation
@@ -41,12 +59,12 @@ try {
       await page
         .locator("[data-cluster-card] .cluster-note")
         .first()
-        .innerText(),
+        .textContent(),
       /chưa phải khóa A1/,
     );
     assert.match(
       await page.locator("[data-guided-cluster]").innerText(),
-      /6 Unit|5 Unit/,
+      /6 cụm|5 cụm/,
     );
     for (const question of await preparation.locator(".sq-q").all())
       await question.locator(".quiz-opt").first().click();
@@ -62,6 +80,17 @@ try {
         .nth(answer)
         .click();
     await preparation.locator(".sq-submit").click();
+    assert.match(await preparation.locator(".sq-result").innerText(), /3\/3/);
+    const prepNode = await preparation.elementHandle();
+    await page.locator('[data-lesson-step="listen"]').click();
+    await page.locator('[data-lesson-step="prepare"]').click();
+    assert.equal(
+      await preparation.evaluate(
+        (node, original) => node === original,
+        prepNode,
+      ),
+      true,
+    );
     assert.match(await preparation.locator(".sq-result").innerText(), /3\/3/);
     const prepRecords = await page.evaluate(
       () =>
@@ -138,6 +167,7 @@ try {
       /vận dụng 1 lần/,
     );
     assert.match(await quiz.locator(".sq-result").innerText(), /3\/3/);
+    await page.getByRole("tab", { name: "Thư viện", exact: true }).click();
     // Check the entire document, with the import form open, not only the cluster.
     await page.locator("#importUrlInput").evaluate((node) => {
       for (
@@ -168,8 +198,8 @@ try {
         await details.locator(":scope > summary").click();
       await page.locator("#typeInput").selectOption("word_sense");
       await page.locator('#captureForm button[type="submit"]').click();
-      await page.getByRole("tab", { name: "Bộ nhớ", exact: true }).waitFor();
-      await page.getByRole("tab", { name: "Học", exact: true }).click();
+      await page.getByRole("tab", { name: "Từ đã lưu", exact: true }).waitFor();
+      await page.getByRole("tab", { name: "Thư viện", exact: true }).click();
     }
     const importShell = page.locator("#importShell");
     if (!(await importShell.evaluate((node) => node.open)))
@@ -240,7 +270,8 @@ try {
     const ids = await page
       .locator("#a1LessonSelect option")
       .evaluateAll((nodes) => nodes.map((node) => node.value));
-    assert.equal(ids.length, 13);
+    assert.equal(ids.length, 30);
+    assert.equal(await page.locator("#a1LessonSelect optgroup").count(), 6);
     for (const id of ids) {
       await page.locator("#a1LessonSelect").selectOption(id);
       assert.equal(
@@ -252,6 +283,20 @@ try {
         3,
       );
       assert.equal(await page.locator("[data-scenario-quiz] .sq-q").count(), 3);
+      const expectedReading = await page.evaluate(
+        (id) =>
+          window.FlashDayLearningEntry.LESSON_DIALOGUES[id].lines.map(
+            (line) => line[0],
+          ),
+        id,
+      );
+      assert.deepEqual(
+        await page.locator("[data-reading-line]").allTextContents(),
+        expectedReading,
+        `reading and quiz source must match: ${id}`,
+      );
+      assert.equal(await page.locator(".lesson-coaching").count(), 1);
+      assert.equal(await page.locator(".lesson-revisit").count(), 1);
       assert.equal(await page.locator("[data-listen-text]").isVisible(), false);
       assert.equal(
         await page.evaluate(
@@ -261,6 +306,29 @@ try {
         `curriculum overflow: ${id}`,
       );
     }
+    await page
+      .locator("#a1LessonSelect")
+      .selectOption("a1-checkpoint-services");
+    await page.locator('[data-lesson-step="read"]').click();
+    const checkpointQuiz = page.locator("[data-scenario-quiz]");
+    for (const [index, answer] of [1, 0, 2].entries())
+      await checkpointQuiz
+        .locator(".sq-q")
+        .nth(index)
+        .locator(".quiz-opt")
+        .nth(answer)
+        .click();
+    await checkpointQuiz.locator(".sq-submit").click();
+    assert.match(
+      await checkpointQuiz.locator(".sq-result").innerText(),
+      /3\/3/,
+    );
+    await page.reload();
+    assert.equal(
+      await page.locator("#a1LessonSelect").inputValue(),
+      "a1-checkpoint-services",
+    );
+    assert.match(await page.locator(".lesson-evidence").innerText(), /3\/3/);
     await page.locator("#a1LessonSelect").selectOption("a1-introductions");
     await page.locator(".lesson-listening summary").click();
     const listening = page.locator("[data-listening-quiz]");
@@ -322,8 +390,8 @@ try {
     assert.equal(records.at(-1).assistance, "transcript-viewed");
     assert.equal(records.at(-1).completedPlays, 0);
     assert.match(
-      await page.locator("#coursePracticeSummary").innerText(),
-      /nghe giọng máy 1\/13/,
+      await page.locator("#coursePracticeSummary").textContent(),
+      /nghe giọng máy 1\/30/,
     );
     await page.locator("#a1LessonSelect").selectOption("a1-introductions");
     await page.locator("[data-guided-cluster]").click();

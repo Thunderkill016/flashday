@@ -124,70 +124,82 @@ qua. Điều kiện công bố khóa A1 vẫn **chưa đạt**: ma trận còn t
 người có chuyên môn giảng dạy và đánh giá nghe/nói/đọc/viết độc lập. Test kỹ thuật
 chỉ chứng minh phần mềm thực thi thiết kế, không xác nhận độ khó hay hiệu quả học.
 
-### Lộ trình nội dung A1 — bản triển khai 2026-09-27
+### Lộ trình nội dung A1 — mở rộng theo năng lực giao tiếp
 
-Bản này thay thế trạng thái “chỉ một bài” ở audit phía trên. Phạm vi biên soạn
-hiện tại là **12 chủ đề và 1 bài tổng ôn**, theo các hoạt động A1 trong CEFR,
-không phải tuyên bố 13 bài là ngưỡng chuẩn CEFR. Nội dung nguyên bản FlashDay;
-nhãn A1 là mục tiêu biên soạn, chưa phải chứng nhận của Council of Europe.
+Bản hiện tại thay thế danh mục 13 bài trước đó: **30 bài, gồm 26 bài dạy và
+4 bài ôn tích hợp**, chia thành 6 chặng. Đây là phạm vi biên soạn cho người Việt
+mới bắt đầu, không phải quy định “CEFR yêu cầu 30 bài”. Không đặt ngưỡng số từ,
+điểm quiz hay số lần học để cấp trình độ.
 
-| Thứ tự | Bài                | Đầu ra cụ thể                                       | Điểm ngôn ngữ chính                        |
-| ------ | ------------------ | --------------------------------------------------- | ------------------------------------------ |
-| 1      | Giới thiệu         | Tên, nơi ở, hỏi tên người mới                       | I am, my name, live in, câu hỏi tên/nơi    |
-| 2      | Đánh vần/liên hệ   | Xác nhận tên và số, thẻ liên hệ giả                 | chữ cái, chữ số, How do you spell, Is that |
-| 3      | Gia đình           | Giới thiệu người, quan hệ, tuổi/nghề                | he/she, my/his/her, is, số nhiều           |
-| 4      | Nhà ở              | Mô tả phòng, xác định vị trí đồ vật                 | there is/are, a/an, on/under/next to       |
-| 5      | Sinh hoạt/sở thích | Lịch một ngày, sở thích, khả năng                   | present simple, do/don’t, can, giờ         |
-| 6      | Ăn uống            | Gọi món, chọn cỡ, hỏi giá                           | Can I have, would like, How much           |
-| 7      | Mua sắm            | Chọn màu/cỡ/số lượng                                | this/these, is/are, danh từ số nhiều       |
-| 8      | Chỉ đường          | Hỏi vị trí, làm theo và xác nhận đường              | Where, câu mệnh lệnh, mốc và hướng         |
-| 9      | Đi lại             | Mua vé, phân biệt giờ/số sân ga, truyền thông báo   | ticket to, giờ/phút, fifteen/fifty         |
-| 10     | Nhu cầu            | Xin nước/chỗ ngồi/giúp đỡ; nóng/lạnh                | am + trạng thái, need, yêu cầu lịch sự     |
-| 11     | Biểu mẫu/tin nhắn  | Thông tin giả; truyền ngày/giờ/phòng                | tên/họ/địa chỉ, ngày tháng, on/at          |
-| 12     | Hẹn gặp            | Đọc giờ/nơi, xin nhắc lại, chốt giờ thay đổi        | mẫu hỏi giờ, xác nhận và sửa hiểu nhầm     |
-| 13     | Tổng ôn            | Thông báo trung tâm, hỏi đáp và tin nhắn câu lạc bộ | kết hợp các mẫu trong bối cảnh khác        |
+Nguồn đối chiếu trực tiếp ngày 2026-09-27:
 
-Phần tra cứu nền tảng cung cấp bảng chữ cái, số 0–100, thứ/tháng, giờ, đại từ/be,
-sở hữu, số ít/nhiều, vị trí, hiện tại đơn/tiếp diễn, từ nối và xin hỗ trợ. Đây là
-hỗ trợ để quay lại khi thiếu kiến thức; không tính việc mở bảng là “đã biết”.
+- [Council of Europe — CEFR descriptors](https://www.coe.int/en/web/common-european-framework-reference-languages/cefr-descriptors-search):
+  giao tiếp nhu cầu cụ thể, hiểu lời chậm/rõ, hỏi lại, tin nhắn đơn giản và chuyển
+  thông tin ngắn giữa ngôn ngữ. Dùng làm khung can-do, không sao chép bài tập.
+- [British Council — A1 Elementary](https://learnenglish.britishcouncil.org/level/understand-your-level/a1-elementary):
+  diễn đạt thường ngày, thông tin cá nhân và tương tác với người nói chậm/rõ.
+  Danh mục ngữ pháp A1–A2 của họ gộp hai mức, không dùng nhãn đó để khẳng định
+  mọi điểm ngữ pháp trong danh mục đều bắt buộc cho A1.
 
-Mỗi bài có mục tiêu, nghĩa từ, mẫu câu, văn bản có nghĩa, ba câu luyện ngôn ngữ,
-ba câu kiểm hiểu thông tin, một đoạn nghe khác văn bản đọc với hai câu hỏi,
-nhiệm vụ viết và nói hai vai với checklist. Bài hẹn gặp giữ ID nhiệm vụ cũ để
-không mất lịch sử. Các bài mới dùng source ID có phiên bản `:v1`.
+#### Phạm vi và trình tự
 
-**Nghe:** trình duyệt phát TTS tiếng Anh chậm. Transcript mặc định ẩn; xem lời
-được ghi `transcriptViewed`, phát hết được ghi `completedPlays`. Không có giọng
-phù hợp hoặc phát lỗi thì không ghi hoàn tất lượt nghe. Đọc transcript thay thế
-được ghi `listening-transcript-practice`, không cộng vào số bài đã thử nghe.
-Test trình duyệt giả lập sự kiện giọng đọc để kiểm cơ chế; không xác nhận chất
-lượng âm thanh thật trên mọi thiết bị. Chưa có bộ audio người nói đã thẩm định.
+| Chặng                     | Bài theo thứ tự                                                    | Can-do và kiến thức được thực hành                                                                                             |
+| ------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| 1 · Bắt đầu giao tiếp     | Giới thiệu; Liên hệ; Hỏi lại/hướng dẫn; Gia đình; Ôn gặp người mới | Tên, nơi ở, đánh vần, số, quan hệ/tuổi; be, đại từ, sở hữu; yêu cầu nhắc lại, làm theo chỉ dẫn                                 |
+| 2 · Nhà và sinh hoạt      | Nhà ở; Đồ dùng/sở hữu; Công việc; Sinh hoạt; Tần suất; Ôn một ngày | Vị trí, đồ đạc, nghề và lịch; there is/are, have/has, my/mine, hiện tại đơn, do/does, usually/never                            |
+| 3 · Hoạt động và kế hoạch | Khả năng; Đang diễn ra; Thời tiết; Ngày/lời mời; Kế hoạch gần      | can/can’t, like + danh từ/ing, hiện tại tiếp diễn, thời tiết/quần áo, ngày rõ ràng, am/pm, going to và phản hồi lời rủ         |
+| 4 · Mua đồ và nhu cầu     | Ăn uống; Số lượng; Mua sắm; Nhu cầu; Ôn giao dịch                  | Gọi món, lượng/giá, màu/cỡ, trạng thái và yêu cầu giúp; a/an, số nhiều, some/any, how many/much, sửa đơn nhắc sai              |
+| 5 · Đi lại và hẹn gặp     | Chỉ đường; Biển báo; Đi lại; Hẹn gặp                               | Chỉ dẫn, giờ mở/đóng, vé/sân ga, xác nhận kế hoạch sau thay đổi; mệnh lệnh, giới từ, giữ nhãn của các con số                   |
+| 6 · Viết tin và tổng ôn   | Hôm qua ở đâu; Việc đã làm; Biểu mẫu/tin nhắn; Bưu thiếp; Tổng ôn  | was/were, did + động từ gốc, một số quá khứ thông dụng, thông tin cá nhân, câu ngắn/and/but, tin nhắn có người nhận và câu hỏi |
 
-**Viết/nói:** các bài mới yêu cầu câu viết trước khi xem mẫu; bài nói thêm yêu
-cầu thực hành nói và ghi câu/chi tiết người nghe hiểu hoặc ghi rõ tự luyện.
-Records vẫn `grading: self-check`; không chấm phát âm hoặc ngữ nghĩa bằng số từ.
-Các lần nói/viết là hoạt động riêng. Tổng quan đọc/nghe/viết/nói đếm bài có lần
-thử, kể cả sai; không tăng CEFR và không hiển thị “đã đạt A1”.
+Quá khứ và going to được dạy bằng mẫu giao tiếp hẹp, không biến thành khóa lý
+thuyết mọi thì. Đây là lựa chọn biên soạn để diễn đạt những việc cá nhân đơn
+giản; không tuyên bố CEFR là một giáo trình ngữ pháp cố định.
 
-**Đánh giá cuối lộ trình:** tự làm tổng ôn trước khi mở đáp án/mẫu; ghi các hỗ
-trợ đã dùng. Với một người nghe/chấm độc lập, dùng nhiệm vụ mới cùng dạng:
+#### Mỗi bài có gì
 
-- Đọc/nghe: người học tìm đúng người, thời gian, nơi hoặc số/giá cần hành động.
-  Giữ riêng số đúng, số lần nghe lại, và việc đã xem transcript.
-- Nói: người nghe ghi thông tin thực sự hiểu được, câu cần nhắc lại, khả năng hỏi
-  và đáp. Chấp nhận hỗ trợ chậm/rõ phù hợp A1; không yêu cầu giọng bản ngữ.
-- Viết: người đọc xác định được thông tin và hành động; lỗi cơ bản có thể còn,
-  nhưng phải chỉ rõ lỗi làm hiểu sai giờ/nơi/người/số.
-- Chưa đủ bằng chứng nếu chỉ chép mẫu, chỉ tick đã nói, hoặc thiếu một kỹ năng.
-  Học lại điểm yếu và dùng tình huống mới để kiểm lại sau đó. Không quy ước một
-  tổng phần trăm tùy ý thành chứng nhận A1.
+1. Mục tiêu quan sát được; từ có nghĩa Việt; mẫu câu và ví dụ giải từng bước.
+2. Ba câu luyện ngôn ngữ, đáp án và gợi ý sửa, có thể làm lại.
+3. Văn bản/hội thoại có bản dịch bật riêng; ba câu kiểm hiểu người/giờ/nơi/hành động.
+4. Một đoạn nghe có dữ kiện khác bài đọc, hai câu hỏi và transcript hỗ trợ.
+5. Nhiệm vụ viết tình huống mới với mẫu/chỉ dẫn đối chiếu; nhiệm vụ hỏi đáp hai vai.
+6. Lỗi thường gặp kèm cách sửa, hướng dẫn nói rõ, câu hỏi tự giải thích và gợi ý
+   ôn lại ngày sau với dữ kiện mới. Gợi ý tự luyện không tự ghi thành lần làm.
+7. Cụm câu nhập vào bộ ôn hiện có; tiếp tục dùng lịch ôn và cơ chế thử lại của app.
 
-Phân biệt **đã có nội dung và luồng luyện phủ các nhóm đã chọn** với **đã chứng
-minh hiệu quả/chuẩn đầu ra A1**. Phần thứ hai vẫn cần thẩm định người dạy, kiểm
-âm thanh và bằng chứng đánh giá độc lập với người học. Không coi test kỹ thuật
-hoặc số lượng bài là bằng chứng thay thế. Nguồn đối chiếu vẫn là CEFR ở audit
-trên và [British Council A1 listening](https://learnenglish.britishcouncil.org/free-resources/listening/a1)
-cho cấu trúc chuẩn bị → audio → nhiệm vụ kiểm hiểu; không sao chép audio/bài tập.
+Tổng hiện tại: **90 câu luyện ngôn ngữ, 90 câu kiểm hiểu đọc, 60 câu nghe,
+60 nhiệm vụ viết/nói**. Các con số dùng kiểm kê nội dung, không phải thước đo
+chất lượng hoặc chuẩn đạt A1. Bốn bài ôn đều có dữ kiện mới, gợi ý quay lại bài
+liên quan khi mắc lỗi; người học vẫn được xem hỗ trợ khi cần.
+
+#### Dữ liệu và sự tương thích
+
+Giữ ID bài, Unit, nhiệm vụ và source version của nội dung cũ. Chỉ bổ sung lớp
+hướng dẫn/ôn lại cho bài cũ, không thay đáp án câu hỏi đã ghi lịch sử. Các bài mới
+có source `lesson:<id>:v1`. Đổi thứ tự hiển thị không thay danh tính bản ghi.
+`stages` là nơi định nghĩa thứ tự; selector và model cùng dùng danh mục này.
+
+#### Ranh giới đánh giá
+
+- **Nghe:** TTS tiếng Anh, transcript mặc định ẩn; sự kiện nghe hết và việc xem
+  lời được ghi riêng. Mở transcript không tự tính là đã nghe. Chưa có audio người
+  nói và đánh giá chất lượng âm thanh độc lập trên các thiết bị.
+- **Viết/nói:** mẫu và checklist để tự đối chiếu. Bài nói yêu cầu nói thật, ghi một
+  câu và phản hồi người nghe hoặc khai rõ tự luyện. Không tự chấm nghĩa/phát âm.
+- **Ôn sau:** gợi ý trong bài là tự luyện không lưu điểm; bộ Ôn tập và delayed
+  Unit transfer vẫn là các luồng ghi bằng chứng riêng, không coi mở details là học.
+- **Kết quả:** không nâng CEFR theo hoạt động hoặc số câu đúng. Người chấm/nghe
+  độc lập cần dùng tình huống mới, ghi hỗ trợ, lỗi gây hiểu sai và thông tin thực
+  sự truyền được; thiếu kỹ năng nào thì chưa đủ bằng chứng ở kỹ năng đó.
+
+#### Điều kiện hoàn thành triển khai
+
+Danh mục có đầy đủ dữ liệu được nêu trên cho từng bài; mỗi ID tồn tại một lần;
+thứ tự chặng khớp UI; tất cả đáp án có chỉ số hợp lệ và hint; import lặp không
+nhân đôi Unit; ID cũ còn nguyên; văn bản đọc khớp nguồn câu hỏi (kể cả bài hẹn gặp cũ); quiz mới lưu và hiện sau reload; toàn bộ bài
+mở được trên mobile; typecheck và verify:full đạt. Các kiểm tra này xác nhận
+phần mềm/nội dung có cấu trúc, không thay thế thẩm định giáo viên hay kết quả
+học viên. Phần audio người nói và đánh giá nói/viết độc lập vẫn chưa triển khai.
 
 FlashDay helps Vietnamese-speaking learners retain and retrieve English that
 they can use. Its purpose is not to make a learner finish a card queue; it is
