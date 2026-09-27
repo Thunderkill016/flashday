@@ -89,3 +89,36 @@ export function suggestNext({ events, session, lessons }) {
 
   return { kind: 'done', lessonId: null, step: null, reason: 'all-attempted' };
 }
+
+// Learning streak: consecutive local-calendar days with ≥1 submitted event
+// (lesson event or review log), ending today — or ending yesterday if today
+// hasn't produced one yet (the streak is still alive until tomorrow).
+// Activity data only; no claim about proficiency.
+export function computeStreak(db, now = Date.now()) {
+  const days = new Set();
+  const stamp = (ts) => {
+    const d = new Date(Number(ts));
+    return Number.isNaN(d.getTime()) ? null : `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+  };
+  for (const e of db?.lessonEvents || []) {
+    const s = stamp(e.submittedAt);
+    if (s) days.add(s);
+  }
+  for (const r of db?.reviewLog || []) {
+    const s = stamp(r.reviewedAt ?? r.submittedAt ?? r.at);
+    if (s) days.add(s);
+  }
+  const dayKey = (offset) => {
+    const d = new Date(now);
+    d.setDate(d.getDate() - offset);
+    return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+  };
+  let start = 0;
+  if (!days.has(dayKey(0))) {
+    if (!days.has(dayKey(1))) return 0;
+    start = 1;
+  }
+  let streak = 0;
+  for (let i = start; days.has(dayKey(i)); i++) streak++;
+  return streak;
+}

@@ -1,5 +1,5 @@
 // Kết quả buổi học — per-step activity table from the lesson's own events.
-import { stepsForLesson } from '../../core/progress.js';
+import { computeStreak, stepsForLesson } from '../../core/progress.js';
 import { dueChunks } from '../../core/scheduler.js';
 import { lessonById, nextLesson } from '../../content/a1/index.js';
 
@@ -35,6 +35,34 @@ export function mount(root, ctx) {
 
   const events = db.lessonEvents.filter((event) => event.lessonId === lesson.id);
   const steps = stepsForLesson(lesson);
+
+  // Celebration (Duolingo lesson-complete screen): every step done → a real
+  // reward moment, not just a data table. Numbers are activity facts.
+  const allDone = steps.every((step) => events.some((e) => e.step === step));
+  if (allDone) {
+    const banner = document.createElement('div');
+    banner.className = 'celebration-banner';
+    banner.dataset.role = 'celebration';
+    const quizSteps = steps.filter((s) => s !== 'write' && s !== 'speak');
+    const correctTotal = quizSteps.reduce((sum, step) => {
+      const best = Math.max(
+        0,
+        ...events.filter((e) => e.step === step).map((e) => Number(e.payload?.correct) || 0)
+      );
+      return sum + best;
+    }, 0);
+    const streak = computeStreak(db);
+    banner.appendChild(el('p', '🎉 Xong bài!', 'celebration-title'));
+    banner.appendChild(
+      el(
+        'p',
+        `${steps.length}/${steps.length} bước · ${correctTotal} câu đúng` +
+          (streak > 0 ? ` · 🔥 ${streak} ngày liên tiếp` : ''),
+        'celebration-detail'
+      )
+    );
+    section.appendChild(banner);
+  }
 
   const table = document.createElement('ul');
   table.className = 'summary-steps';

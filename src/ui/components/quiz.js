@@ -124,7 +124,14 @@ export function mountQuiz(el, questions, { onSubmit, initialAnswers = {}, onAnsw
     submitBtn.hidden = true;
     retryBtn.hidden = false;
     feedback.hidden = false;
-    feedback.textContent = `Đúng ${correct}/${questions.length}.`;
+    // Banner feedback (Duolingo pattern): full-width color block + icon —
+    // the emotional "I did it" / "try again" signal, not just a number.
+    const passed = correct === questions.length;
+    feedback.classList.toggle('pass', passed);
+    feedback.classList.toggle('retry', !passed);
+    feedback.innerHTML = passed
+      ? `<strong>✓ Đúng ${correct}/${questions.length}</strong><span>Tốt lắm!</span>`
+      : `<strong>⟳ Đúng ${correct}/${questions.length}</strong><span>Xem gợi ý rồi làm lại nhé.</span>`;
     onSubmit?.({ correct, total: questions.length, answers: { ...answers }, hintsViewed });
   });
 
@@ -145,6 +152,7 @@ export function mountQuiz(el, questions, { onSubmit, initialAnswers = {}, onAnsw
     retryBtn.hidden = true;
     submitBtn.hidden = false;
     feedback.hidden = true;
+    feedback.classList.remove('pass', 'retry');
   });
 
   el.append(...questionEls.map((q) => q.fieldset), submitBtn, retryBtn, feedback);

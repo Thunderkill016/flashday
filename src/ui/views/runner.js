@@ -10,6 +10,8 @@ import { enrollChunks } from '../../core/scheduler.js';
 import { stepsForLesson } from '../../core/progress.js';
 import { checkTimeGate } from '../../core/time-gate.js';
 import { mountQuiz } from '../components/quiz.js';
+import { mountMatchPairs } from '../components/matchpairs.js';
+import { mountWordBank } from '../components/wordbank.js';
 import { pickEnglishVoice, LEARNER_SPEECH_RATE, playButton, speakCheck, speechRecognizer, matchSpeech } from '../speech.js';
 import { getTutor } from '../../ai/tutor.js';
 
@@ -23,6 +25,44 @@ const STEP_LABELS = {
   write: 'Viết',
   speak: 'Nói'
 };
+
+const STEP_ICONS = {
+  prepare: '👀',
+  read: '📖',
+  listen: '👂',
+  write: '✍️',
+  speak: '🗣️'
+};
+
+// Scenario glyph per lesson — the visual anchor every top product uses.
+// Keyword-matched on title + canDo so all 30 lessons get one without a
+// schema change; 📗 is the neutral fallback.
+const SCENE_ICONS = [
+  [/gặp|chào|giới thiệu|quen/i, '👋'],
+  [/ăn|món|cơm|nhà hàng/i, '🍜'],
+  [/uống|cà phê|trà|nước/i, '🥤'],
+  [/mua|chợ|cửa hàng|giá|tiền/i, '🛒'],
+  [/xe|đi lại|đường|bus|tàu|ga /i, '🚌'],
+  [/giờ|hẹn|thời gian|lịch/i, '⏰'],
+  [/nhà|phòng|ở /i, '🏠'],
+  [/sức khỏe|bác sĩ|bệnh|đau|thuốc/i, '🏥'],
+  [/việc|công ty|làm/i, '💼'],
+  [/thời tiết|mưa|nắng|lạnh/i, '🌤️'],
+  [/gia đình|bố|mẹ|anh|chị|em|con/i, '👨‍👩‍👧'],
+  [/sở thích|chơi|thể thao|phim|nhạc|đọc/i, '🎮'],
+  [/du lịch|khách sạn|máy bay|thành phố/i, '✈️'],
+  [/tuần trước|hôm qua|đã |quá khứ/i, '📅'],
+  [/kế hoạch|sẽ |cuối tuần|tương lai/i, '🗓️'],
+  [/checkpoint|ôn chặng/i, '🏁']
+];
+
+function lessonIcon(lesson) {
+  const haystack = `${lesson.title} ${lesson.canDo || ''} ${lesson.stage || ''}`;
+  for (const [pattern, icon] of SCENE_ICONS) {
+    if (pattern.test(haystack)) return icon;
+  }
+  return '📗';
+}
 
 const STEP_KIND = {
   prepare: 'drill',
@@ -69,9 +109,18 @@ export function mount(root, ctx) {
   topbar.className = 'runner-topbar';
   topbar.innerHTML = `
     <a class="runner-back" href="#/path">← Lộ trình</a>
-    <span class="runner-title">${escapeHtml(lesson.title)}</span>
+    <span class="runner-title">${lessonIcon(lesson)} ${escapeHtml(lesson.title)}</span>
     <span class="runner-progress" data-role="progress"></span>`;
   section.appendChild(topbar);
+
+  // Continuous lesson-progress bar (Duolingo pattern): fills as steps get
+  // submitted, so "còn bao nhiêu việc" is visible at a glance.
+  const progressBar = document.createElement('div');
+  progressBar.className = 'lesson-progress';
+  progressBar.dataset.role = 'lesson-progress';
+  progressBar.setAttribute('role', 'progressbar');
+  progressBar.appendChild(document.createElement('i'));
+  section.appendChild(progressBar);
 
   const draftStatus = document.createElement('p');
   draftStatus.className = 'draft-status';
@@ -98,7 +147,7 @@ export function mount(root, ctx) {
     link.className = 'step-pill';
     link.dataset.stepLink = step;
     link.href = `#/lesson/${lesson.id}/${step}`;
-    link.textContent = STEP_LABELS[step];
+    link.textContent = `${STEP_ICONS[step] || ''} ${STEP_LABELS[step]}`;
     strip.appendChild(link);
   }
   section.appendChild(strip);
@@ -144,6 +193,7 @@ export function mount(root, ctx) {
     initial = state.draft.step;
   }
   showStep(initial);
+  updateLessonProgress();
 }
 
 // The router calls this on hashchange while the runner stays mounted.
@@ -270,6 +320,7 @@ function recordEvent(step, payload, support) {
   if (step === 'prepare' || step === 'read' || step === 'listen') {
     patchDraft({ answers: { ...state.draft?.answers, [step]: {} } });
   }
+  updateLessonProgress();
 }
 
 function draftAnswers(step) {
@@ -385,6 +436,58 @@ function explainOption(stepLabel, source) {
     : undefined;
 }
 
+// Word-bank items from drills: correct option must be a full sentence
+// (≥3 words); words unique to wrong options become distractors.
+function wordBankItems(drills, limit = 2) {
+  const items = [];
+  for (const drill of drills || []) {
+    const answer = drill?.options?.[drill.answer];
+    if (typeof answer !== 'string') continue;
+    const words = answer.replace(/[.,!?…]/g, '').split(/\s+/).filter(Boolean);
+    if (words.length < 3) continue;
+    const answerSet = new Set(words.map((w) => w.toLowerCase()));
+    const extra = [];
+    for (const opt of drill.options) {
+      if (opt === answer) continue;
+      for (const w of String(opt).replace(/[.,!?…]/g, '').split(/\s+/).filter(Boolean)) {
+        if (!answerSet.has(w.toLowerCase()) && !extra.includes(w)) extra.push(w);
+      }
+    }
+    items.push({ prompt: drill.q, answer, words, extra: extra.slice(0, 3) });
+    if (items.length >= limit) break;
+  }
+  return items;
+}
+
+// Speaker initial in a colored circle — cheap "character" presence for
+// dialogue lines without shipping artwork (name hashed to a stable hue).
+function speakerAvatar(en) {
+  const name = String(en).match(/^([A-Z][a-zA-ZÀ-ỹ]+)\s*:/)?.[1];
+  if (!name) return null;
+  const avatar = document.createElement('span');
+  avatar.className = 'avatar';
+  avatar.textContent = name[0];
+  avatar.style.setProperty('--avatar-h', String((name.charCodeAt(0) * 47) % 360));
+  avatar.title = name;
+  return avatar;
+}
+
+// Fill the lesson-progress bar: submitted steps / total steps. Called at
+// mount and after every recorded event.
+function updateLessonProgress() {
+  const sectionEl = state.panes[state.active]?.closest('.runner')
+    || state.panes[state.steps[0]]?.closest('.runner');
+  const bar = sectionEl?.querySelector('[data-role="lesson-progress"] i');
+  if (!bar) return;
+  const events = state.ctx.store.getState().lessonEvents || [];
+  const done = state.steps.filter((s) =>
+    events.some((e) => e.lessonId === state.lesson.id && e.step === s)
+  ).length;
+  const pct = Math.round((done / state.steps.length) * 100);
+  bar.style.width = `${pct}%`;
+  bar.parentElement.setAttribute('aria-valuenow', String(pct));
+}
+
 function text(tag, content, className) {
   const el = document.createElement(tag);
   if (className) el.className = className;
@@ -445,29 +548,93 @@ const buildStep = {
     pattern.appendChild(examples);
     pane.appendChild(pattern);
 
-    const chunks = document.createElement('ul');
-    chunks.className = 'chunk-list';
-    for (const chunk of lesson.chunks) {
-      const li = document.createElement('li');
-      li.append(
-        text('strong', chunk.target),
-        document.createTextNode(` · ${chunk.meaning} `),
-        playButton(chunk.target)
+    // Chunk pager — one chunk per screen (Duolingo one-challenge-per-screen).
+    // Every card stays mounted; the pager only toggles `hidden`, so TTS/ASR
+    // buttons and test selectors keep working on the hidden cards too.
+    const pager = document.createElement('div');
+    pager.className = 'chunk-pager';
+    const cards = lesson.chunks.map((chunk, index) => {
+      const card = document.createElement('div');
+      card.className = 'chunk-card';
+      card.hidden = index !== 0;
+      card.append(
+        text('strong', chunk.target, 'chunk-target'),
+        text('span', ` ${chunk.meaning}`, 'chunk-meaning')
       );
-      // Say-it-back (ELSA-lite): listen → speak → see what the recognizer
-      // heard. Only renders where SpeechRecognition exists.
+      const controls = document.createElement('div');
+      controls.className = 'chunk-controls';
       const sayCheck = speakCheck(chunk.target);
-      li.append(sayCheck.button, sayCheck.output);
+      controls.append(playButton(chunk.target), sayCheck.button);
+      card.appendChild(controls);
+      card.appendChild(sayCheck.output);
       const detail = document.createElement('details');
       detail.className = 'chunk-example';
       const summary = document.createElement('summary');
       summary.textContent = 'Ví dụ';
       detail.append(summary, text('p', `${chunk.example} — ${chunk.exampleVi}`));
-      li.appendChild(detail);
-      chunks.appendChild(li);
-    }
-    pane.appendChild(chunks);
+      card.appendChild(detail);
+      pager.appendChild(card);
+      return card;
+    });
+    // `chunk-list` class kept for selector compatibility — all cards live
+    // inside it even though only one is visible.
+    const listHost = document.createElement('div');
+    listHost.className = 'chunk-list';
+    listHost.appendChild(pager);
+    pane.appendChild(listHost);
 
+    if (cards.length > 1) {
+      let cursor = 0;
+      const nav = document.createElement('div');
+      nav.className = 'chunk-pager-nav';
+      const prev = document.createElement('button');
+      prev.type = 'button';
+      prev.className = 'btn-secondary';
+      prev.dataset.role = 'chunk-prev';
+      prev.textContent = '← Trước';
+      const counter = text('span', '', 'chunk-counter');
+      const next = document.createElement('button');
+      next.type = 'button';
+      next.className = 'btn-secondary';
+      next.dataset.role = 'chunk-next';
+      next.textContent = 'Cụm tiếp →';
+      const show = (i) => {
+        cursor = Math.max(0, Math.min(cards.length - 1, i));
+        cards.forEach((c, j) => (c.hidden = j !== cursor));
+        counter.textContent = `Cụm ${cursor + 1}/${cards.length}`;
+        prev.disabled = cursor === 0;
+        next.disabled = cursor === cards.length - 1;
+      };
+      prev.addEventListener('click', () => show(cursor - 1));
+      next.addEventListener('click', () => show(cursor + 1));
+      show(0);
+      nav.append(prev, counter, next);
+      pane.appendChild(nav);
+    }
+
+    // Warm-up 1 — match pairs EN↔VI on the first 4 chunks (recognition).
+    if (lesson.chunks.length >= 2) {
+      pane.appendChild(text('h3', 'Ghép nhanh — cụm nào là gì?', 'practice-sub'));
+      const pairsHost = document.createElement('div');
+      pane.appendChild(pairsHost);
+      mountMatchPairs(
+        pairsHost,
+        lesson.chunks.slice(0, 4).map((c) => [c.target, c.meaning])
+      );
+    }
+
+    // Warm-up 2 — word bank: rebuild a target sentence from shuffled chips
+    // (constrained production). Auto-derived from drills whose correct
+    // option is a full sentence; wrong options donate distractor words.
+    const bankItems = wordBankItems(lesson.drills, 2);
+    if (bankItems.length) {
+      pane.appendChild(text('h3', 'Sắp lại câu', 'practice-sub'));
+      const bankHost = document.createElement('div');
+      pane.appendChild(bankHost);
+      mountWordBank(bankHost, bankItems);
+    }
+
+    pane.appendChild(text('h3', 'Kiểm tra', 'practice-sub'));
     const quizHost = document.createElement('div');
     pane.appendChild(quizHost);
     mountQuiz(quizHost, lesson.drills, {
@@ -499,6 +666,8 @@ const buildStep = {
     list.className = 'dialogue-lines';
     for (const [en, vi] of lesson.dialogue.lines) {
       const li = document.createElement('li');
+      const avatar = speakerAvatar(en);
+      if (avatar) li.appendChild(avatar);
       li.append(playButton(en), text('span', en, 'en'), text('span', vi, 'vi translation'));
       list.appendChild(li);
     }
@@ -551,6 +720,8 @@ const buildStep = {
           list.className = 'dialogue-lines';
           for (const [en, vi] of lines) {
             const li = document.createElement('li');
+            const avatar = speakerAvatar(en);
+            if (avatar) li.appendChild(avatar);
             li.append(playButton(String(en)), text('span', String(en), 'en'), text('span', String(vi || ''), 'vi translation'));
             list.appendChild(li);
           }
@@ -607,7 +778,7 @@ const buildStep = {
     const playBtn = document.createElement('button');
     playBtn.type = 'button';
     playBtn.className = 'btn-primary';
-    playBtn.textContent = 'Nghe (giọng máy)';
+    playBtn.textContent = 'Nghe mẫu';
 
     const rateLabel = document.createElement('label');
     const rateToggle = document.createElement('input');

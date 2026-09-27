@@ -1,7 +1,8 @@
 // Hôm nay — the next thing to do, review due count, current stage.
-// Activity-only labels: no streaks, XP, or level claims.
+// Streak shows activity facts only (consecutive days with work) — still no
+// XP or proficiency claims.
 import { LESSONS, STAGES, lessonById } from '../../content/a1/index.js';
-import { STEPS, lessonStatus, stageStatus, stepsForLesson, suggestNext } from '../../core/progress.js';
+import { STEPS, computeStreak, lessonStatus, stageStatus, stepsForLesson, suggestNext } from '../../core/progress.js';
 import { dueChunks } from '../../core/scheduler.js';
 
 function draftHasContent(draft) {
@@ -18,6 +19,14 @@ export function mount(root, ctx) {
   section.className = 'view-section';
   const h1 = document.createElement('h1');
   h1.textContent = 'Hôm nay';
+  const streak = computeStreak(db);
+  if (streak > 0) {
+    const chip = document.createElement('span');
+    chip.className = 'streak-chip';
+    chip.dataset.role = 'streak';
+    chip.textContent = `🔥 ${streak} ngày liên tiếp`;
+    h1.appendChild(chip);
+  }
   section.appendChild(h1);
 
   // Card 1: next action
