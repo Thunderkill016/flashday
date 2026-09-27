@@ -2,6 +2,11 @@ import { createClient } from './src/auth/firebase-client.mjs';
 import { mergeProgressPayload } from './src/core/cloud.js';
 
 const config = __FLASHDAY_FIREBASE_CONFIG__;
+let appLoad;
+function loadApp() {
+  appLoad ||= import('./src/ui/app.js');
+  return appLoad;
+}
 
 function announce(detail) {
   // Stash for late-loading module scripts (the event fires during bootstrap's
@@ -12,11 +17,14 @@ function announce(detail) {
 
 if (!config?.apiKey || !config?.projectId || !config?.appId) {
   announce({ client: null, error: 'Thiếu cấu hình cloud.' });
+  loadApp();
 } else {
   const client = createClient(config, { mergeProgressPayload });
   const HAD_SESSION_KEY = 'flashday:had-session';
   const markSession = (had) => {
-    try { window.localStorage.setItem(HAD_SESSION_KEY, had ? '1' : ''); } catch (_e) {}
+    try {
+      window.localStorage.setItem(HAD_SESSION_KEY, had ? '1' : '');
+    } catch (_e) {}
   };
 
   // Wait for Firebase Auth to settle before any route guard can kick in.
@@ -34,8 +42,12 @@ if (!config?.apiKey || !config?.projectId || !config?.appId) {
       }
       if (!session && window.location.pathname.includes('/app/') && !previewMode) {
         let hadSession = true; // blocked storage is exactly the case session=lost explains
-        try { hadSession = window.localStorage.getItem(HAD_SESSION_KEY) === '1'; } catch (_e) {}
+        try {
+          hadSession = window.localStorage.getItem(HAD_SESSION_KEY) === '1';
+        } catch (_e) {}
         window.location.replace(hadSession ? '/login/?session=lost#signin' : '/login/#signin');
+      } else {
+        loadApp();
       }
       return;
     }
