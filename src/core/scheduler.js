@@ -47,6 +47,27 @@ export function dueChunks(db, now = Date.now()) {
     .sort((a, b) => new Date(a.card.due) - new Date(b.card.due));
 }
 
+// Earliest future due time across enrolled chunks (null when none scheduled).
+export function nextDueAt(db, now = Date.now()) {
+  const nowMs = Number(now);
+  const upcoming = Object.values(cardMap(db))
+    .map(deserializeCard)
+    .filter(Boolean)
+    .map((card) => new Date(card.due).getTime())
+    .filter((due) => due > nowMs);
+  return upcoming.length ? Math.min(...upcoming) : null;
+}
+
+// chunkKey is `${lessonId}:${chunkId}` — resolve back to the lesson's chunk.
+export function chunkForKey(key, lessons) {
+  const sep = String(key).indexOf(':');
+  const lessonId = String(key).slice(0, sep);
+  const chunkId = String(key).slice(sep + 1);
+  const lesson = (Array.isArray(lessons) ? lessons : []).find((l) => String(l?.id) === lessonId);
+  const chunk = lesson?.chunks?.find((c) => String(c.id) === chunkId) || null;
+  return chunk ? { lesson, chunk } : null;
+}
+
 export function rateChunk(db, key, grade, now = Date.now()) {
   const cards = cardMap(db);
   const rating = Rating[grade] != null && typeof grade === 'string'

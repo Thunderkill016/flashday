@@ -1,5 +1,6 @@
-// Kết quả buổi học — per-step status from the lesson's own events.
-import { STEPS, lessonStatus } from '../../core/progress.js';
+// Kết quả buổi học — per-step activity table from the lesson's own events.
+import { STEPS } from '../../core/progress.js';
+import { dueChunks } from '../../core/scheduler.js';
 import { lessonById, nextLesson } from '../../content/a1/index.js';
 
 const STEP_LABELS = {
@@ -10,8 +11,15 @@ const STEP_LABELS = {
   speak: 'Nói'
 };
 
+const SUPPORT_LABELS = {
+  translationViewed: 'có xem nghĩa',
+  transcriptViewed: 'có xem lời',
+  modelRevealed: 'có xem mẫu'
+};
+
 export function mount(root, ctx) {
   const lesson = lessonById(ctx.params?.lessonId);
+  const db = ctx.store.getState();
   const section = document.createElement('section');
   section.className = 'view-section';
   const h1 = document.createElement('h1');
@@ -19,56 +27,95 @@ export function mount(root, ctx) {
   section.appendChild(h1);
 
   if (!lesson) {
-    const p = document.createElement('p');
-    p.textContent = 'Không tìm thấy bài.';
-    section.appendChild(p);
-  } else {
-    const title = document.createElement('h2');
-    title.textContent = lesson.title;
-    section.appendChild(title);
-
-    const events = ctx.store.getState().lessonEvents.filter(
-      (event) => event.lessonId === lesson.id
-    );
-    const status = lessonStatus(events, lesson);
-    const steps = lesson.kind === 'checkpoint' ? STEPS.slice(1) : STEPS;
-    const list = document.createElement('ul');
-    list.className = 'summary-steps';
-    for (const step of steps) {
-      const li = document.createElement('li');
-      const latest = [...events].reverse().find((event) => event.step === step);
-      let detail = 'Chưa làm';
-      if (latest) {
-        detail = latest.payload?.total != null
-          ? `Đúng ${latest.payload.correct}/${latest.payload.total}`
-          : 'Đã lưu lần thử';
-      } else if (status[step] === 'attempted') {
-        detail = 'Đã thử';
-      }
-      li.textContent = `${STEP_LABELS[step]} — ${detail}`;
-      list.appendChild(li);
-    }
-    section.appendChild(list);
-
-    const nav = document.createElement('div');
-    nav.className = 'runner-nav';
-    const next = nextLesson(lesson.id);
-    if (next) {
-      const nextLink = document.createElement('a');
-      nextLink.className = 'btn-primary';
-      nextLink.href = `#/lesson/${next.id}/prepare`;
-      nextLink.textContent = 'Bài tiếp theo';
-      nav.appendChild(nextLink);
-    }
-    const home = document.createElement('a');
-    home.className = 'btn-secondary';
-    home.href = '#/today';
-    home.textContent = 'Về Hôm nay';
-    nav.appendChild(home);
-    section.appendChild(nav);
+    section.appendChild(el('p', 'Không tìm thấy bài.'));
+    root.appendChild(section);
+    return;
   }
+  section.appendChild(el('h2', lesson.title));
 
+  const events = db.lessonEvents.filter((event) => event.lessonId === lesson.id);
+  const steps = lesson.kind === 'checkpoint' ? STEPS.slice(1) : STEPS;
+
+  const table = document.createElement('ul');
+  table.className = 'summary-steps';
+  const todoSteps = [];
+  for (const step of steps) {
+    const stepEvents = events.filter((event) => event.step === step);
+    const li = document.createElement('li');
+    if (!stepEvents.length) {
+      todoSteps.push(step);
+      const link = document.createElement('a');
+      link.href = `#/lesson/${lesson.id}/${step}`;
+      link.textContent = `${STEP_LABELS[step]} — Chưa làm`;
+      li.appendChild(link);
+    } else {
+      li.appendChild(el('span', `${STEP_LABELS[step]} — `, 'summary-label'));
+      if (step === 'write' || step === 'speak') {
+        li.appendChild(el('span', `Đã lưu ${stepEvents.length} lần thử · tự đối chiếu`));
+      } else {
+        const best = Math.max(...stepEvents.map((e) => Number(e.payload?.correct) || 0));
+        const latest = stepEvents[stepEvents.length - 1];
+        const latestTxt = `lần thử ${latest.payload?.correct}/${latest.payload?.total} đúng`;
+        li.appendChild(el('span',
+          stepEvents.length > 1 ? `${latestTxt}, tốt nhất ${best}/${latest.payload?.total}` : `${latestTxt}`));
+      }
+      const support = supportText(stepEvents[stepEvents.length - 1]);
+      if (support) li.appendChild(el('span', ` · ${support}`, 'view-placeholder'));
+    }
+    table.appendChild(li);
+  }
+  section.appendChild(table);
+
+  // Enrolled chunks for this lesson
+  const enrolled = Object.keys(db.fsrs || {}).filter((key) => key.startsWith(`${lesson.id}:`)).length;
+  const enrolledLine = document.createElement('p');
+  enrolledLine.className = 'view-placeholder';
+  enrolledLine.textContent = enrolled
+    ? `Cụm đã vào bộ ôn: ${enrolled}`
+    : 'Cụm đã vào bộ ôn: chưa có — nộp phần Hiểu mẫu để thêm';
+  section.appendChild(enrolledLine);
+
+  // Next action
+  const due = dueChunks(db, Date.now()).length;
+  const nav = document.createElement('div');
+  nav.className = 'runner-nav';
+  const action = document.createElement('a');
+  action.className = 'btn-primary';
+  if (todoSteps.length) {
+    action.href = `#/lesson/${lesson.id}/${todoSteps[0]}`;
+    action.textContent = `Làm phần ${STEP_LABELS[todoSteps[0]]}`;
+  } else if (due > 0) {
+    action.href = '#/review';
+    action.textContent = `Ôn ${due} cụm đến hạn`;
+  } else {
+    const next = nextLesson(lesson.id);
+    action.href = next ? `#/lesson/${next.id}/prepare` : '#/path';
+    action.textContent = next ? `Bài tiếp theo: ${next.title}` : 'Về lộ trình';
+  }
+  const home = document.createElement('a');
+  home.className = 'btn-secondary';
+  home.href = '#/today';
+  home.textContent = 'Về Hôm nay';
+  nav.append(action, home);
+  section.appendChild(nav);
+
+  section.appendChild(el('p', 'Số liệu là hoạt động đã làm, không phải đánh giá trình độ.', 'view-placeholder caveat'));
   root.appendChild(section);
+}
+
+function supportText(event) {
+  const flags = event?.support || {};
+  const parts = Object.entries(SUPPORT_LABELS)
+    .filter(([key]) => flags[key])
+    .map(([, label]) => label);
+  return parts.join(' · ');
+}
+
+function el(tag, content, className) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  node.textContent = content;
+  return node;
 }
 
 export function unmount() {}
