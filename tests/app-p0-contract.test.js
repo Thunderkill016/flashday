@@ -82,4 +82,22 @@ assert(source.includes("$('memorySearch').oninput = renderMemory"), 'search inpu
 assert(cloud.includes('mergeCaptures'), 'captures must merge by updatedAt, not blanket remote-wins');
 assert(learningHub.includes('row.updatedAt=Date.now()'), 'in-place capture edits must stamp updatedAt');
 
-console.log('FlashDay app P0 contract: 35 checks passed');
+// Regression: submitting the scenario quiz used to re-render the whole cluster
+// card, wiping the just-rendered score/hints/"Làm lại". Post-save paths must
+// patch the progress strip in place via updateLessonProgress — the full
+// renderGuidedModules() is allowed exactly once (definition + mount call).
+assert.strictEqual(learningHub.split('renderGuidedModules()').length - 1, 2,
+  'renderGuidedModules must only run at init — post-save paths update progress in place');
+assert(learningHub.includes('function updateLessonProgress'), 'in-place lesson progress updater must exist');
+assert(learningHub.split('updateLessonProgress()').length - 1 >= 5,
+  'all post-save paths (unit transfer, mission, source quiz, scenario quiz) must update progress in place');
+// Regression: reveal and submit must share checkFinalTimeConfirm — if either
+// path re-implemented the gate, "Xem mẫu" and the saved record could disagree.
+assert(learningHub.includes('L.checkFinalTimeConfirm('), 'reveal gate must share the final-time check');
+assert(learningEntry.split('checkFinalTimeConfirm(').length - 1 >= 2, 'submit gate must share the final-time check');
+// Regression: the confirmation mission pins the scenario's agreed time —
+// self-consistency between declared time and response text is not enough.
+assert(learningEntry.includes("expectedFinalTime:'7:00'"), 'confirm mission must pin the scenario final time');
+assert(learningEntry.includes('meridiemStrict'), 'strict AM/PM matching must be available per-mission');
+
+console.log('FlashDay app P0 contract: 42 checks passed');
