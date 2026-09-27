@@ -120,6 +120,18 @@ const C = require('../flashday-cloud.js');
   assert.strictEqual(merged.length, 2);
 }
 
+{
+  // Comprehension spot-check records ride the learning_progress payload —
+  // remote + local records union by id like encounters, never FSRS state.
+  const merged = C.mergeLearnerDb(
+    { comprehensionChecks: [{ id: 'comp-local', sourceKey: 's', correct: 3, total: 4, at: 10 }] },
+    {},
+    { comprehensionChecks: [{ id: 'comp-remote', sourceKey: 's', correct: 4, total: 4, at: 20 }] }
+  );
+  assert.strictEqual(merged.comprehensionChecks.length, 2, 'local + remote quiz records must both survive');
+  assert(merged.comprehensionChecks.some((r) => r.id === 'comp-local'));
+}
+
 assert.strictEqual(C.remoteHasLearnerData({}), false);
 assert.strictEqual(C.remoteHasLearnerData({ units: [{ id: 'u' }] }), true);
-console.log('FlashDay cloud P0: 6 checks passed');
+console.log('FlashDay cloud P0: 7 checks passed');

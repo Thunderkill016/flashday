@@ -737,10 +737,10 @@ svg { display: block; }
   --fd-border: rgba(60, 50, 30, 0.14); --fd-border-interactive: rgba(60, 50, 30, 0.3);
 }
 .source-reader { background: var(--rbg); color: var(--rtext); }
-.source-reader-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--rbg-line); }
+.source-reader-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--rbg-line); flex-wrap: wrap; }
 .source-reader-head strong { display: block; font-size: 15px; }
 .source-reader-head span { color: var(--rtext-sub); font-size: 13px; }
-.reader-controls { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.reader-controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .reader-ctl { padding: 5px 10px; border: 1px solid var(--rbg-line); border-radius: var(--radius-pill); background: transparent; color: var(--rtext-sub); font-size: 12px; cursor: pointer; }
 .reader-ctl:hover { color: var(--rtext); }
 .reader-ctl.active { color: var(--rtext); border-color: var(--rtext); }
@@ -760,6 +760,22 @@ mark.token-known, mark.token-learning, mark.token-new { background: transparent;
 mark.token-learning { border-bottom: 2px solid var(--memory-learning); padding: 0 1px; }
 mark.token-new { border-bottom: 2px solid var(--memory-new); padding: 0 1px; }
 .source-reader .footer-note { padding: 10px 20px; border-top: 1px solid var(--rbg-line); margin: 0; color: var(--rtext-faint); font-size: 13px; }
+
+/* Comprehension quiz — sits inside the reader, follows the reader theme. */
+#readerQuiz { padding: 14px 20px; border-top: 1px solid var(--rbg-line); }
+.quiz-head { display: grid; gap: 2px; margin-bottom: 12px; }
+.quiz-head strong { color: var(--rtext); font-size: 15px; }
+.quiz-head span, .quiz-empty { color: var(--rtext-sub); font-size: 13px; }
+.quiz-q { margin-bottom: 14px; }
+.quiz-sentence { color: var(--rtext); font-size: 15px; margin: 0 0 8px; }
+.quiz-opts { display: grid; gap: 6px; }
+.quiz-opt { text-align: left; padding: 9px 12px; border: 1px solid var(--rbg-line); border-radius: var(--radius-md); background: transparent; color: var(--rtext-sub); font-size: 14px; cursor: pointer; }
+.quiz-opt:hover { border-color: var(--teal-400); }
+.quiz-opt.picked { border-color: var(--teal-400); color: var(--rtext); }
+.quiz-q.quiz-right .quiz-opt.quiz-answer { border-color: var(--teal-500); background: rgba(45, 158, 142, 0.15); }
+.quiz-q.quiz-wrong .quiz-opt.picked { border-color: #D97A6C; background: rgba(217, 122, 108, 0.12); }
+.quiz-q.quiz-wrong .quiz-opt.quiz-answer { border-color: var(--teal-500); }
+.quiz-score { color: var(--rtext); font-size: 14px; margin-top: 10px; }
 /* The global action dock is sticky-on-canvas; inside the reader it must be a
    plain in-flow row on the document surface, or light themes get a black bar. */
 .source-reader .secondary-actions { position: static; background: transparent; padding: 0; margin-top: 14px; }

@@ -210,6 +210,10 @@
     // the learning_progress payload like transferAttempts, never FSRS state.
     const encounters = mergeEncounters(progressPayload.encounters || [], localDb.encounters || [])
       .sort((a, b) => Number(a.at || 0) - Number(b.at || 0));
+    // Comprehension spot-checks are learner records (id-unique per attempt)
+    // riding the same progress payload as encounters.
+    const comprehensionChecks = mergeById(progressPayload.comprehensionChecks || [], localDb.comprehensionChecks || [])
+      .sort((a, b) => Number(a.at || 0) - Number(b.at || 0));
 
     return {
       version: String(localDb.version || progressPayload.version || 'repo-driven-2'),
@@ -220,6 +224,7 @@
       events,
       transferAttempts,
       encounters,
+      comprehensionChecks,
       learningProfile: mergeLearningProfile(localDb.learningProfile, progressPayload.learningProfile),
       // Review events are durable history. Both scheduler objects are caches and
       // must be rebuilt after a multi-device merge whenever history exists.

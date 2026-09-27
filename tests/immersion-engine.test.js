@@ -143,4 +143,34 @@ const mixed = (unitId) => (unitId === 'u1' ? 'known' : 'learning');
   assert.strictEqual(IM.sourceKey(legacy), 'Daily vlog', 'legacy capture keeps title key');
 }
 
-console.log('FlashDay immersion engine: 10 checks passed');
+{
+  // Comprehension spot-check — only translatable lines may be quizzed, and
+  // the honest failure mode reports "not enough translations" instead of
+  // fabricating questions.
+  const tcap = (id, sentence, vi, i) => SC.normalizeCapture({ id, sentence, nativeSentence: vi, sourceTitle: 'src', sourceId: 'src', subtitle: { text: sentence, start: i, end: i + 1, index: i } });
+  const line1 = tcap('l1', 'Hello there.', 'Xin chào.', 0);
+  const untranslated = SC.normalizeCapture({ id: 'l2', sentence: 'General Kenobi.', sourceTitle: 'src', sourceId: 'src', subtitle: { text: 'General Kenobi.', start: 1, end: 2, index: 1 } });
+
+  const thin = IM.comprehensionQuiz({ encounters: [] }, [line1, untranslated]);
+  assert.strictEqual(thin.available, false, 'one translated line is not enough to build distractors');
+  assert(thin.reason.length > 0, 'unavailable must come with a learner-readable reason');
+
+  const caps = [line1, untranslated, tcap('l3', 'How are you?', 'Bạn khỏe không?', 2), tcap('l4', 'I am fine.', 'Tôi khỏe.', 3), tcap('l5', 'See you.', 'Hẹn gặp.', 4), tcap('l6', 'Goodbye.', 'Tạm biệt.', 5)];
+  const quiz = IM.comprehensionQuiz({ encounters: [] }, caps, { count: 4 });
+  assert.strictEqual(quiz.available, true);
+  assert.strictEqual(quiz.questions.length, 4);
+  for (const q of quiz.questions) {
+    assert(q.answer && q.options.includes(q.answer), 'correct answer must be among options');
+    assert.strictEqual(new Set(q.options).size, q.options.length, 'options must be unique');
+    assert(!q.options.includes(''), 'no blank distractors');
+    assert(q.sentence !== 'General Kenobi.', 'untranslated line must never become a question');
+  }
+  // Seeded: same input → identical questions and option order.
+  const again = IM.comprehensionQuiz({ encounters: [] }, caps, { count: 4 });
+  assert.deepStrictEqual(again.questions, quiz.questions, 'quiz must be deterministic across re-renders');
+  // Encountered lines are quizzed first — the check covers what was read.
+  const seenQuiz = IM.comprehensionQuiz({ encounters: [{ captureId: 'l6', kind: 'line-viewed' }] }, caps, { count: 1 });
+  assert.strictEqual(seenQuiz.questions[0].captureId, 'l6', 'encountered line must be picked first');
+}
+
+console.log('FlashDay immersion engine: 13 checks passed');

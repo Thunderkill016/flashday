@@ -403,6 +403,55 @@
     readerCaptures=[];
     if(panel){panel.classList.add('hidden');panel.innerHTML='';}
   }
+
+  // Comprehension spot-check — "đã đọc" ≠ "hiểu". Each question shows a
+  // source line and asks for its meaning among sibling distractors; the
+  // result is a learner record, not a scheduler input.
+  function toggleComprehensionQuiz(key){
+    const box=$('readerQuiz');if(!box)return;
+    if(!box.classList.contains('hidden')){box.classList.add('hidden');box.innerHTML='';return;}
+    const db=store.refresh();
+    const quiz=IM.comprehensionQuiz(db,readerCaptures,{count:5});
+    if(!quiz.available){
+      box.innerHTML=`<div class="quiz-empty">${esc(quiz.reason)}</div>`;
+      box.classList.remove('hidden');
+      return;
+    }
+    const picked=new Map();
+    box.innerHTML=`<div class="quiz-head"><strong>Kiểm tra hiểu bài</strong><span>Chọn nghĩa đúng cho từng dòng — chỉ các dòng có bản dịch mới được hỏi.</span></div>`+
+      quiz.questions.map((q,qi)=>`<div class="quiz-q" data-qi="${qi}">
+        <p class="quiz-sentence">${esc(q.sentence)}</p>
+        <div class="quiz-opts">${q.options.map(opt=>`<button type="button" class="quiz-opt" data-opt="${esc(opt)}">${esc(opt)}</button>`).join('')}</div>
+      </div>`).join('')+
+      `<button type="button" class="primary-btn" id="quizSubmit" disabled>Nộp — chấm thử</button><div id="quizResult"></div>`;
+    box.classList.remove('hidden');
+    box.querySelectorAll('.quiz-opt').forEach(btn=>btn.onclick=()=>{
+      const q=btn.closest('.quiz-q');
+      q.querySelectorAll('.quiz-opt').forEach(b=>b.classList.remove('picked'));
+      btn.classList.add('picked');
+      picked.set(Number(q.dataset.qi),btn.dataset.opt);
+      $('quizSubmit').disabled=picked.size<quiz.questions.length;
+    });
+    $('quizSubmit').onclick=()=>{
+      let correct=0;
+      for(const [qi,opt] of picked){
+        const q=quiz.questions[qi];
+        const qEl=box.querySelector(`.quiz-q[data-qi="${qi}"]`);
+        const ok=opt===q.answer;
+        if(ok)correct++;
+        qEl?.classList.add(ok?'quiz-right':'quiz-wrong');
+        qEl?.querySelectorAll('.quiz-opt').forEach(b=>{
+          b.disabled=true;
+          if(b.dataset.opt===q.answer)b.classList.add('quiz-answer');
+        });
+      }
+      const record={id:SC.stableId('comp',[key,Date.now()].join('|')),sourceKey:key,correct,total:quiz.questions.length,at:Date.now()};
+      store.transact((db)=>{db.comprehensionChecks=Array.isArray(db.comprehensionChecks)?db.comprehensionChecks:[];db.comprehensionChecks.push(record);return {result:true};});
+      $('quizSubmit').disabled=true;
+      $('quizResult').innerHTML=`<p class="quiz-score">Đúng ${correct}/${quiz.questions.length} dòng — ${correct===quiz.questions.length?'hiểu chắc phần đã kiểm tra.':correct>0?'có dòng chưa chắc nghĩa — đọc lại dòng đánh dấu đỏ.':'chưa nắm được nghĩa — đọc lại kèm dịch rồi thử lại.'}</p>`;
+      window.dispatchEvent(new CustomEvent('flashday:learning-state-changed'));
+    };
+  }
   const READER_THEMES=['dark','light','warm'];
   const READER_SIZES=['normal','large'];
   function readerPrefs(){
@@ -558,6 +607,7 @@
           <button type="button" class="reader-ctl hidden" id="readerJumpStudy" title="Tới dòng có unit đang học">↳ unit đang học</button>
           <button type="button" class="reader-ctl" id="readerSizeToggle" title="Đổi cỡ chữ">A${prefs.size==='large'?'−':'+'}</button>
           ${READER_THEMES.map(t=>`<button type="button" class="reader-ctl${t===prefs.theme?' active':''}" data-rtheme="${t}">${{dark:'Tối',light:'Sáng',warm:'Ấm'}[t]}</button>`).join('')}
+          <button type="button" class="reader-ctl" id="readerQuizBtn" title="Đối chiếu nghĩa của các dòng">Kiểm hiểu</button>
           <button type="button" class="ghost-btn" id="closeSourceReader">Đóng</button>
         </div>
       </div>
@@ -573,9 +623,11 @@
         </div>`;
       }).join('')}</div>
       <div id="wordCapturePanel" class="hidden"></div>
+      <div id="readerQuiz" class="hidden"></div>
       <p class="footer-note">Chữ trơn = đã thuộc hoặc ngoài deck · <mark class="token-learning">đang học</mark> <mark class="token-new">mới vào deck</mark>. <b>Bấm từ bất kỳ để lưu thành Unit.</b></p>`;
     panel.classList.remove('hidden');
     $('closeSourceReader').onclick=closeReader;
+    $('readerQuizBtn').onclick=()=>toggleComprehensionQuiz(key);
     const rerender=()=>{openSource(key);openSource(key);};
     $('readerSizeToggle').onclick=()=>{
       const current=readerPrefs();

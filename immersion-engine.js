@@ -221,5 +221,41 @@
     return parts;
   }
 
-  return {sourceKey,unitKnowledge,assessCapture,assessSource,assessSources,annotatedParts,meaningfulChars,collectEncounters,encounterCount,encounterDay,ENCOUNTER_KINDS};
+  // Comprehension spot-check: distinguishes "scrolled past the line" from
+  // "understood the line". Each question shows an English source line and
+  // asks for its Vietnamese meaning among sibling-line distractors — only
+  // possible where the source actually carries translations, so an
+  // untranslated YouTube import honestly reports itself unavailable instead
+  // of fabricating a check against machine output.
+  function comprehensionQuiz(db,captures,{count=5}={}){
+    const usable=(captures||[]).map(c=>SC.normalizeCapture(c)).filter(c=>c.sentence&&c.nativeSentence);
+    if(usable.length<2)return {available:false,reason:'Nguồn này chưa có đủ dòng có bản dịch để đối chiếu.',questions:[]};
+    // Lines the learner actually encountered come first — the check should
+    // cover what was read, not arbitrary untouched lines.
+    const seenCaps=new Set((db?.encounters||[]).map(e=>String(e.captureId)));
+    const ordered=usable.map((c,i)=>({c,i,seen:seenCaps.has(String(c.id))?1:0}))
+      .sort((a,b)=>b.seen-a.seen||a.i-b.i);
+    const picked=ordered.slice(0,count).map((row)=>row.c);
+    const pool=[...new Set(usable.map(c=>c.nativeSentence))];
+    const questions=picked.map((line)=>{
+      // Seeded RNG per question: distractor pick and option order stay stable
+      // across re-renders so the learner can't answer-position memorise.
+      let seed=[...SC.stableId('quiz',line.id)].reduce((n,ch)=>(n*31+ch.charCodeAt(0))>>>0,7);
+      const rand=()=>{seed=(seed*1103515245+12345)>>>0;return seed/4294967296;};
+      const distractors=[];
+      const others=pool.filter(t=>t!==line.nativeSentence);
+      for(let guard=0;distractors.length<Math.min(3,others.length)&&guard<64;guard++){
+        const cand=others[Math.floor(rand()*others.length)];
+        if(!distractors.includes(cand))distractors.push(cand);
+      }
+      // RNG could theoretically stall — fill any shortfall in pool order.
+      for(const cand of others){if(distractors.length>=3)break;if(!distractors.includes(cand))distractors.push(cand);}
+      const options=[line.nativeSentence,...distractors];
+      for(let i=options.length-1;i>0;i--){const j=Math.floor(rand()*(i+1));[options[i],options[j]]=[options[j],options[i]];}
+      return {captureId:String(line.id),sentence:line.sentence,answer:line.nativeSentence,options};
+    });
+    return {available:true,questions};
+  }
+
+  return {sourceKey,unitKnowledge,assessCapture,assessSource,assessSources,annotatedParts,meaningfulChars,collectEncounters,encounterCount,encounterDay,ENCOUNTER_KINDS,comprehensionQuiz};
 });

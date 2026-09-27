@@ -42,6 +42,7 @@
       bespokeCards:Array.isArray(raw.bespokeCards)?clone(raw.bespokeCards):[],
       transferAttempts:Array.isArray(raw.transferAttempts)?clone(raw.transferAttempts):[],
       encounters:Array.isArray(raw.encounters)?clone(raw.encounters):[],
+      comprehensionChecks:Array.isArray(raw.comprehensionChecks)?clone(raw.comprehensionChecks):[],
       bespokeProgress:raw.bespokeProgress?clone(raw.bespokeProgress):null,
       fsrsProgress:raw.fsrsProgress?clone(raw.fsrsProgress):null,
       learningProfile:raw.learningProfile?clone(raw.learningProfile):null,

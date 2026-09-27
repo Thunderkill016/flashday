@@ -970,6 +970,7 @@
         fsrsProgress: db.fsrsProgress,
         transferAttempts: db.transferAttempts || [],
         encounters: db.encounters || [],
+        comprehensionChecks: db.comprehensionChecks || [],
         scheduler: db.scheduler,
         schedulerSource: db.schedulerSource
       },
