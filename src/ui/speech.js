@@ -132,6 +132,31 @@ export function matchSpeech(target, transcript) {
   };
 }
 
+// Records a short mic clip for AI pronunciation assessment. Returns null when
+// MediaRecorder/getUserMedia is unavailable — callers hide the control.
+export async function startClipRecorder() {
+  if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+    return null;
+  }
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const recorder = new MediaRecorder(stream);
+  const chunks = [];
+  recorder.addEventListener('dataavailable', (e) => chunks.push(e.data));
+  const done = new Promise((resolve) => {
+    recorder.addEventListener('stop', () => {
+      for (const track of stream.getTracks()) track.stop();
+      resolve(new Blob(chunks, { type: recorder.mimeType || 'audio/webm' }));
+    });
+  });
+  recorder.start();
+  return {
+    stop() {
+      if (recorder.state !== 'inactive') recorder.stop();
+    },
+    done
+  };
+}
+
 // "Nói thử" control: records via SpeechRecognition, then shows a word-level
 // diff against the target so the learner sees what the recognizer heard.
 // Returns { button, output } — mount both next to a model line.

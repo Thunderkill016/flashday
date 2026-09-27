@@ -346,3 +346,16 @@ textarea.write-area, textarea.speak-area {
 .roleplay-checklist, .roleplay-corrections { padding-left: var(--space-5); }
 .roleplay-summary { color: var(--text-secondary); }
 .self-study-label { margin-top: var(--space-4); font-size: 13px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.04em; }
+
+.remediation-btn { margin-top: var(--space-2); }
+.remediation { border-left: 3px solid var(--brand-line); padding-left: var(--space-4); margin-top: var(--space-3); }
+.remediation-title { font-size: 14px; margin: var(--space-2) 0; }
+.variant { margin-top: var(--space-3); }
+.dictation { margin-top: var(--space-4); }
+.dictation-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin: var(--space-2) 0; }
+.dictation-input { flex: 1; min-width: 180px; min-height: 40px; padding: 0 var(--space-3); font-size: 15px; }
+.dictation-out { flex-basis: 100%; margin: 0; font-size: 13px; color: var(--text-secondary); }
+.pron-check { margin-left: var(--space-2); font-size: 13px; min-height: 30px; padding: 0 var(--space-3); }
+.pron-check-out { flex-basis: 100%; margin: var(--space-1) 0 0; font-size: 13px; color: var(--text-secondary); }
+.review-suggestion { font-size: 13px; color: var(--text-secondary); margin: var(--space-1) 0; }
+.grade-btn.suggested { border-color: var(--brand-line); box-shadow: 0 0 0 2px var(--brand-soft, #e8f0fe); }

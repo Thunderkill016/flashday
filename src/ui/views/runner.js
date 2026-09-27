@@ -10,7 +10,7 @@ import { enrollChunks } from '../../core/scheduler.js';
 import { stepsForLesson } from '../../core/progress.js';
 import { checkTimeGate } from '../../core/time-gate.js';
 import { mountQuiz } from '../components/quiz.js';
-import { pickEnglishVoice, LEARNER_SPEECH_RATE, playButton, speakCheck, speechRecognizer } from '../speech.js';
+import { pickEnglishVoice, LEARNER_SPEECH_RATE, playButton, speakCheck, speechRecognizer, matchSpeech, startClipRecorder } from '../speech.js';
 import { getTutor } from '../../ai/tutor.js';
 
 // Re-exported: existing tests import the voice picker from this module.
@@ -285,6 +285,77 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
+// Mastery learning (Duolingo practice-on-errors): after a submit with wrongs,
+// offer an AI-generated mini-quiz on exactly the missed points — the learner
+// re-tests the gap instead of redoing what they already know.
+function remediationOffer(pane, step, lesson, questions, result, sourceText) {
+  const wrong = questions
+    .map((q, i) => ({
+      question: q.q,
+      chosen: q.options[result.answers[i]],
+      correct: q.options[q.answer],
+      isWrong: Number(result.answers[i]) !== Number(q.answer)
+    }))
+    .filter((w) => w.isWrong);
+  if (!wrong.length || !state.tutor?.available) return;
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'btn-secondary remediation-btn';
+  btn.dataset.role = 'remediation';
+  btn.textContent = 'Luyện thêm điểm vừa sai (AI)';
+  const host = document.createElement('div');
+  host.className = 'remediation';
+  // Land right after the quiz host, before the nav row.
+  const nav = pane.querySelector('.runner-nav');
+  pane.insertBefore(btn, nav);
+  pane.insertBefore(host, nav);
+
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    btn.textContent = 'AI đang ra đề…';
+    try {
+      const { questions: extra } = await state.tutor.generateDrills({
+        lessonTitle: lesson.title,
+        sourceText,
+        wrong
+      });
+      const clean = sanitizeDrills(extra);
+      if (!clean.length || !host.isConnected) throw new Error('empty drills');
+      host.appendChild(text('h3', `Luyện lại ${wrong.length} điểm vừa sai`, 'remediation-title'));
+      const quizHost = document.createElement('div');
+      host.appendChild(quizHost);
+      mountQuiz(quizHost, clean, {
+        onSubmit: (r) => recordEvent(step, { ...r, remediation: true }, {})
+      });
+      btn.hidden = true;
+    } catch {
+      btn.disabled = false;
+      btn.textContent = 'Luyện thêm điểm vừa sai (AI)';
+    }
+  });
+}
+
+// AI output is data, not schema — validate every generated item before it
+// can break mountQuiz or teach a malformed question.
+function sanitizeDrills(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter(
+      (q) =>
+        q &&
+        typeof q.q === 'string' &&
+        Array.isArray(q.options) &&
+        q.options.length >= 2 &&
+        q.options.every((o) => typeof o === 'string') &&
+        Number.isInteger(q.answer) &&
+        q.answer >= 0 &&
+        q.answer < q.options.length
+    )
+    .slice(0, 4)
+    .map((q) => ({ q: q.q, options: q.options, answer: q.answer, hint: String(q.hint || '') }));
+}
+
 // Explain-my-answer wiring (Duolingo Max pattern): wrong quiz answers get an
 // AI button only when the tutor can respond — otherwise the static hint is
 // the whole story and no dead control renders.
@@ -397,6 +468,14 @@ const buildStep = {
       onAnswerChange: (answers) => patchDraft({ answers: { ...state.draft?.answers, prepare: answers } }),
       onSubmit: (result) => {
         recordEvent('prepare', result, draftSupport());
+        remediationOffer(
+          pane,
+          'prepare',
+          lesson,
+          lesson.drills,
+          result,
+          `${lesson.pattern.rule} ${lesson.chunks.map((c) => c.target).join(' | ')}`
+        );
         continueLink(pane, 'prepare');
       }
     });
@@ -430,6 +509,56 @@ const buildStep = {
 
     const quizHost = document.createElement('div');
     pane.appendChild(quizHost);
+
+    // VARY CONTEXT: a fresh AI-written dialogue on the same target language —
+    // a second exposure that isn't a re-read. Hidden when the tutor is out.
+    if (state.tutor?.available) {
+      const variantBtn = document.createElement('button');
+      variantBtn.type = 'button';
+      variantBtn.className = 'btn-secondary';
+      variantBtn.dataset.role = 'variant';
+      variantBtn.textContent = 'Hội thoại mới cùng mẫu (AI)';
+      const variantHost = document.createElement('div');
+      variantHost.className = 'variant';
+      pane.append(variantBtn, variantHost);
+      variantBtn.addEventListener('click', async () => {
+        variantBtn.disabled = true;
+        variantBtn.textContent = 'AI đang viết hội thoại mới…';
+        try {
+          const variant = await state.tutor.generateVariant({
+            canDo: lesson.canDo,
+            patternName: lesson.pattern.name,
+            chunkTargets: lesson.chunks.map((c) => c.target),
+            currentTitle: lesson.dialogue.title,
+            countLines: lesson.dialogue.lines.length
+          });
+          const lines = Array.isArray(variant?.lines) ? variant.lines : [];
+          const questions = sanitizeDrills(variant?.questions);
+          if (!lines.length || !variantHost.isConnected) throw new Error('bad variant');
+          variantHost.appendChild(text('h3', variant.title || 'Hội thoại mới'));
+          const list = document.createElement('ol');
+          list.className = 'dialogue-lines';
+          for (const [en, vi] of lines) {
+            const li = document.createElement('li');
+            li.append(playButton(String(en)), text('span', String(en), 'en'), text('span', String(vi || ''), 'vi translation'));
+            list.appendChild(li);
+          }
+          variantHost.appendChild(list);
+          if (questions.length) {
+            const vQuiz = document.createElement('div');
+            variantHost.appendChild(vQuiz);
+            mountQuiz(vQuiz, questions, {
+              onSubmit: (r) => recordEvent('read', { ...r, variant: true }, {})
+            });
+          }
+          variantBtn.hidden = true;
+        } catch {
+          variantBtn.disabled = false;
+          variantBtn.textContent = 'Hội thoại mới cùng mẫu (AI)';
+        }
+      });
+    }
+
     mountQuiz(quizHost, lesson.dialogue.questions, {
       initialAnswers: draftAnswers('read'),
       onExplain: explainOption('Đọc', lesson.dialogue.lines.map(([en]) => en).join(' ')),
@@ -438,6 +567,14 @@ const buildStep = {
         recordEvent('read', result, {
           translationViewed: Boolean(draftSupport().translationViewed)
         });
+        remediationOffer(
+          pane,
+          'read',
+          lesson,
+          lesson.dialogue.questions,
+          result,
+          lesson.dialogue.lines.map(([en]) => en).join(' ')
+        );
         continueLink(pane, 'read');
       }
     });
@@ -524,6 +661,52 @@ const buildStep = {
 
     const quizHost = document.createElement('div');
     pane.appendChild(quizHost);
+
+    // Dictation (Duolingo/Anki-typed): hear a sentence → type it back.
+    // Deterministic word-diff; the transcript stays hidden so it is a test,
+    // not a copy exercise.
+    const dictation = document.createElement('div');
+    dictation.className = 'dictation';
+    dictation.appendChild(text('h3', 'Chép chính tả — nghe rồi gõ lại'));
+    const sentences = String(lesson.listening.text)
+      .match(/[^.!?]+[.!?]*/g)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    for (const sentence of sentences) {
+      const row = document.createElement('div');
+      row.className = 'dictation-row';
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'dictation-input';
+      input.placeholder = 'Gõ lại câu vừa nghe…';
+      input.setAttribute('aria-label', 'Chép chính tả');
+      const checkBtn = document.createElement('button');
+      checkBtn.type = 'button';
+      checkBtn.className = 'btn-secondary';
+      checkBtn.textContent = 'Kiểm';
+      const out = text('p', '', 'dictation-out');
+      out.hidden = true;
+      checkBtn.addEventListener('click', () => {
+        const match = matchSpeech(sentence, input.value);
+        out.hidden = false;
+        out.textContent = '';
+        out.append(
+          document.createTextNode(
+            match.score >= 0.95
+              ? 'Đúng hết. '
+              : `Khớp ${Math.round(match.score * 100)}% — ${match.missedWords.length ? `thiếu/khác: ${match.missedWords.join(', ')}` : ''}`
+          )
+        );
+        if (match.score >= 0.95) {
+          checkBtn.disabled = true;
+          input.disabled = true;
+        }
+      });
+      row.append(playButton(sentence), input, checkBtn, out);
+      dictation.appendChild(row);
+    }
+    pane.appendChild(dictation);
+
     mountQuiz(quizHost, lesson.listening.questions, {
       initialAnswers: draftAnswers('listen'),
       onExplain: explainOption('Nghe', lesson.listening.text),
@@ -537,6 +720,14 @@ const buildStep = {
             transcriptViewed: Boolean(draftSupport().transcriptViewed)
           },
           { transcriptViewed: Boolean(draftSupport().transcriptViewed) }
+        );
+        remediationOffer(
+          pane,
+          'listen',
+          lesson,
+          lesson.listening.questions,
+          result,
+          lesson.listening.text
         );
         continueLink(pane, 'listen');
       }
@@ -863,6 +1054,10 @@ const buildStep = {
       for (const line of lesson.speak.model) {
         const li = text('li', line);
         li.appendChild(playButton(line));
+        if (state.tutor?.available) {
+          const check = pronunciationCheck(line);
+          li.append(check.button, check.output);
+        }
         modelList.appendChild(li);
       }
       modelArea.append(text('h3', 'Bài mẫu'), modelList);
@@ -1139,6 +1334,57 @@ function buildRoleplay(pane, lesson) {
       note.hidden = false;
     }
   });
+}
+
+// ELSA-style scripted scoring: record a clip → the model hears the actual
+// audio, catching dropped final consonants and slurred words that a
+// transcript comparison can never see. Degrades to a hidden message when
+// recording or AI is unavailable.
+function pronunciationCheck(target) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'btn-secondary pron-check';
+  button.dataset.role = 'pron-check';
+  button.textContent = '✨ Chấm phát âm';
+  const output = text('p', '', 'pron-check-out');
+  output.hidden = true;
+  let recorder = null;
+
+  button.addEventListener('click', async () => {
+    if (!recorder) {
+      try {
+        recorder = await startClipRecorder();
+      } catch {
+        recorder = null;
+      }
+      if (!recorder) {
+        output.textContent = 'Cần quyền micro và trình duyệt hỗ trợ ghi âm — thử Chrome/Edge.';
+        output.hidden = false;
+        return;
+      }
+      button.textContent = '■ Dừng & chấm (đang ghi…)';
+      return;
+    }
+    recorder.stop();
+    const clip = await recorder.done;
+    recorder = null;
+    button.disabled = true;
+    button.textContent = 'AI đang nghe…';
+    try {
+      const result = await state.tutor.assessPronunciation({ target, audioBlob: clip });
+      if (!output.isConnected) return;
+      const parts = [`Điểm nghe-hiểu: ${result.score}/100`];
+      if (result.unclear?.length) parts.push(`chưa rõ: ${result.unclear.join(', ')}`);
+      if (result.tip) parts.push(result.tip);
+      output.textContent = parts.join(' — ');
+      output.hidden = false;
+    } catch {
+      // silent degrade — ASR say-check remains the free fallback path
+    }
+    button.disabled = false;
+    button.textContent = '✨ Chấm lại';
+  });
+  return { button, output };
 }
 
 function setTranslationsVisible(list, visible) {

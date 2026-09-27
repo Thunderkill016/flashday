@@ -340,8 +340,12 @@ try {
     await goto(page, `${origin}app/?preview#/review`);
     assert.equal(await page.locator('.review-counter').textContent(), '1/8');
     assert.equal(await page.locator('.review-target').isVisible(), false, 'answer hidden before reveal');
+    // typed production recall → diff score + suggested grade on reveal
+    await page.locator('.review-card .write-area').fill('Hello, I’m …');
     await page.locator('[data-role="reveal"]').click();
     assert.equal(await page.locator('.review-target').isVisible(), true);
+    assert.match(await page.locator('.review-suggestion').textContent(), /gợi ý chấm/);
+    assert.equal(await page.locator('.grade-btn.suggested').count(), 1, 'one grade lights up');
     await page.locator('[data-grade="3"]').click(); // Nhớ
     assert.equal(await page.locator('.review-counter').textContent(), '2/8');
     const logLen = await page.evaluate((key) => {
@@ -479,6 +483,24 @@ try {
             summary: 'Hội thoại đủ ý — mức A1.',
           }),
         }),
+        assessPronunciation: async () => ({ score: 90, unclear: [], tip: 'Phát âm rõ.' }),
+        generateDrills: async () => ({
+          questions: [
+            { q: 'She ___ from London.', options: ['is', 'am', 'are'], answer: 0, hint: 'she đi với is.' },
+            { q: 'Đáp "Nice to meet you.":', options: ['Nice to meet you too.', 'I am Mai.', 'Bye.'], answer: 0, hint: 'Thêm too.' },
+          ],
+        }),
+        generateVariant: async () => ({
+          title: 'Ở quán cà phê',
+          lines: [
+            ['Emma: Hi! I’m Emma.', 'Emma: Chào! Mình là Emma.'],
+            ['Binh: I’m Binh. Where are you from?', 'Binh: Mình là Bình. Bạn đến từ đâu?'],
+            ['Emma: I’m from Sydney.', 'Emma: Mình đến từ Sydney.'],
+          ],
+          questions: [
+            { q: 'Emma đến từ đâu?', options: ['Sydney', 'Hà Nội', 'Đà Nẵng'], answer: 0, hint: '"I’m from Sydney."' },
+          ],
+        }),
       };
     });
     const page = await context.newPage();
@@ -495,6 +517,21 @@ try {
     await explainBtn.click();
     await preparePane.locator('.quiz-explain:not([hidden])').waitFor();
     assert.match(await preparePane.locator('.quiz-explain').first().textContent(), /AI mẫu/);
+
+    // Remediation: wrong answers → "Luyện thêm" → AI mini-quiz → records event
+    const remBtn = preparePane.locator('[data-role="remediation"]');
+    assert.equal(await remBtn.isVisible(), true, 'remediation offered after wrongs');
+    await remBtn.click();
+    await preparePane.locator('.remediation .quiz-question').first().waitFor();
+    for (const q of await preparePane.locator('.remediation .quiz-question').all()) {
+      await q.locator('.quiz-option').first().click();
+    }
+    await preparePane.locator('.remediation .quiz-submit').click();
+    const remEvents = await page.evaluate((key) => {
+      const db = JSON.parse(localStorage.getItem(key) || '{}');
+      return (db.lessonEvents || []).filter((e) => e.payload?.remediation);
+    }, DB_KEY);
+    assert.equal(remEvents.length, 1, 'remediation attempt recorded');
 
     // Write review: save → AI feedback with error + suggestion
     await goto(page, `${origin}app/?preview#/lesson/${L1}/write`);
@@ -531,6 +568,28 @@ try {
       [2, 3],
       'AI checklist mapped onto correct/total'
     );
+
+    // Vary context: AI-written dialogue + its own comprehension quiz
+    await goto(page, `${origin}app/?preview#/lesson/${L1}/read`);
+    const readPane = page.locator('.runner-pane[data-step="read"]');
+    await readPane.locator('[data-role="variant"]').click();
+    await readPane.locator('.variant .dialogue-lines li').first().waitFor();
+    assert.match(await readPane.locator('.variant').textContent(), /quán cà phê/);
+    assert.equal(
+      await readPane.locator('.variant .quiz-question').count(),
+      1,
+      'variant ships its own comprehension quiz'
+    );
+
+    // Dictation: type back the heard sentence → word-diff feedback
+    await goto(page, `${origin}app/?preview#/lesson/${L1}/listen`);
+    const listenPane = page.locator('.runner-pane[data-step="listen"]');
+    const dictRow = listenPane.locator('.dictation-row').first();
+    await dictRow.locator('.dictation-input').fill('Hello, my name is Anna.');
+    await dictRow.locator('button:has-text("Kiểm")').click();
+    await dictRow.locator('.dictation-out:not([hidden])').waitFor();
+    assert.match(await dictRow.locator('.dictation-out').textContent(), /Khớp \d+%|Đúng hết/);
+
     await context.close();
     check('AI explain + write review + roleplay end-to-end (mocked tutor)');
   }
