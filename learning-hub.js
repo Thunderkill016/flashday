@@ -183,6 +183,18 @@
         window.dispatchEvent(new CustomEvent('flashday:learning-state-changed'));
         renderTransferMissions();
         showInlineMessage(attempt.selfReviewed?'Đã lưu — bạn đã tự đối chiếu câu mới với mẫu.':'Đã lưu lần thử. Bạn có thể quay lại đối chiếu sau.',false);
+        // Close the loop: production returns to immersion. Offer a one-tap
+        // path back to the source this unit was mined from so the learner
+        // re-meets it in context.
+        const cap=(store.refresh().captures||[]).find(c=>Array.isArray(c.linkedUnitIds)&&c.linkedUnitIds.includes(due.unitId));
+        const srcKey=cap&&IM?IM.sourceKey(cap):null;
+        if(srcKey&&$('transferMissions')){
+          const back=document.createElement('button');
+          back.type='button';back.className='ghost-btn transfer-return';
+          back.textContent=`Đọc lại “${cap.sourceTitle||'nguồn'}” — gặp lại ${due.item.target||''} trong ngữ cảnh`;
+          back.onclick=()=>{document.querySelector('[data-view="capture"]')?.click();openSource(srcKey);};
+          $('transferMissions').appendChild(back);
+        }
       }catch(error){
         showInlineMessage(error.message,true);
       }
