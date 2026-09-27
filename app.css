@@ -359,3 +359,93 @@ textarea.write-area, textarea.speak-area {
 .pron-check-out { flex-basis: 100%; margin: var(--space-1) 0 0; font-size: 13px; color: var(--text-secondary); }
 .review-suggestion { font-size: 13px; color: var(--text-secondary); margin: var(--space-1) 0; }
 .grade-btn.suggested { border-color: var(--brand-line); box-shadow: 0 0 0 2px var(--brand-soft, #e8f0fe); }
+
+/* ── Learning-loop additions (Duolingo/Babbel patterns) ── */
+
+/* Continuous lesson progress — fills as steps submit */
+.lesson-progress {
+  height: 4px; border-radius: var(--radius-pill);
+  background: var(--border-subtle); overflow: hidden;
+}
+.lesson-progress i { display: block; height: 100%; width: 0; background: var(--action-primary-bg); transition: width .3s ease; }
+
+/* Chunk pager — one chunk per screen */
+.chunk-pager-nav { display: flex; align-items: center; gap: var(--space-3); margin: var(--space-3) 0 var(--space-4); }
+.chunk-counter { flex: 1; text-align: center; font-size: 13px; color: var(--text-secondary); }
+.chunk-card {
+  background: var(--bg-surface-1); border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md); padding: var(--space-4);
+}
+.chunk-target { display: block; font-size: 20px; font-weight: 700; }
+.chunk-meaning { color: var(--text-secondary); }
+.chunk-controls { display: flex; gap: var(--space-2); margin: var(--space-3) 0 var(--space-2); }
+.practice-sub { margin: var(--space-6) 0 var(--space-3); font-family: var(--font-display); font-size: 17px; }
+
+/* Match pairs */
+.match-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
+.match-col { display: flex; flex-direction: column; gap: var(--space-2); }
+.match-chip {
+  min-height: 44px; padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
+  background: var(--bg-surface-1); color: var(--text-primary);
+  font-size: 14px; cursor: pointer; text-align: center;
+}
+.match-chip.match-picked { border-color: var(--action-primary-bg); box-shadow: 0 0 0 1px var(--action-primary-bg); }
+.match-chip.match-hit { border-color: var(--feedback-correct); background: var(--feedback-correct-soft); opacity: .65; cursor: default; }
+.match-chip.match-miss { border-color: var(--feedback-error); animation: wb-shake .3s ease; }
+.match-status { margin: var(--space-3) 0 0; font-weight: 600; }
+
+/* Word bank */
+.wb-item { margin-bottom: var(--space-4); }
+.wb-prompt { font-weight: 600; margin: 0 0 var(--space-2); }
+.wb-answer {
+  display: flex; flex-wrap: wrap; gap: var(--space-2); min-height: 48px;
+  padding: var(--space-2); margin-bottom: var(--space-2);
+  border: 1px dashed var(--border-strong); border-radius: var(--radius-md);
+}
+.wb-answer.wb-wrong { border-color: var(--feedback-error); animation: wb-shake .3s ease; }
+.wb-answer.wb-done { border-style: solid; border-color: var(--feedback-correct); }
+.wb-bank { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-2); }
+.wb-chip {
+  min-height: 40px; padding: 0 var(--space-3);
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-pill);
+  background: var(--bg-surface-1); color: var(--text-primary);
+  font-size: 15px; cursor: pointer;
+}
+.wb-answer .wb-chip { border-color: var(--action-primary-bg); }
+.wb-feedback { font-size: 14px; margin: var(--space-1) 0 var(--space-2); color: var(--feedback-warning); }
+.wb-feedback.wb-ok { color: var(--feedback-correct); }
+@keyframes wb-shake { 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
+
+/* Quiz feedback banner — full-width pass/retry block */
+.quiz-feedback {
+  display: flex; align-items: baseline; gap: var(--space-3);
+  margin-top: var(--space-3); padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md); font-size: 15px;
+}
+.quiz-feedback.pass { background: var(--feedback-correct-soft); color: var(--feedback-correct); }
+.quiz-feedback.retry { background: var(--feedback-warning-soft); color: var(--feedback-warning); }
+
+/* Speaker avatars in dialogue lines */
+.avatar {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 50%; flex: none;
+  margin-right: var(--space-2); font-size: 13px; font-weight: 700;
+  color: #fff; background: hsl(var(--avatar-h, 210) 55% 45%);
+}
+.dialogue-lines li { display: flex; align-items: flex-start; }
+
+/* Streak chip + celebration */
+.streak-chip {
+  display: inline-flex; align-items: center; margin-left: var(--space-3);
+  padding: var(--space-1) var(--space-3); border-radius: var(--radius-pill);
+  background: var(--feedback-warning-soft); font-size: 14px; font-weight: 600;
+  vertical-align: middle;
+}
+.celebration-banner {
+  margin: var(--space-4) 0; padding: var(--space-5) var(--space-4);
+  border-radius: var(--radius-md); text-align: center;
+  background: var(--feedback-correct-soft); border: 1px solid var(--feedback-correct);
+}
+.celebration-title { font-size: 22px; font-weight: 800; margin: 0 0 var(--space-2); font-family: var(--font-display); }
+.celebration-detail { margin: 0; color: var(--text-secondary); }

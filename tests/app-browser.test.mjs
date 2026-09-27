@@ -617,6 +617,97 @@ try {
     check('tutor absent → static fallbacks only');
   }
 
+  // ── 16. Engagement layer: chunk pager, match pairs, word bank, banner,
+  //        progress bar, celebration, streak ──
+  {
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+    });
+    await context.addInitScript(() => {
+      window.__FLASHDAY_TUTOR__ = { available: false };
+    });
+    const page = await context.newPage();
+    await goto(page, `${origin}app/?preview#/lesson/${L1}/prepare`);
+    const prep = page.locator('.runner-pane[data-step="prepare"]');
+
+    // Chunk pager: one card at a time, nav moves through all chunks
+    assert.equal(await prep.locator('.chunk-card:visible').count(), 1, 'pager shows one chunk');
+    await prep.locator('[data-role="chunk-next"]').click();
+    assert.match(await prep.locator('.chunk-counter').textContent(), /Cụm 2\/8/);
+
+    // Match pairs: click EN chip then its VI counterpart → all lock
+    for (let i = 0; i < 4; i++) {
+      await prep.locator(`.match-en [data-pair="${i}"]`).click();
+      await prep.locator(`.match-vi [data-pair="${i}"]`).click();
+    }
+    assert.match(await prep.locator('.match-status:not([hidden])').textContent(), /Ghép xong/);
+
+    // Word bank: rebuild the first sentence-answer drill, chip by chip
+    const wbDrill = lesson.drills.find((d) => {
+      const ans = d.options[d.answer];
+      return ans && ans.replace(/[.,!?…]/g, '').split(/\s+/).filter(Boolean).length >= 3;
+    });
+    assert.ok(wbDrill, 'lesson has a sentence-answer drill for word bank');
+    const bankItem = prep.locator('.wb-item').first();
+    for (const w of wbDrill.options[wbDrill.answer].replace(/[.,!?…]/g, '').split(/\s+/)) {
+      await bankItem.locator(`.wb-bank .wb-chip[data-word="${w}"]`).first().click();
+    }
+    await bankItem.locator('.wb-check').click();
+    assert.match(await bankItem.locator('.wb-feedback:not([hidden])').textContent(), /Đúng/);
+
+    // Drill submit → colored pass banner + progress bar fills
+    const fieldsets = prep.locator('.quiz-question');
+    const qCount = await fieldsets.count();
+    for (let i = 0; i < qCount; i++) {
+      await fieldsets.nth(i).locator('.quiz-option input').nth(lesson.drills[i].answer).check();
+    }
+    await prep.locator('.quiz-submit').click();
+    assert.match(await prep.locator('.quiz-feedback.pass').textContent(), /Đúng 4\/4/);
+    const width = await page.locator('[data-role="lesson-progress"] i').evaluate((el) => el.style.width);
+    assert.equal(width, '20%', `progress bar ${width} after 1/5 steps`);
+
+    // Finish the remaining four steps → celebration + streak
+    await goto(page, `${origin}app/?preview#/lesson/${L1}/read`);
+    const read = page.locator('.runner-pane[data-step="read"]');
+    const rq = read.locator('.quiz-question');
+    for (let i = 0; i < await rq.count(); i++) {
+      await rq.nth(i).locator('.quiz-option input').nth(lesson.dialogue.questions[i].answer).check();
+    }
+    await read.locator('.quiz-submit').click();
+
+    await goto(page, `${origin}app/?preview#/lesson/${L1}/listen`);
+    const lis = page.locator('.runner-pane[data-step="listen"]');
+    const lq = lis.locator('.quiz-question');
+    for (let i = 0; i < await lq.count(); i++) {
+      await lq.nth(i).locator('.quiz-option input').nth(lesson.listening.questions[i].answer).check();
+    }
+    await lis.locator('.quiz-submit').click();
+
+    await goto(page, `${origin}app/?preview#/lesson/${L1}/write`);
+    const write = page.locator('.runner-pane[data-step="write"]');
+    await write.locator('.write-area').fill('I am Linh from Hue.');
+    await write.locator('[data-role="model-toggle"]').click();
+    const wChecks = write.locator('[data-check]');
+    for (let i = 0; i < await wChecks.count(); i++) await wChecks.nth(i).check();
+    await write.locator('[data-role="write-save"]').click();
+
+    await goto(page, `${origin}app/?preview#/lesson/${L1}/speak`);
+    const speak = page.locator('.runner-pane[data-step="speak"]');
+    await speak.locator('.speak-area').fill('Hi I am Linh. I am from Hue.');
+    await speak.locator('[data-role="spoke"]').check();
+    await speak.locator('[data-role="model-toggle"]').click();
+    const sChecks = speak.locator('[data-check]');
+    for (let i = 0; i < await sChecks.count(); i++) await sChecks.nth(i).check();
+    await speak.locator('[data-role="speak-save"]').click();
+
+    await goto(page, `${origin}app/?preview#/summary/${L1}`);
+    assert.equal(await page.locator('[data-role="celebration"]').count(), 1, 'celebration banner after all steps');
+    await goto(page, `${origin}app/?preview`);
+    assert.match(await page.locator('[data-role="streak"]').textContent(), /ngày liên tiếp/);
+    await context.close();
+    check('engagement layer: pager + match pairs + word bank + banner + progress + celebration + streak');
+  }
+
   console.log(`FlashDay app browser tests: ${passed} groups passed`);
 } finally {
   await browser?.close();
