@@ -10,6 +10,7 @@ const firebaseJson = fs.readFileSync(path.join(__dirname, '..', 'firebase.json')
 const firestoreRules = fs.readFileSync(path.join(__dirname, '..', 'firestore.rules'), 'utf8');
 const cloud = fs.readFileSync(path.join(__dirname, '..', 'flashday-cloud.js'), 'utf8');
 const appHtml = fs.readFileSync(path.join(__dirname, '..', 'app', 'index.html'), 'utf8');
+const loginJs = fs.readFileSync(path.join(__dirname, '..', 'login', 'login.js'), 'utf8');
 
 assert(source.includes('persistIncrementalDb'), 'runtime must use incremental cloud writes');
 assert(!source.includes('function persistCurrentDb'), 'legacy full-database sync must stay removed');
@@ -98,5 +99,14 @@ assert(learningEntry.includes('meridiemStrict'), 'strict AM/PM matching must be 
 // (cluster cards, mission lock, sources) in their pre-hydrate state.
 assert(source.includes("'flashday:cloud-hydrated'"), 'hydrate must notify the hub that learner data was replaced');
 assert(learningHub.includes("addEventListener('flashday:cloud-hydrated'"), 'hub must re-render data surfaces after cloud hydration');
+
+// Regression: the auth listener exists for OAuth redirect completions, but
+// SIGNED_IN also fires when createUserWithEmailAndPassword succeeds — signUp
+// then signs out to wait for email verification, so auto-navigation raced the
+// sign-out (some signups landed in /app/, some stayed on #signin).
+assert(
+  loginJs.includes('mode !== AUTH_MODE.SIGN_UP'),
+  'auth listener must not navigate while an email sign-up is in flight'
+);
 
 console.log('FlashDay app P0 contracts passed');

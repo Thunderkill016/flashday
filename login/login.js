@@ -414,7 +414,16 @@ if (!client) {
       // getRedirectResult() resolves asynchronously and can finish AFTER
       // getSession() already observed a null session. Without this branch a
       // slow Google round-trip signs the learner in but strands them here.
-      if (event === 'SIGNED_IN' && signedInUser && !inRecoveryFlow()) {
+      // But during an email sign-up the submit handler owns the flow — the
+      // client signs out immediately to wait for email verification, and
+      // letting the listener navigate on the transient SIGNED_IN event
+      // races it: sometimes landing in /app/, sometimes not.
+      if (
+        event === 'SIGNED_IN' &&
+        signedInUser &&
+        mode !== AUTH_MODE.SIGN_UP &&
+        !inRecoveryFlow()
+      ) {
         openAuthenticatedApp(session);
       }
     });
