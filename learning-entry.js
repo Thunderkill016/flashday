@@ -102,10 +102,12 @@
       setup:'Bạn và Alex đã hẹn gặp lúc 6 giờ ở quán cà phê. Bây giờ Alex nhắn:',
       incomingMessage:'Sorry, something came up. Can we move it to seven?',
       instructions:'Trả lời bằng tiếng Anh: đồng ý hoặc đề xuất giờ khác, rồi xác nhận lại giờ cuối cùng. Bạn có thể viết hoặc nói thành tiếng.',
-      // The can-do is "confirm the final time" — a text attempt that never
-      // states a time cannot demonstrate it. Spoken-only attempts stay
-      // allowed but carry grading:'self-check' either way.
-      requireFinalTimeConfirm:true,
+      // The can-do is "confirm the FINAL time the scenario agreed on" —
+      // declared time must equal expectedFinalTime AND appear in the
+      // response. Loose 12-hour compare: the incoming message says "seven"
+      // without am/pm, so '7 pm' and '7 am' both satisfy it. A mission that
+      // specifies meridiem must set meridiemStrict:true.
+      requireFinalTimeConfirm:true,expectedFinalTime:'7:00',meridiemStrict:false,
       modelAnswer:['No problem. Seven works for me.', 'Great. See you at seven.'],
       selfCheck:['Bạn có phản hồi về việc đổi lịch không?', 'Bạn có nói rõ giờ cuối cùng không?', 'Câu trả lời có phù hợp với tình huống, không chỉ chép một từ đơn lẻ?']
     }
@@ -210,11 +212,39 @@
     return times;
   }
 
-  // 12-hour-clock agreement between a declared time and the times a text
-  // actually states.
-  function confirmsTime(text,declared){
+  // Agreement between a declared/expected time and the times a text
+  // actually states. strict=true → exact 'h:mm' (scenario pinned am/pm);
+  // otherwise 12-hour compare ("8 pm" declared ≡ "at eight" written).
+  function confirmsTime(text,expected,strict=false){
+    const times=extractClockTimes(text);
+    if(strict)return times.includes(expected);
     const as12=(t)=>{const[h,m]=String(t).split(':').map(Number);return normTime(h%12||12,m);};
-    return extractClockTimes(text).map(as12).includes(as12(declared));
+    return times.map(as12).includes(as12(expected));
+  }
+
+  function timesAgree(a,b,strict=false){
+    if(strict)return a===b;
+    const as12=(t)=>{const[h,m]=String(t).split(':').map(Number);return normTime(h%12||12,m);};
+    return as12(a)===as12(b);
+  }
+
+  // Shared gate for the final-time can-do — used by the reveal button and
+  // by submitTransferAttempt so client and record rules can't drift.
+  // Returns {ok,declared,error}; ok implies declared parses and matches the
+  // scenario's expected final time (when the mission defines one).
+  function checkFinalTimeConfirm(mission,raw={}){
+    const declared=parseTimeInput(raw.declaredFinalTime);
+    if(!declared)return {ok:false,declared:null,error:'Điền giờ cuối cùng bạn muốn chốt (vd: 7, 7:30, seven).'};
+    const expected=mission?.expectedFinalTime;
+    const strict=Boolean(mission?.meridiemStrict);
+    if(expected&&!timesAgree(declared,expected,strict)){
+      return {ok:false,declared,error:`Giờ cuối cùng trong tình huống là ${expected} — đọc lại tin nhắn rồi khai đúng giờ.`};
+    }
+    const text=String(raw.responseText||'').trim();
+    if(text&&!confirmsTime(text,declared,strict)){
+      return {ok:false,declared,error:`Câu trả lời chưa xác nhận giờ ${declared} đã khai — vd: "See you at seven."`};
+    }
+    return {ok:true,declared,error:null};
   }
 
   // Cold input for the cluster's lesson loop — a NEW invitation exchange the
@@ -487,21 +517,18 @@
     if(!db||typeof db!=='object')throw new Error('FlashDay DB is required');
     const attempt=normalizeTransferAttempt(raw,now);
     const mission=missionById(attempt.missionId);
-    // Structured check for the "confirm the final time" can-do: the learner
-    // declares the agreed time in its own field, and a written attempt must
-    // state that same time in a time position — "I have two cats" or
-    // "My phone is 12345" can't pass. A spoken-only attempt can't be
-    // text-checked; the declared time is still required and the attempt
-    // stays self-check evidence by flag.
+    // Structured check for the "confirm the final time" can-do: the
+    // declared time must equal the scenario's agreed time AND appear in
+    // the written response. Matching declaration alone ("See you at six" +
+    // declare 6) only proves the two inputs agree — not that the learner
+    // understood the agreed time is seven.
     if(mission?.requireFinalTimeConfirm){
-      const declared=parseTimeInput(raw.declaredFinalTime);
-      if(!declared)throw new Error('Điền giờ cuối cùng bạn muốn chốt (vd: 7, 7:30, seven) trước khi lưu.');
-      // Compare on a 12-hour clock: declaring "8 pm" then writing "see you
-      // at eight" states the same agreed time.
-      if(attempt.responseText&&!confirmsTime(attempt.responseText,declared)){
-        throw new Error(`Câu trả lời chưa xác nhận giờ ${declared} đã khai — vd: "See you at seven."`);
-      }
-      attempt.finalTime=declared;
+      const gate=checkFinalTimeConfirm(mission,{declaredFinalTime:raw.declaredFinalTime,responseText:attempt.responseText});
+      if(!gate.ok)throw new Error(gate.error);
+      attempt.finalTime=gate.declared;
+      // Recorded evidence: the declared time matched the scenario's agreed
+      // time. Whole-sentence quality still stays grading:'self-check'.
+      attempt.scenarioTimeMatch=Boolean(mission.expectedFinalTime);
     }
     db.transferAttempts=Array.isArray(db.transferAttempts)?db.transferAttempts:[];
     if(db.transferAttempts.some(item=>String(item?.id)===attempt.id))throw new Error('Lần thử này đã được lưu.');
@@ -621,7 +648,7 @@
     normalizeLevel,normalizeProfile,ensureProfile,setSkillLevel,setOverallLevel,effectiveLevel,
     assessContent,normalizePhrase,identityForms,phraseAppears,matchUnitsInText,normalizeSourceKind,
     moduleById,clusterById,missionById,modulesForCluster,moduleState,clusterState,installGuidedModule,installGuidedCluster,
-    normalizeTransferAttempt,submitTransferAttempt,missionState,extractClockTimes,parseTimeInput,confirmsTime,
+    normalizeTransferAttempt,submitTransferAttempt,missionState,extractClockTimes,parseTimeInput,confirmsTime,checkFinalTimeConfirm,
     UNIT_TRANSFER_DELAY_MS,dueUnitTransfer,submitUnitTransferAttempt
   };
 });

@@ -85,9 +85,10 @@ const C=require('../flashday-cloud.js');
   assert.equal(attempt.grading,'self-check');
 }
 
-// Final-time gate (structured): the learner declares the agreed time and a
-// written attempt must state THAT time in a time position — a bare digit
-// or number word ("two cats", "12345") can no longer pass. (F5 honesty fix)
+// Final-time gate (structured): the declared time must equal the
+// SCENARIO's agreed time (expectedFinalTime:'7:00') and appear in the
+// response. "See you at six" + declare 6 only proves the inputs match —
+// not that the learner understood the agreed time is seven.
 {
   const db=D.createInitialDb([],1000);
   // Missing declaration
@@ -95,26 +96,57 @@ const C=require('../flashday-cloud.js');
     ()=>L.submitTransferAttempt(db,{missionId:'a1-meeting-change-transfer',responseText:'No problem. See you at seven.'}),
     /giờ cuối cùng/i
   );
-  // Declared time absent from the written response
+  // Declared a different time than the scenario agreed → rejected even if
+  // the response consistently states it (counter-proposal is a separate
+  // mission, not this can-do).
+  assert.throws(
+    ()=>L.submitTransferAttempt(db,{missionId:'a1-meeting-change-transfer',responseText:'See you at six.',declaredFinalTime:'6'}),
+    /giờ cuối cùng trong tình huống/i
+  );
+  assert.throws(
+    ()=>L.submitTransferAttempt(db,{missionId:'a1-meeting-change-transfer',responseText:'How about eight? See you at eight.',declaredFinalTime:'8 pm'}),
+    /giờ cuối cùng trong tình huống/i
+  );
+  // Declared seven but response never states it
   assert.throws(
     ()=>L.submitTransferAttempt(db,{missionId:'a1-meeting-change-transfer',responseText:'No problem, that is fine.',declaredFinalTime:'seven'}),
     /chưa xác nhận giờ/i
   );
-  // Declared + stated, but a different time than declared
+  // Non-times cannot satisfy the gate
   assert.throws(
-    ()=>L.submitTransferAttempt(db,{missionId:'a1-meeting-change-transfer',responseText:'See you at six.',declaredFinalTime:'7'}),
-    /chưa xác nhận giờ/i
+    ()=>L.submitTransferAttempt(db,{missionId:'a1-meeting-change-transfer',responseText:'I have two cats.',declaredFinalTime:'two'}),
+    /giờ cuối cùng trong tình huống|chưa xác nhận/i
   );
   const ok=L.submitTransferAttempt(db,{missionId:'a1-meeting-change-transfer',responseText:'No problem. See you at seven then.',declaredFinalTime:'7'});
   assert.equal(ok.finalTime,'7:00');
+  assert.equal(ok.scenarioTimeMatch,true);
   assert.equal(ok.grading,'self-check');
-  const counter=L.submitTransferAttempt(db,{missionId:'a1-meeting-change-transfer',responseText:'Seven is hard for me — how about eight? See you at eight.',declaredFinalTime:'8 pm'});
-  assert.equal(counter.finalTime,'20:00');
-  // Spoken-only: declared time still required, stays self-check evidence.
+  // Loose 12h compare: the scenario says "seven" without am/pm, so both
+  // meridiem spellings satisfy it.
+  const pm=L.submitTransferAttempt(db,{missionId:'a1-meeting-change-transfer',responseText:'Great. See you at 7 pm.',declaredFinalTime:'19:00'});
+  assert.equal(pm.finalTime,'19:00');
+  // Spoken-only: declared time still required and must match the scenario.
   assert.throws(()=>L.submitTransferAttempt(db,{missionId:'a1-meeting-change-transfer',spoke:true}),/giờ cuối cùng/i);
+  assert.throws(()=>L.submitTransferAttempt(db,{missionId:'a1-meeting-change-transfer',spoke:true,declaredFinalTime:'8'}),/tình huống/i);
   const spoken=L.submitTransferAttempt(db,{missionId:'a1-meeting-change-transfer',spoke:true,declaredFinalTime:'19:00'});
   assert.equal(spoken.finalTime,'19:00');
-  assert.equal(spoken.grading,'self-check');
+  assert.equal(spoken.scenarioTimeMatch,true);
+}
+
+// Meridiem strictness: only when the scenario pins am/pm does '7 am'
+// fail against a '7 pm' agreement.
+{
+  const strictMission={expectedFinalTime:'19:00',meridiemStrict:true};
+  const looseMission={expectedFinalTime:'19:00',meridiemStrict:false};
+  // Loose: 'seven' ↔ 19:00 acceptable (scenario didn't specify am/pm).
+  assert.equal(L.checkFinalTimeConfirm(looseMission,{declaredFinalTime:'seven'}).ok,true);
+  // Strict: declaring '7 am' against a '7 pm' scenario must fail.
+  assert.equal(L.checkFinalTimeConfirm(strictMission,{declaredFinalTime:'7 am'}).ok,false);
+  assert.equal(L.checkFinalTimeConfirm(strictMission,{declaredFinalTime:'7 pm'}).ok,true);
+  // Strict also applies to the response text.
+  assert.equal(L.checkFinalTimeConfirm(strictMission,{declaredFinalTime:'7 pm',responseText:'See you at 7 am.'}).ok,false);
+  assert.equal(L.confirmsTime('See you at 7 am.','19:00',true),false);
+  assert.equal(L.confirmsTime('See you at 7 am.','19:00',false),true);
 }
 
 {

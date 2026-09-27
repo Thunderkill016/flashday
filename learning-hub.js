@@ -272,12 +272,11 @@
       // time in a time position — a bare digit or number word won't do.
       const mission=L.missionById(missionId);
       if(mission?.requireFinalTimeConfirm){
-        const declared=L.parseTimeInput(card.querySelector(`[id="finalTime-${missionId}"]`)?.value);
-        if(!declared){cardMessage(card,'Điền giờ cuối cùng bạn muốn chốt (vd: 7, 7:30, seven) trước khi xem mẫu.');return;}
-        if(response.value.trim()&&!L.confirmsTime(response.value,declared)){
-          cardMessage(card,`Câu trả lời chưa xác nhận giờ ${declared} đã khai — viết rõ giờ hẹn rồi mới xem mẫu.`);
-          return;
-        }
+        const gate=L.checkFinalTimeConfirm(mission,{
+          declaredFinalTime:card.querySelector(`[id="finalTime-${missionId}"]`)?.value,
+          responseText:response.value
+        });
+        if(!gate.ok){cardMessage(card,gate.error);return;}
       }
       card.querySelector('[data-transfer-save]')?.focus();
       card.querySelector('.transfer-model')?.classList.remove('hidden');
