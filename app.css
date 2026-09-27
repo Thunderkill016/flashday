@@ -30,7 +30,7 @@ body {
 }
 .skip-link:focus { top: var(--space-3); }
 
-.hidden { display: none !important; }
+.hidden, [hidden] { display: none !important; }
 
 .app-header {
   position: sticky;
@@ -68,6 +68,7 @@ body {
   color: var(--text-secondary);
   text-decoration: none;
   font-weight: 500;
+  white-space: nowrap;
 }
 .app-tab.active {
   color: var(--action-primary-fg);
@@ -106,8 +107,6 @@ input:focus-visible {
 }
 .view-placeholder { color: var(--text-secondary); }
 
-.runner-pane[hidden] { display: none; }
-
 .profile-email { color: var(--text-secondary); }
 .profile-actions {
   display: flex;
@@ -142,6 +141,12 @@ input:focus-visible {
 
 @media (min-width: 640px) {
   .profile-actions { flex-direction: row; }
+}
+
+@media (max-width: 420px) {
+  .app-header { flex-wrap: wrap; gap: var(--space-2); padding-left: var(--space-3); padding-right: var(--space-3); }
+  .app-tab { padding: 0 var(--space-3); font-size: 15px; }
+  .preview-badge { order: 3; width: 100%; text-align: left; border: 0; padding-left: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -248,3 +253,27 @@ textarea.write-area, textarea.speak-area {
 .btn-primary:disabled, .btn-secondary:disabled { opacity: 0.5; cursor: default; }
 .runner-nav { display: flex; gap: var(--space-3); margin-top: var(--space-6); }
 .runner-continue { margin-top: var(--space-4); }
+
+/* ── Today / path / summary / review (Phase 3) ───────────── */
+.card h2 { font-size: 18px; margin: 0 0 var(--space-2); }
+.card .btn-primary { margin-top: var(--space-3); }
+.draft-note { font-size: 13px; color: var(--text-tertiary); }
+
+.path-stage { margin-bottom: var(--space-4); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: var(--space-3) var(--space-4); }
+.path-stage > summary { cursor: pointer; font-family: var(--font-display); font-size: 17px; min-height: 44px; display: flex; align-items: center; }
+.path-empty { color: var(--text-tertiary); }
+.path-lessons { list-style: none; padding-left: 0; }
+.path-lessons li { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); padding: var(--space-2) 0; border-top: 1px solid var(--border-subtle); }
+.path-lessons a { min-height: 44px; display: inline-flex; align-items: center; }
+.path-status { margin-left: auto; font-size: 12px; padding: var(--space-1) var(--space-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-pill); color: var(--text-secondary); }
+.path-cando { flex-basis: 100%; margin: 0; font-size: 13px; color: var(--text-secondary); }
+
+.summary-steps { list-style: none; padding-left: 0; }
+.summary-steps li { padding: var(--space-2) 0; border-bottom: 1px solid var(--border-subtle); }
+.caveat { font-size: 13px; }
+
+.review-counter { font-family: var(--font-mono); font-size: 12px; color: var(--text-tertiary); }
+.review-meaning { font-size: 18px; font-weight: 600; }
+.review-target { font-size: 20px; font-weight: 700; }
+.grade-row { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-3); }
+.grade-btn { flex: 1; min-width: 64px; }

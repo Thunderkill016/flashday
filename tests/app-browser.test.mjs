@@ -196,6 +196,103 @@ try {
     check('checkpoint → 4 steps, lands on read');
   }
 
+  // ── 8. [hidden] must actually hide: retry/save stay invisible until due ──
+  {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const page = await context.newPage();
+    await page.goto(`${origin}app/?preview#/lesson/${L1}/read`);
+    const readPane = page.locator('.runner-pane[data-step="read"]');
+    assert.equal(await readPane.locator('.quiz-retry').isVisible(), false, 'Làm lại must be hidden before submit');
+    // submit → retry visible
+    await readPane.locator('.quiz-question').nth(0).locator('.quiz-option').nth(0).click();
+    await readPane.locator('.quiz-question').nth(1).locator('.quiz-option').nth(1).click();
+    await readPane.locator('.quiz-question').nth(2).locator('.quiz-option').nth(0).click();
+    await readPane.locator('.quiz-submit').click();
+    assert.equal(await readPane.locator('.quiz-retry').isVisible(), true);
+
+    await page.evaluate(() => { window.location.hash = '#/lesson/a1-s1-l1/write'; });
+    const writePane = page.locator('.runner-pane[data-step="write"]');
+    assert.equal(await writePane.locator('[data-role="write-save"]').isVisible(), false, 'Lưu lần thử hidden before Xem mẫu');
+    // empty text → Xem mẫu stays disabled
+    assert.equal(await writePane.locator('[data-role="model-toggle"]').isEnabled(), false);
+    await writePane.locator('.write-area').fill('Hi I am Linh');
+    await writePane.locator('[data-role="model-toggle"]').click();
+    assert.equal(await writePane.locator('[data-role="write-save"]').isVisible(), true);
+    // empty the answer → save shows notice, no event
+    await writePane.locator('.write-area').fill('');
+    await writePane.locator('[data-role="write-save"]').click();
+    assert.equal(await writePane.locator('.runner-notice').isVisible(), true);
+    const writes = await page.evaluate((key) => {
+      const db = JSON.parse(localStorage.getItem(key) || '{}');
+      return (db.lessonEvents || []).filter((e) => e.kind === 'write').length;
+    }, DB_KEY);
+    assert.equal(writes, 0, 'empty text must not append a write event');
+    await context.close();
+    check('hidden controls + empty save guarded');
+  }
+
+  // ── 9. Today: fresh → no due cards; after drills → N cụm đến hạn ──
+  {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const page = await context.newPage();
+    await page.goto(`${origin}app/?preview#/today`);
+    assert.match(await page.locator('#view').textContent(), /Chưa có thẻ đến hạn/);
+    // submit drills on s1-l1 (answers: drills 1-4 correct = 0,2,0,0 — any answers enroll chunks)
+    await page.goto(`${origin}app/?preview#/lesson/${L1}/prepare`);
+    const pane = page.locator('.runner-pane[data-step="prepare"]');
+    for (let q = 0; q < 4; q++) {
+      await pane.locator('.quiz-question').nth(q).locator('.quiz-option').nth(0).click();
+    }
+    await pane.locator('.quiz-submit').click();
+    const enrolled = await page.evaluate((key) => {
+      const db = JSON.parse(localStorage.getItem(key) || '{}');
+      return Object.keys(db.fsrs || {}).length;
+    }, DB_KEY);
+    assert.equal(enrolled, 8, 'drill submit enrolls all 8 chunks');
+    await page.goto(`${origin}app/?preview#/today`);
+    assert.match(await page.locator('#view').textContent(), /8 cụm đến hạn/, 'new FSRS cards are due immediately');
+    // path pill for s1-l1 now "Đang luyện"
+    await page.goto(`${origin}app/?preview#/path`);
+    const pill = page.locator('.path-lessons li', { hasText: 'Chào hỏi và giới thiệu' }).locator('.path-status');
+    assert.equal(await pill.textContent(), 'Đang luyện');
+    // summary: untouched steps show "Chưa làm" links
+    await page.goto(`${origin}app/?preview#/summary/${L1}`);
+    const todoLinks = page.locator('.summary-steps a', { hasText: 'Chưa làm' });
+    assert.equal(await todoLinks.count(), 4, 'read/listen/write/speak untouched');
+    await context.close();
+    check('today due count + path pill + summary todo links');
+  }
+
+  // ── 10. Review: reveal → grade → next card; graded card not due after reload ──
+  {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const page = await context.newPage();
+    // enroll via drills first
+    await page.goto(`${origin}app/?preview#/lesson/${L1}/prepare`);
+    const pane = page.locator('.runner-pane[data-step="prepare"]');
+    for (let q = 0; q < 4; q++) {
+      await pane.locator('.quiz-question').nth(q).locator('.quiz-option').nth(0).click();
+    }
+    await pane.locator('.quiz-submit').click();
+
+    await page.goto(`${origin}app/?preview#/review`);
+    assert.equal(await page.locator('.review-counter').textContent(), '1/8');
+    assert.equal(await page.locator('.review-target').isVisible(), false, 'answer hidden before reveal');
+    await page.locator('[data-role="reveal"]').click();
+    assert.equal(await page.locator('.review-target').isVisible(), true);
+    await page.locator('[data-grade="3"]').click(); // Nhớ
+    assert.equal(await page.locator('.review-counter').textContent(), '2/8');
+    const logLen = await page.evaluate((key) => {
+      const db = JSON.parse(localStorage.getItem(key) || '{}');
+      return (db.reviewLog || []).length;
+    }, DB_KEY);
+    assert.equal(logLen, 1, 'grade appends a reviewLog entry');
+    await page.reload();
+    assert.equal(await page.locator('.review-counter').textContent(), '1/7', 'graded card no longer due');
+    await context.close();
+    check('review reveal → grade → persisted scheduling');
+  }
+
   console.log(`FlashDay app browser tests: ${passed} groups passed`);
 } finally {
   await browser?.close();

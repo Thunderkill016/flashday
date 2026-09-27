@@ -490,6 +490,11 @@ const buildStep = {
     if (draftSupport().modelRevealed) modelBtn.click();
 
     saveBtn.addEventListener('click', () => {
+      if (wordCount(textarea.value) < 3) {
+        gateNote.textContent = 'Viết câu trả lời trước khi lưu.';
+        gateNote.hidden = false;
+        return;
+      }
       if (lesson.write.gate) {
         const check = checkTimeGate({
           gate: lesson.write.gate,
@@ -589,7 +594,10 @@ const buildStep = {
     saveBtn.textContent = 'Lưu lần thử';
     saveBtn.hidden = true;
 
-    pane.append(spoke, listener, textarea, modelBtn, modelArea, saveBtn);
+    const speakNote = text('p', '', 'runner-notice');
+    speakNote.hidden = true;
+
+    pane.append(spoke, listener, textarea, modelBtn, modelArea, saveBtn, speakNote);
 
     modelBtn.addEventListener('click', () => {
       patchDraft({ support: { ...draftSupport(), modelRevealed: true } });
@@ -615,6 +623,12 @@ const buildStep = {
     });
 
     saveBtn.addEventListener('click', () => {
+      if (!textarea.value.trim() || !spokeBox.checked) {
+        speakNote.textContent = 'Ghi lại câu bạn đã nói và đánh dấu "Tôi đã nói thành tiếng" trước khi lưu.';
+        speakNote.hidden = false;
+        return;
+      }
+      speakNote.hidden = true;
       saveBtn.disabled = true;
       const checklist = [...modelArea.querySelectorAll('[data-check]')].map((box) => box.checked);
       recordEvent('speak', {
