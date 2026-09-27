@@ -5,6 +5,11 @@ import s1l2 from './s1-l2.js';
 import s1l3 from './s1-l3.js';
 import s1l4 from './s1-l4.js';
 import s1l5 from './s1-l5.js';
+import s2l1 from './s2-l1.js';
+import s2l2 from './s2-l2.js';
+import s2l3 from './s2-l3.js';
+import s2l4 from './s2-l4.js';
+import s2l5 from './s2-l5.js';
 
 export const STAGES = Object.freeze([
   { id: 1, title: 'Tôi và mọi người', blurb: 'Chào hỏi, thông tin liên hệ, gia đình, công việc.' },
@@ -15,7 +20,7 @@ export const STAGES = Object.freeze([
   { id: 6, title: 'Kế hoạch, tin nhắn, kể lại', blurb: 'Cuối tuần này, tin nhắn ngắn, hôm qua, hỏi lại.' },
 ]);
 
-export const LESSONS = Object.freeze([s1l1, s1l2, s1l3, s1l4, s1l5]);
+export const LESSONS = Object.freeze([s1l1, s1l2, s1l3, s1l4, s1l5, s2l1, s2l2, s2l3, s2l4, s2l5]);
 
 export function lessonById(id) {
   return LESSONS.find((lesson) => lesson.id === id) || null;
