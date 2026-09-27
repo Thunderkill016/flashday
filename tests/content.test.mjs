@@ -18,4 +18,13 @@ import lesson from '../src/content/a1/s1-l1.js';
   assert.deepEqual(validateCourse([lesson]), [], 'single-lesson course must produce no errors');
 }
 
-console.log('FlashDay content: 3 checks passed');
+{
+  assert.equal(lesson.contentVersion, 2, 'revised lesson must invalidate earlier drafts');
+  assert.match(lesson.speak.model.join(' '), /Where are you from/);
+  assert.match(lesson.speak.model.join(' '), /What’s your name/);
+  assert.match(lesson.listening.text, /Sydney/);
+  assert.equal(lesson.listening.questions[1].options[lesson.listening.questions[1].answer], 'Sydney');
+  assert(lesson.dialogue.lines.every(([english, vietnamese]) => english && vietnamese));
+}
+
+console.log('FlashDay content: 4 checks passed');

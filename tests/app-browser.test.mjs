@@ -2,15 +2,14 @@ import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
+import lesson from '../src/content/a1/s1-l1.js';
 
 // Isolated preview: no login, no production writes, fresh storage per context.
 const server = await createServer({ server: { host: '127.0.0.1', port: 0 } });
 await server.listen();
 const origin = server.resolvedUrls.local[0];
 
-const executablePath =
-  process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ||
-  (existsSync('/usr/bin/google-chrome') ? '/usr/bin/google-chrome' : undefined);
+const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || (existsSync('/usr/bin/google-chrome') ? '/usr/bin/google-chrome' : undefined);
 
 const DB_KEY = 'flashday-a1';
 const SESSION_KEY = 'flashday-a1:lesson-session';
@@ -32,14 +31,19 @@ async function reload(page) {
 
 let browser;
 let passed = 0;
-const check = (name) => { passed++; console.log(`  ✓ ${name}`); };
+const check = (name) => {
+  passed++;
+  console.log(`  ✓ ${name}`);
+};
 
 try {
   browser = await chromium.launch({ executablePath, headless: true });
 
   // ── Shell smoke: loads clean, tabs switch, hash routes render ──
   for (const width of [390, 1280]) {
-    const context = await browser.newContext({ viewport: { width, height: 844 } });
+    const context = await browser.newContext({
+      viewport: { width, height: 844 },
+    });
     const page = await context.newPage();
     const errors = [];
     page.on('pageerror', (error) => errors.push(error.message));
@@ -75,7 +79,9 @@ try {
 
   // ── 1. Write draft survives reload ──
   {
-    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+    });
     const page = await context.newPage();
     await goto(page, `${origin}app/?preview#/lesson/${L1}/write`);
     await page.locator('.runner-pane[data-step="write"] .write-area').fill('I am Linh from Hue.');
@@ -89,7 +95,9 @@ try {
 
   // ── 2. Quiz draft + pane identity survive step navigation (no rebuild) ──
   {
-    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+    });
     const page = await context.newPage();
     await goto(page, `${origin}app/?preview#/lesson/${L1}/read`);
     const readPane = page.locator('.runner-pane[data-step="read"]');
@@ -97,9 +105,13 @@ try {
     await readPane.locator('.quiz-question').nth(0).locator('.quiz-option').nth(0).click();
     await readPane.locator('.quiz-question').nth(1).locator('.quiz-option').nth(1).click();
     await sleep(1200);
-    await page.evaluate(() => { window.location.hash = `#/lesson/${'a1-s1-l1'}/listen`; });
+    await page.evaluate(() => {
+      window.location.hash = `#/lesson/${'a1-s1-l1'}/listen`;
+    });
     await page.waitForSelector('.runner-pane[data-step="listen"]:not([hidden])');
-    await page.evaluate(() => { window.location.hash = `#/lesson/${'a1-s1-l1'}/read`; });
+    await page.evaluate(() => {
+      window.location.hash = `#/lesson/${'a1-s1-l1'}/read`;
+    });
     await page.waitForSelector('.runner-pane[data-step="read"]:not([hidden])');
     const pane = page.locator('.runner-pane[data-step="read"]');
     assert.equal(await pane.locator('.quiz').getAttribute('data-quiz-mount'), stamp, 'quiz DOM must be the same mounted node');
@@ -111,7 +123,9 @@ try {
 
   // ── 3. Quiz retry flow records exactly 2 read events ──
   {
-    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+    });
     const page = await context.newPage();
     await goto(page, `${origin}app/?preview#/lesson/${L1}/read`);
     const pane = page.locator('.runner-pane[data-step="read"]');
@@ -141,16 +155,21 @@ try {
 
   // ── 4. Stale draft (old contentVersion) → notice, nothing applied ──
   {
-    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+    });
     const page = await context.newPage();
     await goto(page, `${origin}app/?preview#/lesson/${L1}/write`);
     await page.locator('.runner-pane[data-step="write"] .write-area').fill('old draft text');
     await sleep(1200);
-    await page.evaluate(({ key, lessonId }) => {
-      const session = JSON.parse(localStorage.getItem(key));
-      session.drafts[lessonId].contentVersion = 99;
-      localStorage.setItem(key, JSON.stringify(session));
-    }, { key: SESSION_KEY, lessonId: L1 });
+    await page.evaluate(
+      ({ key, lessonId }) => {
+        const session = JSON.parse(localStorage.getItem(key));
+        session.drafts[lessonId].contentVersion = 99;
+        localStorage.setItem(key, JSON.stringify(session));
+      },
+      { key: SESSION_KEY, lessonId: L1 },
+    );
     await reload(page);
     await page.waitForSelector('[data-role="stale-notice"]');
     assert.equal(await page.locator('.runner-pane[data-step="write"] .write-area').inputValue(), '', 'stale draft must not replay answers');
@@ -160,7 +179,9 @@ try {
 
   // ── 5. Another account's namespace never shows this draft ──
   {
-    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+    });
     const page = await context.newPage();
     await goto(page, `${origin}app/?preview#/lesson/${L1}/write`);
     await page.locator('.runner-pane[data-step="write"] .write-area').fill('alice draft');
@@ -182,7 +203,9 @@ try {
 
   // ── 6. Double fast "Lưu lần thử" → exactly 1 write event ──
   {
-    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+    });
     const page = await context.newPage();
     await goto(page, `${origin}app/?preview#/lesson/${L1}/write`);
     const pane = page.locator('.runner-pane[data-step="write"]');
@@ -203,7 +226,9 @@ try {
 
   // ── 7. Checkpoint lesson: 4 step pills, lands on read; first submit enrolls chunks ──
   {
-    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+    });
     const page = await context.newPage();
     await goto(page, `${origin}app/?preview#/lesson/a1-s1-l5/prepare`);
     assert.equal(await page.locator('.step-pill').count(), 4, 'checkpoint hides the prepare step');
@@ -227,7 +252,9 @@ try {
 
   // ── 8. [hidden] must actually hide: retry/save stay invisible until due ──
   {
-    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+    });
     const page = await context.newPage();
     await goto(page, `${origin}app/?preview#/lesson/${L1}/read`);
     const readPane = page.locator('.runner-pane[data-step="read"]');
@@ -239,7 +266,9 @@ try {
     await readPane.locator('.quiz-submit').click();
     assert.equal(await readPane.locator('.quiz-retry').isVisible(), true);
 
-    await page.evaluate(() => { window.location.hash = '#/lesson/a1-s1-l1/write'; });
+    await page.evaluate(() => {
+      window.location.hash = '#/lesson/a1-s1-l1/write';
+    });
     const writePane = page.locator('.runner-pane[data-step="write"]');
     assert.equal(await writePane.locator('[data-role="write-save"]').isVisible(), false, 'Lưu lần thử hidden before Xem mẫu');
     // empty text → Xem mẫu stays disabled
@@ -262,7 +291,9 @@ try {
 
   // ── 9. Today: fresh → no due cards; after drills → N cụm đến hạn ──
   {
-    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+    });
     const page = await context.newPage();
     await goto(page, `${origin}app/?preview#/today`);
     assert.match(await page.locator('#view').textContent(), /Chưa có thẻ đến hạn/);
@@ -294,7 +325,9 @@ try {
 
   // ── 10. Review: reveal → grade → next card; graded card not due after reload ──
   {
-    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+    });
     const page = await context.newPage();
     // enroll via drills first
     await goto(page, `${origin}app/?preview#/lesson/${L1}/prepare`);
@@ -324,7 +357,9 @@ try {
 
   // ── 11. Debounced draft writes must not outlive the unmounted runner ──
   {
-    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+    });
     const page = await context.newPage();
     const errors = [];
     page.on('pageerror', (error) => errors.push(error.message));
@@ -347,19 +382,26 @@ try {
 
   // ── 12. TTS play buttons call speak() with the right target text ──
   {
-    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+    });
     await context.addInitScript(() => {
       window.__ttsCalls = [];
       window.SpeechSynthesisUtterance = class {
-        constructor(text) { this.text = text; }
+        constructor(text) {
+          this.text = text;
+        }
       };
       Object.defineProperty(window, 'speechSynthesis', {
         value: {
           getVoices: () => [{ name: 'Mock en-US', lang: 'en-US' }],
           cancel: () => {},
-          speak: (u) => { window.__ttsCalls.push(u.text); u.onend?.(); },
-          addEventListener: () => {}
-        }
+          speak: (u) => {
+            window.__ttsCalls.push(u.text);
+            u.onend?.();
+          },
+          addEventListener: () => {},
+        },
       });
     });
     const page = await context.newPage();
@@ -371,7 +413,7 @@ try {
     // read: dialogue line play buttons
     await goto(page, `${origin}app/?preview#/lesson/${L1}/read`);
     const linePlays = page.locator('.runner-pane[data-step="read"] .dialogue-lines [data-role="play-target"]');
-    assert.equal(await linePlays.count(), 7, 'every dialogue line gets a play button');
+    assert.equal(await linePlays.count(), lesson.dialogue.lines.length, 'every dialogue line gets a play button');
     await linePlays.first().click();
     const calls = await page.evaluate(() => window.__ttsCalls);
     assert.equal(calls.length, 2, `expected 2 TTS calls, got ${calls.length}`);
@@ -382,7 +424,9 @@ try {
 
   // ── 13. Write correction loop: compare shows, retry records attempt 2 ──
   {
-    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+    });
     const page = await context.newPage();
     await goto(page, `${origin}app/?preview#/lesson/${L1}/write`);
     const pane = page.locator('.runner-pane[data-step="write"]');
