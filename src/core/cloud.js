@@ -242,7 +242,7 @@ export function createCloudSync({ client, store, storage, onStatus }) {
 
       const remotePayload = progressResult.data?.payload && typeof progressResult.data.payload === 'object'
         ? progressResult.data.payload : {};
-      const local = store.getState();
+      const local = store.refresh();
       const mergedPayload = mergeProgressPayload(remotePayload, {
         reviewLog: local.reviewLog, profile: local.profile
       });
