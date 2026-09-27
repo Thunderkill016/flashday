@@ -5,15 +5,18 @@
  *
  * Policy order (ADR):
  *   1. resume  — in-flight draft with unsubmitted content
- *   2. review  — retrieval tasks due (spaced memory outranks new content)
+ *   2. review  — scheduled retrieval tasks due (spaced memory outranks new
+ *      content; brand-new task introductions do NOT count — they are not
+ *      overdue work, they ride the review queue opportunistically)
  *   3. remediate — the latest quiz attempt for some (lesson, step) is still
  *      a partial/failed outcome and nothing newer fixed it
  *   4. finish  — started lesson with steps still todo (course order)
  *   5. next    — first unstarted lesson in course order
- *   6. done
+ *   6. review  — curriculum exhausted but new tasks await introduction
+ *   7. done
  */
 import { STEPS, lessonStatus, stepsForLesson } from './progress.js';
-import { dueTasks } from './scheduler.js';
+import { dueTasks, reviewQueue } from './scheduler.js';
 
 function courseOrder(lessons) {
   return [...(Array.isArray(lessons) ? lessons : [])].sort(
@@ -75,8 +78,10 @@ export function planNext({ db, session, lessons, now = Date.now() }) {
     };
   }
 
-  // 2. review — due retrieval tasks. Spaced memory outranks new content.
-  const due = dueTasks(db, now);
+  // 2. review — SCHEDULED retrieval tasks that are due (already exercised
+  // at least once). New-state cards are introductions, not overdue work —
+  // they never hold the curriculum hostage.
+  const due = dueTasks(db, now, ordered);
   if (due.length) {
     return {
       kind: 'review',
@@ -116,6 +121,19 @@ export function planNext({ db, session, lessons, now = Date.now() }) {
     if (!lessonStatus(events, lesson).anyAttempt) {
       return { kind: 'next', lessonId: String(lesson.id), step: stepsForLesson(lesson)[0], reason: 'unstarted' };
     }
+  }
+
+  // 6. review — curriculum exhausted; introduce pending new tasks.
+  const queue = reviewQueue(db, ordered, now);
+  if (queue.due.length || queue.freshPending) {
+    return {
+      kind: 'review',
+      lessonId: null,
+      step: null,
+      reason: queue.due.length ? 'due-tasks' : 'new-tasks',
+      dueCount: queue.due.length,
+      newCount: queue.freshPending
+    };
   }
 
   return { kind: 'done', lessonId: null, step: null, reason: 'all-attempted' };

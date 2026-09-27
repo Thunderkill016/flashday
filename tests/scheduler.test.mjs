@@ -7,19 +7,36 @@ import {
   nextDueAt,
   rateTask,
   rebuildFsrsFromLog,
+  reviewQueue,
   taskForKey,
-  taskKey
+  taskKey,
+  NEW_TASK_BUDGET
 } from '../src/core/scheduler.js';
-import { TASK_KINDS, STEP_TASKS, LEGACY_TASK_KIND } from '../src/core/domain.js';
+import {
+  TASK_KINDS,
+  STEP_TASKS,
+  LEGACY_TASK_KIND,
+  contentRev,
+  normalizeTaskKey
+} from '../src/core/domain.js';
 import { createInitialDb } from '../src/core/evidence.js';
 
 const lesson = {
   id: 'a1-s1-l1',
-  chunks: [{ id: 'c1' }, { id: 'c2' }, { id: 'c3' }]
+  chunks: [
+    { id: 'c1', target: 'Hello', meaning: 'Xin chào' },
+    { id: 'c2', target: 'I’m …', meaning: 'Tôi là …' },
+    { id: 'c3', target: 'What’s your name?', meaning: 'Tên bạn là gì?' }
+  ]
+};
+
+const tk = (chunkId, kind) => {
+  const chunk = lesson.chunks.find((c) => c.id === chunkId);
+  return taskKey(lesson.id, chunkId, kind, contentRev(chunk.target));
 };
 
 // Staged enrollment: prepare introduces only its two task kinds; each chunk
-// gets one FSRS card per kind, keyed `lesson:chunk:kind`.
+// gets one FSRS card per kind, keyed `lesson:chunk@rev:kind`.
 {
   const db = createInitialDb();
   const enrolled = enrollTasks(db, lesson, STEP_TASKS.prepare, 1000);
@@ -27,9 +44,9 @@ const lesson = {
   assert.deepEqual(
     enrolled.sort(),
     [
-      'a1-s1-l1:c1:form_recognition', 'a1-s1-l1:c1:meaning_recall',
-      'a1-s1-l1:c2:form_recognition', 'a1-s1-l1:c2:meaning_recall',
-      'a1-s1-l1:c3:form_recognition', 'a1-s1-l1:c3:meaning_recall'
+      tk('c1', 'form_recognition'), tk('c1', 'meaning_recall'),
+      tk('c2', 'form_recognition'), tk('c2', 'meaning_recall'),
+      tk('c3', 'form_recognition'), tk('c3', 'meaning_recall')
     ]
   );
   const again = enrollTasks(db, lesson, STEP_TASKS.prepare, 2000);
@@ -40,38 +57,48 @@ const lesson = {
   assert(later.every((k) => k.endsWith(':listening_recognition')));
   assert.equal(Object.keys(db.fsrs).length, 9);
   assert.equal(db.reviewLog.length, 6, 'one enroll entry per chunk per stage');
-  assert.deepEqual(db.reviewLog[0].tasks, ['form_recognition', 'meaning_recall']);
+  // Enrol entries store the FULL task ids — replay never guesses the rev.
+  assert.deepEqual(
+    db.reviewLog[0].tasks,
+    [tk('c1', 'form_recognition'), tk('c1', 'meaning_recall')]
+  );
 }
 
 // Independent memory states: rating one task never advances another.
+// due() holds only exercised work — New cards wait in the bounded queue.
 {
   const db = createInitialDb();
   enrollTasks(db, lesson, TASK_KINDS, 1000);
-  assert.equal(dueTasks(db, 1000).length, 12, 'new task cards are due immediately');
-  rateTask(db, 'a1-s1-l1:c1:meaning_recall', 3, 1000); // Good
-  rateTask(db, 'a1-s1-l1:c2:meaning_recall', 1, 1000); // Again
-  const due = dueTasks(db, 1000 + 60 * 60 * 1000);
+  assert.equal(dueTasks(db, 1000).length, 0,
+    'brand-new tasks are introductions, not overdue review');
+  const queue = reviewQueue(db, [lesson], 1000);
+  assert.equal(queue.due.length, 0);
+  assert.equal(queue.freshPending, 12, '3 chunks × 4 kinds await introduction');
+  assert(queue.fresh.length <= NEW_TASK_BUDGET, 'introductions are bounded');
+  assert(queue.fresh.length <= 3, 'sibling bury: at most one new task per component');
+  rateTask(db, tk('c1', 'meaning_recall'), 3, 1000); // Good
+  rateTask(db, tk('c2', 'meaning_recall'), 1, 1000); // Again
+  const due = dueTasks(db, 1000 + 60 * 60 * 1000, [lesson]);
   const dueKeys = due.map((d) => d.key);
-  assert(dueKeys.includes('a1-s1-l1:c2:meaning_recall'), 'Again stays due soon');
-  assert(dueKeys.includes('a1-s1-l1:c1:listening_recognition'),
-    'unrated listening task still due — separate state');
-  assert(!dueKeys.includes('a1-s1-l1:c1:meaning_recall') ||
-    new Date(db.fsrs['a1-s1-l1:c1:meaning_recall'].due).getTime() > 1000 + 3 * 60 * 1000,
+  assert(dueKeys.includes(tk('c2', 'meaning_recall')), 'Again stays due soon');
+  assert(!dueKeys.includes(tk('c1', 'meaning_recall')) ||
+    new Date(db.fsrs[tk('c1', 'meaning_recall')].due).getTime() > 1000 + 3 * 60 * 1000,
     'rated meaning_recall moved on its own schedule');
-  assert.equal(rateTask(db, 'a1-s1-l1:c1:meaning_recall', 0, 1000), null, 'invalid grade returns null');
-  assert.equal(taskKey('l', 'c', 'meaning_recall'), 'l:c:meaning_recall');
+  // Unrated siblings stay out of `due` — they are still New.
+  assert(!dueKeys.includes(tk('c1', 'listening_recognition')),
+    'unrated sibling is an introduction, not overdue');
+  assert.equal(rateTask(db, tk('c1', 'meaning_recall'), 0, 1000), null, 'invalid grade returns null');
+  assert.equal(taskKey('l', 'c', 'meaning_recall', 'abcdef12'), 'l:c@abcdef12:meaning_recall');
   assert.equal(chunkKey('l', 'c'), 'l:c');
-  assert.equal(typeof nextDueAt(db, 1000), 'number', 'some cards still due later');
-  const resolved = taskForKey('a1-s1-l1:c2:listening_recognition', [
-    { id: 'a1-s1-l1', chunks: [{ id: 'c2', target: 't' }] }
-  ]);
-  assert.equal(resolved.chunk.target, 't');
+  assert.equal(typeof nextDueAt(db, 1000), 'number', 'rated cards still due later');
+  const resolved = taskForKey(tk('c2', 'listening_recognition'), [lesson]);
+  assert.equal(resolved.chunk.target, 'I’m …');
   assert.equal(resolved.taskKind, 'listening_recognition');
-  assert.equal(chunkForKey('a1-s1-l1:c2:meaning_recall', [
-    { id: 'a1-s1-l1', chunks: [{ id: 'c2', target: 't' }] }
-  ]).chunk.target, 't', 'chunkForKey resolves through task keys');
-  assert.equal(taskForKey('nope:c1:meaning_recall', [{ id: 'a1-s1-l1', chunks: [] }]), null);
-  assert.equal(taskForKey('junk', [{ id: 'a1-s1-l1', chunks: [] }]), null);
+  assert.equal(resolved.superseded, false);
+  assert.equal(chunkForKey(tk('c2', 'meaning_recall'), [lesson]).chunk.target, 'I’m …',
+    'chunkForKey resolves through task keys');
+  assert.equal(taskForKey('nope:c1:meaning_recall', [lesson]), null);
+  assert.equal(taskForKey('junk', [lesson]), null);
 }
 
 // Enrolment is recorded in reviewLog so db.fsrs rebuilds identically after a
@@ -81,26 +108,28 @@ const lesson = {
   enrollTasks(db, lesson, STEP_TASKS.prepare, 1000);
   assert.equal(db.reviewLog.length, 3, 'each chunk logs one staged enroll entry');
   assert(db.reviewLog.every((e) => e.kind === 'enroll' && e.id && e.tasks.length === 2));
-  rateTask(db, 'a1-s1-l1:c1:meaning_recall', 3, 5000);
-  db.reviewLog.push({ id: 'l1', kind: 'rate', taskKey: 'a1-s1-l1:c1:meaning_recall', grade: 3, at: 5000 });
+  rateTask(db, tk('c1', 'meaning_recall'), 3, 5000);
+  db.reviewLog.push({ id: 'l1', kind: 'rate', taskKey: tk('c1', 'meaning_recall'), grade: 3, at: 5000 });
   const rebuilt = rebuildFsrsFromLog(db.reviewLog);
   assert.deepEqual(rebuilt, db.fsrs, 'rebuild replays to identical task cards');
   // Two devices: B's log merged in by id → identical rebuild.
   const deviceB = [
-    { id: 'b1', kind: 'rate', taskKey: 'a1-s1-l1:c2:meaning_recall', grade: 4, at: 2000 },
-    { id: 'b0', taskKey: 'a1-s1-l1:c3:form_recognition', grade: 2, at: 3000 } // kindless → rate
+    { id: 'b1', kind: 'rate', taskKey: tk('c2', 'meaning_recall'), grade: 4, at: 2000 },
+    { id: 'b0', taskKey: tk('c3', 'form_recognition'), grade: 2, at: 3000 } // kindless → rate
   ];
   const mergedLog = [...db.reviewLog, ...deviceB]
     .sort((a, b) => (a.at - b.at) || String(a.id).localeCompare(String(b.id)));
   const mergedFsrs = rebuildFsrsFromLog(mergedLog);
   assert(
-    mergedFsrs['a1-s1-l1:c2:meaning_recall'] !== db.fsrs['a1-s1-l1:c2:meaning_recall'],
+    mergedFsrs[tk('c2', 'meaning_recall')] !== db.fsrs[tk('c2', 'meaning_recall')],
     'B rating changes c2 meaning_recall only'
   );
 }
 
-// Legacy migration: a v2 log uses 2-segment chunkKey. Replay projects it to
-// meaning_recall AND expands enrolment to all four kinds as new cards.
+// Legacy migration — the canonical rule is identical for local hydrate and
+// cloud replay: a v2 chunk card projects to exactly ONE meaning_recall task.
+// It must NOT expand to all four kinds (that would invent exercised memory
+// for modalities the learner may never have touched).
 {
   const legacyLog = [
     { id: 'e1', kind: 'enroll', chunkKey: 'a1-s1-l1:c1', at: 1000 },
@@ -108,13 +137,12 @@ const lesson = {
     { id: 'r2', kind: 'rate', chunkKey: 'a1-s1-l1:c1', grade: 4, at: 90000 }
   ];
   const rebuilt = rebuildFsrsFromLog(legacyLog);
-  for (const kind of TASK_KINDS) {
-    assert(rebuilt[`a1-s1-l1:c1:${kind}`], `legacy enroll expands to ${kind}`);
-  }
-  const migrated = rebuilt[`a1-s1-l1:c1:${LEGACY_TASK_KIND}`];
-  assert(migrated.reps >= 2, 'legacy rates keep their history on meaning_recall');
-  assert.equal(rebuilt['a1-s1-l1:c1:listening_recognition'].reps, 0,
-    'no cross-skill credit: other tasks start fresh');
+  const c1Rev = normalizeTaskKey('a1-s1-l1:c1', 2000).split('@')[1].split(':')[0];
+  const legacyTask = `a1-s1-l1:c1@${c1Rev}:${LEGACY_TASK_KIND}`;
+  assert.equal(rebuilt[legacyTask].reps, 2, 'legacy rates keep their history on meaning_recall');
+  const taskKeys = Object.keys(rebuilt).filter((k) => k.startsWith('a1-s1-l1:c1@'));
+  assert.deepEqual(taskKeys, [legacyTask],
+    'legacy enroll creates exactly one task — no invented sibling cards');
   // Idempotent: replaying the same log again produces the same map.
   assert.deepEqual(rebuildFsrsFromLog(legacyLog), rebuilt, 'rebuild is idempotent');
   // And a legacy rate addressed by chunkKey lands on meaning_recall only.
@@ -122,9 +150,20 @@ const lesson = {
   db.reviewLog = legacyLog;
   db.fsrs = rebuilt;
   rateTask(db, 'a1-s1-l1:c1', 1, 100000); // legacy-shaped key
-  assert.equal(db.fsrs['a1-s1-l1:c1:meaning_recall'].lapses, 1,
-    'legacy rate key lands on meaning_recall');
-  assert.equal(db.fsrs['a1-s1-l1:c1:form_recognition'].lapses, 0, 'siblings untouched');
+  assert.equal(db.fsrs[legacyTask].lapses, 1, 'legacy rate key lands on meaning_recall');
 }
 
-console.log('FlashDay scheduler: 4 checks passed');
+// Staged enroll entries written by the first task-aware build stored bare
+// kind names — replay must still resolve them through the ledger.
+{
+  const midLog = [
+    { id: 'e1', kind: 'enroll', chunkKey: 'a1-s1-l1:c1', tasks: ['meaning_recall'], at: 1000 }
+  ];
+  const rebuilt = rebuildFsrsFromLog(midLog);
+  const keys = Object.keys(rebuilt);
+  assert.equal(keys.length, 1);
+  assert(keys[0].endsWith(':meaning_recall'), 'bare-kind task list resolves to a full task id');
+  assert(keys[0].includes('@'), 'resolved id carries the content revision');
+}
+
+console.log('FlashDay scheduler: 5 checks passed');

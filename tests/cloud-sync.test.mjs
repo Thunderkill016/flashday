@@ -128,7 +128,10 @@ globalThis.CustomEvent = class CustomEvent {
 {
   const storage = memStorage();
   const store = makeStore(storage);
-  const lesson = { id: 'a1-s1-l1', chunks: [{ id: 'c1' }] };
+  // Fixture chunk must match the real content — revision-aware identity
+  // fingerprints the target text, so a synthetic target would mint phantom
+  // components that don't exist in the real ledger.
+  const lesson = { id: 'a1-s1-l1', chunks: [{ id: 'c1', target: 'Hello, I’m …', meaning: 'Xin chào, tôi là …' }] };
 
   // Device B already pushed: one event + enroll + rate in the cloud.
   const client = fakeClient('u2');
@@ -156,13 +159,20 @@ globalThis.CustomEvent = class CustomEvent {
 
   const merged = store.getState();
   assert.equal(merged.lessonEvents.length, 2, 'remote event merged in');
-  // Sequential reference: replay the union of both devices' log entries.
-  const reference = rebuildFsrsFromLog([
-    ...remoteLog,
-    { id: 'a-enroll', kind: 'enroll', chunkKey: 'a1-s1-l1:c1', at: 500 },
-    { id: 'a-rate', kind: 'rate', chunkKey: 'a1-s1-l1:c1', grade: 4, at: 4000 }
-  ]);
-  assert.deepEqual(merged.fsrs, reference);
+  // Canonical invariant: hydrated fsrs ≡ replay of the merged durable log,
+  // on every device — the union must contain the REAL local entries (which
+  // carry revision-aware `tasks`), not a reconstructed legacy shape.
+  const reference = rebuildFsrsFromLog(merged.reviewLog);
+  assert.deepEqual(merged.fsrs, reference, 'fsrs state ≡ canonical replay of merged log');
+  // Both devices' legacy entries landed on meaning_recall only — the staged
+  // enroll keeps its four task cards, ratings hit the one card.
+  const meaningKey = Object.keys(merged.fsrs).find((k) => k.endsWith(':meaning_recall'));
+  assert.match(meaningKey, /^a1-s1-l1:c1@9859465e:meaning_recall$/, 'real-revision task key');
+  assert.equal(merged.fsrs[meaningKey].reps, 2, 'both devices’ ratings replayed');
+  assert.equal(
+    Object.keys(merged.fsrs).filter((k) => k.startsWith('a1-s1-l1:c1@')).length, 4,
+    'staged enroll kept its four task identities'
+  );
   // And the local-only event went up post-hydrate.
   assert(await until(() => client.tables.lesson_events.size === 2), 'local event pushed');
   sync.disconnect();

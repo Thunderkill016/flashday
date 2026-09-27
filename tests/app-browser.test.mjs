@@ -310,7 +310,9 @@ try {
     }, DB_KEY);
     assert.equal(enrolled, 16, 'drill submit enrolls prepare tasks for all 8 chunks');
     await goto(page, `${origin}app/?preview#/today`);
-    assert.match(await page.locator('#view').textContent(), /16 thẻ đến hạn/, 'new task cards are due immediately');
+    const todayText = await page.locator('#view').textContent();
+    assert.match(todayText, /Chưa có thẻ đến hạn/, 'brand-new tasks are introductions, not due review');
+    assert.match(todayText, /16 thẻ mới chờ làm quen/, 'new-task pool counted separately');
     // path pill for s1-l1 shows step progress after the drill submit
     await goto(page, `${origin}app/?preview#/path`);
     const pill = page.locator('.path-lessons li', { hasText: 'Chào hỏi và giới thiệu' }).locator('.path-status');
@@ -338,12 +340,26 @@ try {
     await pane.locator('.quiz-submit').click();
 
     await goto(page, `${origin}app/?preview#/review`);
-    assert.equal(await page.locator('.review-counter').textContent(), '1/16');
+    // Bounded introduction: 16 new tasks exist but the session is capped —
+    // one new task per component, at most NEW_TASK_BUDGET per mount.
+    assert.equal(await page.locator('.review-counter').textContent(), '1/8');
+    assert.equal(await page.locator('[data-role="fresh-badge"]').count(), 1, 'new card flagged as introduction');
     assert.equal(await page.locator('.review-target').isVisible(), false, 'answer hidden before reveal');
-    // Task-graded cards: first due task is form_recognition (EN front, ask
-    // the meaning) — the badge names the ability being retrieved.
-    assert.equal(await page.locator('.task-badge').textContent(), 'Nhìn hiểu');
+    // Task-graded cards: sibling bury serves the recognition ability first —
+    // the badge names the ability being retrieved.
+    assert.equal(await page.locator('[data-task-kind]').textContent(), 'Nhìn hiểu');
     assert.equal(await page.locator('.review-front-en').isVisible(), true, 'recognition front shows the EN form');
+    // REGRESSION (review): keyboard grades must be inert before reveal —
+    // a grade produced before seeing the answer panel is uninterpretable
+    // evidence and must never reach the log.
+    await page.keyboard.press('2');
+    await sleep(100);
+    const ratesAfterPreKey = await page.evaluate((key) => {
+      const db = JSON.parse(localStorage.getItem(key) || '{}');
+      return (db.reviewLog || []).filter((e) => e.kind === 'rate').length;
+    }, DB_KEY);
+    assert.equal(ratesAfterPreKey, 0, 'keyboard grade before reveal writes nothing');
+    assert.equal(await page.locator('.review-counter').textContent(), '1/8', 'still on card 1');
     // typed production recall → diff score + suggested grade on reveal
     await page.locator('.review-card .write-area').fill('Hello, I’m …');
     await page.locator('[data-role="reveal"]').click();
@@ -351,22 +367,33 @@ try {
     assert.match(await page.locator('.review-suggestion').textContent(), /gợi ý chấm/);
     assert.equal(await page.locator('.grade-btn.suggested').count(), 1, 'one grade lights up');
     await page.locator('[data-grade="3"]').click(); // Nhớ
-    assert.equal(await page.locator('.review-counter').textContent(), '2/16');
-    // Next card is the same chunk's meaning_recall task — an independent
-    // schedule, addressed by its own taskKey in the log.
-    assert.equal(await page.locator('.task-badge').textContent(), 'Nhớ từ');
-    const taskKeys = await page.evaluate((key) => {
+    assert.equal(await page.locator('.review-counter').textContent(), '2/8');
+    // Sibling bury: the next card is c2's recognition task, not c1's
+    // meaning_recall sibling — one ability per component per session.
+    assert.equal(await page.locator('[data-task-kind]').textContent(), 'Nhìn hiểu');
+    const rateEntries = await page.evaluate((key) => {
       const db = JSON.parse(localStorage.getItem(key) || '{}');
-      return (db.reviewLog || []).filter((e) => e.kind === 'rate').map((e) => e.taskKey);
+      return (db.reviewLog || []).filter((e) => e.kind === 'rate');
     }, DB_KEY);
-    assert.equal(taskKeys[0], `${L1}:c1:form_recognition`, 'rate lands on the task key');
+    assert.match(rateEntries[0].taskKey, /^a1-s1-l1:c1@[0-9a-f]{8}:form_recognition$/,
+      'rate lands on the revision-carrying task key');
+    // Provenance: observable pre-reveal attempt → unaided; the attempt text
+    // is frozen at reveal and both facts are durable.
+    assert.equal(rateEntries[0].attempted, true, 'frozen attempt exists');
+    assert.equal(rateEntries[0].aided, false, 'typed-before-reveal = unaided evidence');
+    assert.equal(rateEntries[0].revealed, true);
+    assert.equal(rateEntries[0].attempt, 'Hello, I’m …', 'attempt frozen verbatim at reveal');
     const logLen = await page.evaluate((key) => {
       const db = JSON.parse(localStorage.getItem(key) || '{}');
       return (db.reviewLog || []).filter((e) => e.kind !== 'enroll').length;
     }, DB_KEY);
     assert.equal(logLen, 1, 'grade appends a reviewLog entry (enroll entries are separate)');
     await reload(page);
-    assert.equal(await page.locator('.review-counter').textContent(), '1/15', 'graded card no longer due');
+    // Remount: c1's remaining sibling (meaning_recall) is now c1's next
+    // introduction — the queue is a fresh bounded snapshot, not a leak.
+    assert.equal(await page.locator('.review-counter').textContent(), '1/8', 'graded card no longer in queue');
+    assert.equal(await page.locator('[data-task-kind]').textContent(), 'Nhớ cụm từ',
+      'c1’s next pending ability surfaces after reload');
     await context.close();
     check('review reveal → grade → persisted scheduling');
   }

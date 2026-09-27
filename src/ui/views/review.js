@@ -1,10 +1,16 @@
 // Ôn — FSRS review over retrieval tasks (A1-ARCH-001). Each card is one
-// ability of a chunk, not the chunk itself: the front changes with the
-// task kind (see / hear → understand vs recall the form vs produce it).
-// Grades feed rateTask and land in the append-only reviewLog. "Nhớ" is a
-// schedule state for THAT task, never a chunk-level mastery claim.
+// ability of one component revision, not the chunk itself: the front
+// changes with the task kind (see / hear → understand vs recall the form
+// vs produce it). Grades feed rateTask and land in the append-only
+// reviewLog. "Nhớ" is a schedule state for THAT task, never a chunk-level
+// mastery claim.
+//
+// Evidence provenance: grading is only possible AFTER reveal, and the
+// typed attempt is frozen at reveal time. A grade with an observable
+// pre-reveal attempt is unaided retrieval evidence; a grade with none is
+// self-report (the answer was just shown) → `aided: true` in the log.
 import { LESSONS } from '../../content/a1/index.js';
-import { dueTasks, nextDueAt, rateTask, taskForKey } from '../../core/scheduler.js';
+import { reviewQueue, nextDueAt, rateTask } from '../../core/scheduler.js';
 import { LEGACY_TASK_KIND, TASK_KIND_LABELS } from '../../core/domain.js';
 import { playButton, matchSpeech } from '../speech.js';
 
@@ -19,7 +25,17 @@ let state = null;
 let keyHandler = null;
 
 export function mount(root, ctx) {
-  state = { ctx, queue: dueTasks(ctx.store.getState(), Date.now()), index: 0, total: 0, grades: [] };
+  const queue = reviewQueue(ctx.store.getState(), LESSONS, Date.now());
+  state = {
+    ctx,
+    queue: [...queue.due, ...queue.fresh.map((entry) => ({ ...entry, fresh: true }))],
+    index: 0,
+    total: 0,
+    grades: [],
+    orphaned: queue.orphaned,
+    freshPending: queue.freshPending,
+    current: null
+  };
   state.total = state.queue.length;
 
   const section = document.createElement('section');
@@ -35,9 +51,17 @@ export function mount(root, ctx) {
 
   keyHandler = (event) => {
     if (event.target.closest('textarea, input')) return;
-    if (event.key === 'Enter') host.querySelector('[data-role="reveal"]:not([hidden])')?.click();
+    if (event.key === 'Enter') {
+      host.querySelector('[data-role="reveal"]:not([hidden])')?.click();
+      return;
+    }
     const grade = GRADES.find((g) => g.key === event.key);
-    if (grade) host.querySelector(`[data-grade="${grade.grade}"]:not([disabled])`)?.click();
+    // Grading before reveal is impossible by design: a score produced
+    // before seeing the answer panel (or without one) is evidence that
+    // cannot be interpreted — the durable log must never carry it.
+    if (grade && state.current?.revealed) {
+      host.querySelector(`[data-grade="${grade.grade}"]:not([disabled])`)?.click();
+    }
   };
   window.addEventListener('keydown', keyHandler);
 
@@ -58,7 +82,9 @@ export function unmount() {
 // never shows the text, a recognition card never pretends to be production.
 function renderFront(card, chunk, taskKind) {
   if (taskKind === 'listening_recognition') {
-    card.appendChild(el('p', 'Nghe — hiểu được gì?', 'review-meaning'));
+    // Comprehension semantics: heard → recall the meaning. The expected
+    // answer is Vietnamese, scored against chunk.meaning — not a transcript.
+    card.appendChild(el('p', 'Nghe — câu này nghĩa là gì?', 'review-meaning'));
     const row = document.createElement('p');
     row.className = 'review-target';
     row.appendChild(playButton(chunk.target));
@@ -83,19 +109,23 @@ function renderFront(card, chunk, taskKind) {
 }
 
 function placeholderFor(taskKind) {
-  if (taskKind === 'form_recognition' || taskKind === 'listening_recognition') {
-    return 'Gõ nghĩa/lời nghe được (không bắt buộc)';
+  if (taskKind === 'listening_recognition') {
+    return 'Gõ nghĩa tiếng Việt của câu vừa nghe (không bắt buộc)';
   }
-  return 'Gõ hoặc nói rồi gõ lại';
+  if (taskKind === 'form_recognition') {
+    return 'Gõ nghĩa (không bắt buộc)';
+  }
+  return 'Gõ lại bằng tiếng Anh (không bắt buộc)';
 }
 
-// What the reveal shows depends on what was asked: recall/production reveal
-// the English target; recognition reveals the meaning it asked about.
+// What the reveal shows depends on what was asked: comprehension tasks
+// reveal the meaning (that IS the answer); recall/production reveal the
+// English target. The scoring `expected` must match the asked ability.
 function renderBack(chunk, taskKind) {
   const back = document.createElement('div');
   back.className = 'review-back';
   back.hidden = true;
-  if (taskKind === 'form_recognition') {
+  if (taskKind === 'form_recognition' || taskKind === 'listening_recognition') {
     back.appendChild(el('p', chunk.meaning, 'review-target'));
     if (chunk.exampleVi) back.appendChild(el('p', chunk.exampleVi, 'view-placeholder'));
     const en = el('p', '', 'view-placeholder');
@@ -107,11 +137,16 @@ function renderBack(chunk, taskKind) {
   targetRow.className = 'review-target';
   targetRow.append(chunk.target, ' ', playButton(chunk.target));
   back.appendChild(targetRow);
-  if (taskKind === 'listening_recognition' && chunk.meaning) {
-    back.appendChild(el('p', chunk.meaning, 'view-placeholder'));
-  }
   if (chunk.example) back.appendChild(el('p', chunk.example, 'view-placeholder'));
   return back;
+}
+
+// The string a typed attempt is compared against: the same ability the
+// front asked for — comprehension → meaning, form tasks → the target.
+function expectedAnswer(chunk, taskKind) {
+  return taskKind === 'form_recognition' || taskKind === 'listening_recognition'
+    ? chunk.meaning
+    : chunk.target;
 }
 
 function renderCard(host) {
@@ -129,6 +164,9 @@ function renderCard(host) {
     const recap = el('p', `Xong buổi ôn — ${state.total} thẻ${parts.length ? `: ${parts.join(' · ')}` : ''}.`);
     recap.dataset.role = 'review-recap';
     host.appendChild(recap);
+    if (state.freshPending > state.queue.filter((e) => e.fresh).length) {
+      host.appendChild(el('p', `Còn ${state.freshPending} thẻ mới đang chờ — quay lại Ôn khi rảnh để làm quen dần.`, 'view-placeholder'));
+    }
     const done = document.createElement('a');
     done.className = 'btn-primary';
     done.href = '#/today';
@@ -138,14 +176,18 @@ function renderCard(host) {
   }
 
   const entry = state.queue[state.index];
-  const resolved = taskForKey(entry.key, LESSONS);
+  const resolved = entry.resolved || null;
+  state.current = { revealed: false, attempt: '' };
 
   const counter = el('p', `${state.index + 1}/${state.total}`, 'review-counter');
   const card = document.createElement('div');
   card.className = 'card review-card';
 
-  if (!resolved) {
-    card.appendChild(el('p', 'Thẻ này thuộc bài đã đổi — bỏ qua.'));
+  if (!resolved || resolved.superseded) {
+    // The phrase this memory belongs to was edited since — the schedule
+    // state is kept (never deleted), but it can't be presented as if it
+    // were today's text.
+    card.appendChild(el('p', 'Thẻ này thuộc nội dung đã thay đổi — bỏ qua.'));
     const skip = document.createElement('button');
     skip.type = 'button';
     skip.className = 'btn-secondary';
@@ -160,6 +202,11 @@ function renderCard(host) {
   const badge = el('span', TASK_KIND_LABELS[taskKind] || taskKind, 'task-badge');
   badge.dataset.taskKind = taskKind;
   card.appendChild(badge);
+  if (entry.fresh) {
+    const freshBadge = el('span', 'Mới', 'task-badge fresh-badge');
+    freshBadge.dataset.role = 'fresh-badge';
+    card.appendChild(freshBadge);
+  }
   renderFront(card, chunk, taskKind);
 
   const answer = document.createElement('textarea');
@@ -184,16 +231,28 @@ function renderCard(host) {
     btn.dataset.grade = String(grade);
     btn.textContent = `${label} (${key})`;
     btn.addEventListener('click', () => {
+      // No grade before reveal — click path and keyboard path both gate on
+      // the same flag so the log can never carry pre-reveal grades.
+      if (!state.current?.revealed) return;
+      const attempted = state.current.attempt.trim().length > 0;
+      // ONE timestamp for both the card write and the log entry — local
+      // state and log replay must agree byte-for-byte.
+      const at = Date.now();
       ctx.store.transact((db) => {
-        rateTask(db, entry.key, grade, Date.now());
+        rateTask(db, entry.key, grade, at);
         if (!Array.isArray(db.reviewLog)) db.reviewLog = [];
         const logEntry = {
           id: crypto.randomUUID?.() || `rv_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`,
           kind: 'rate',
           taskKey: entry.key,
           grade,
-          response: answer.value,
-          at: Date.now()
+          attempt: state.current.attempt,
+          attempted,
+          revealed: true,
+          // Grading with no observable pre-reveal attempt is self-report —
+          // the answer was on screen. Never record that as unaided.
+          aided: !attempted,
+          at
         };
         // `chunkKey` stays only on meaning_recall — the honest nearest match
         // to the legacy card — so a not-yet-updated client replays exactly
@@ -210,17 +269,15 @@ function renderCard(host) {
   back.appendChild(gradeRow);
 
   revealBtn.addEventListener('click', () => {
+    if (state.current.revealed) return;
+    state.current.revealed = true;
+    // Freeze the pre-reveal response — anything typed after seeing the
+    // answer is not retrieval evidence.
+    state.current.attempt = answer.value;
     back.hidden = false;
     revealBtn.hidden = true;
-    // Production recall assist: a typed attempt gets scored against the
-    // target and one grade lights up — the learner still self-marks, but
-    // with evidence instead of vibes (testing-effect research).
-    if (answer.value.trim()) {
-      // What "correct" means depends on the ability under test: a
-      // recognition card asked for the meaning; everything else asked for
-      // the English form.
-      const expected = taskKind === 'form_recognition' ? chunk.meaning : chunk.target;
-      const matches = matchSpeech(expected, answer.value);
+    if (state.current.attempt.trim()) {
+      const matches = matchSpeech(expectedAnswer(chunk, taskKind), state.current.attempt);
       const suggested = matches.score >= 0.9 ? 3 : matches.score >= 0.5 ? 2 : 1;
       const suggestion = el(
         'p',

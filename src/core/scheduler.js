@@ -1,20 +1,26 @@
 /*
  * FSRS scheduler over retrieval tasks (A1-ARCH-001, docs/adr/learning-core-v3.md).
  *
- * Card identity is a RetrievalTask: `${lessonId}:${chunkId}:${taskKind}` —
- * a chunk carries independent memory states per ability (recognition ≠
- * recall ≠ listening ≠ production). Enrollment is staged by the modality
- * actually exercised (domain.js STEP_TASKS); the append-only reviewLog is
- * the durable truth and db.fsrs is a rebuildable cache of it.
+ * Card identity is a RetrievalTask: `${lessonId}:${chunkId}@${rev}:${taskKind}`
+ * — a chunk carries independent memory states per ability AND per content
+ * revision (recognition ≠ recall ≠ listening ≠ production, and an edited
+ * phrase is a different component, not the same memory).
  *
- * Legacy compatibility: 2-segment `lesson:chunk` keys in the log or cache
- * normalize to the `meaning_recall` task — the old card asked VI→EN recall.
- * History is never rewritten; normalization happens at read/replay time.
+ * Canonical rule: the append-only reviewLog is the durable truth and the
+ * ONLY path to task state — enroll entries create task cards, rate entries
+ * advance exactly one. db.fsrs is a rebuildable cache; local hydrate and
+ * cloud hydrate both rebuild from the same merged log, so they converge.
+ *
+ * Legacy compatibility: 2-segment `lesson:chunk` keys normalize to the
+ * `meaning_recall` task (the old card asked VI→EN recall) at the entry's
+ * own timestamp — a rate that predates a content rewrite lands on the OLD
+ * phrase's revision, never on the new text.
  */
 import { createEmptyCard, fsrs } from 'ts-fsrs';
 import {
   FSRS_PARAMETERS,
   Rating,
+  State,
   deserializeCard,
   ratingFromBespokeScore,
   serializeCard
@@ -23,9 +29,11 @@ import {
   TASK_KINDS,
   STEP_TASKS,
   componentKey,
+  contentRev,
   normalizeTaskKey,
   parseTaskKey,
-  taskKey
+  taskKey,
+  LEGACY_TASK_KIND
 } from './domain.js';
 
 const scheduler = fsrs(FSRS_PARAMETERS);
@@ -52,30 +60,50 @@ function logId() {
   return `rv_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
-// The task kinds one enroll entry covers. Entries written before staged
-// enrollment had no `tasks` field — the component was the whole card, so it
-// honestly expands to all kinds (each kind then schedules independently).
-function entryKinds(entry) {
-  const listed = Array.isArray(entry?.tasks)
-    ? entry.tasks.filter((k) => TASK_KINDS.includes(k))
-    : [];
-  return listed.length ? listed : TASK_KINDS;
+// Task keys one enroll entry covers. New entries store full revision-aware
+// task ids. Entries written before staged enrollment stored bare task kinds
+// against a 2-segment chunkKey — each resolves through the ledger at the
+// entry's timestamp. Entries with NO `tasks` at all are the oldest legacy
+// form: one chunk card → exactly one `meaning_recall` task (canonical —
+// same projection as the cache migrator in evidence.js).
+function entryTaskKeys(entry) {
+  const listed = Array.isArray(entry?.tasks) ? entry.tasks : [];
+  const keys = listed.map((task) => {
+    const raw = String(task).includes(':')
+      ? String(task)
+      : `${entry.chunkKey}:${task}`;
+    return normalizeTaskKey(raw, entry.at);
+  }).filter(Boolean);
+  if (keys.length) return keys;
+  const legacy = normalizeTaskKey(entry?.chunkKey, entry?.at);
+  return legacy ? [legacy] : [];
+}
+
+function isNewCard(card) {
+  return Number(card?.state ?? State.New) === State.New && Number(card?.reps || 0) === 0;
 }
 
 // Idempotent per (component, task kind): only kinds not already scheduled
-// enroll. Returns the newly created task keys.
+// enroll. `tasks` in the log entry stores the full revision-aware task ids
+// so replay never has to guess which phrase was enrolled. Returns the newly
+// created task keys.
 export function enrollTasks(db, lesson, kinds, now = Date.now()) {
   const cards = cardMap(db);
   if (!Array.isArray(db.reviewLog)) db.reviewLog = [];
   const wanted = (Array.isArray(kinds) ? kinds : TASK_KINDS).filter((k) => TASK_KINDS.includes(k));
   const enrolled = [];
   for (const chunk of Array.isArray(lesson?.chunks) ? lesson.chunks : []) {
-    const missing = wanted.filter(
-      (kind) => !cards[taskKey(lesson.id, chunk.id, kind)]
-    );
-    if (!missing.length) continue;
-    for (const kind of missing) {
-      const key = taskKey(lesson.id, chunk.id, kind);
+    if (typeof chunk?.target !== 'string' || !chunk.target.trim()) {
+      // A target-less chunk would fingerprint to the empty-string rev and
+      // mint phantom cards no real component owns — fail loudly instead.
+      throw new Error(`enrollTasks ${lesson?.id}: chunk ${chunk?.id} has no target text`);
+    }
+    const rev = contentRev(chunk.target);
+    const missingKeys = wanted
+      .map((kind) => taskKey(lesson.id, chunk.id, kind, rev))
+      .filter((key) => !cards[key]);
+    if (!missingKeys.length) continue;
+    for (const key of missingKeys) {
       cards[key] = serializeCard(createEmptyCard(new Date(Number(now))));
       enrolled.push(key);
     }
@@ -83,7 +111,7 @@ export function enrollTasks(db, lesson, kinds, now = Date.now()) {
       id: logId(),
       kind: 'enroll',
       chunkKey: componentKey(lesson.id, chunk.id),
-      tasks: missing,
+      tasks: missingKeys,
       at: Number(now)
     });
   }
@@ -103,7 +131,7 @@ export function enrollChunks(db, lesson, now = Date.now()) {
 export function rebuildFsrsFromLog(reviewLog, enrolledKeys = []) {
   const cards = {};
   const enroll = (key, at) => {
-    const normalized = normalizeTaskKey(key);
+    const normalized = normalizeTaskKey(key, at);
     if (normalized && !cards[normalized]) {
       cards[normalized] = serializeCard(createEmptyCard(new Date(Number(at) || Date.now())));
     }
@@ -115,12 +143,12 @@ export function rebuildFsrsFromLog(reviewLog, enrolledKeys = []) {
   for (const entry of ordered) {
     const kind = entry.kind === 'enroll' ? 'enroll' : 'rate';
     if (kind === 'enroll') {
-      for (const taskKind of entryKinds(entry)) enroll(`${entry.chunkKey}:${taskKind}`, entry.at);
+      for (const key of entryTaskKeys(entry)) enroll(key, entry.at);
       continue;
     }
     const rating = ratingFromBespokeScore(entry.grade);
     if (rating == null) continue;
-    const key = normalizeTaskKey(entry.taskKey ?? entry.chunkKey);
+    const key = normalizeTaskKey(entry.taskKey ?? entry.chunkKey, entry.at);
     if (!key) continue;
     const at = new Date(Number(entry.at) || Date.now());
     const card = deserializeCard(cards[key]) || createEmptyCard(at);
@@ -129,13 +157,20 @@ export function rebuildFsrsFromLog(reviewLog, enrolledKeys = []) {
   return cards;
 }
 
-// Due retrieval tasks, sorted oldest-due first then task id — a stable,
-// deterministic order the planner and the review queue can share.
-export function dueTasks(db, now = Date.now()) {
+// Retrieval tasks that are SCHEDULED and due — i.e. memory already exercised
+// at least once (Learning/Review/Relearning). Brand-new task introductions
+// (State.New) are NOT here; they surface through reviewQueue's bounded
+// fresh bucket so a fresh lesson can't flood the review wall.
+export function dueTasks(db, now = Date.now(), lessons = null) {
   const nowMs = Number(now);
   return Object.entries(cardMap(db))
     .map(([key, raw]) => ({ key: normalizeTaskKey(key) || key, parsed: parseTaskKey(key), card: deserializeCard(raw) }))
-    .filter((entry) => entry.parsed && entry.card && new Date(entry.card.due).getTime() <= nowMs)
+    .filter((entry) => entry.parsed && entry.card && !isNewCard(entry.card) && new Date(entry.card.due).getTime() <= nowMs)
+    .filter((entry) => {
+      if (!lessons) return true;
+      const resolved = taskForKey(entry.key, lessons);
+      return resolved && !resolved.superseded;
+    })
     .sort((a, b) => new Date(a.card.due) - new Date(b.card.due) || String(a.key).localeCompare(String(b.key)));
 }
 
@@ -143,24 +178,108 @@ export function dueChunks(db, now = Date.now()) {
   return dueTasks(db, now);
 }
 
-// Earliest future due time across enrolled tasks (null when none scheduled).
+// How many brand-new task introductions can sit in one review session, and
+// one-per-component sibling bury: after `prepare`, each chunk has two New
+// tasks — the queue serves the first, the sibling waits for a later visit.
+export const NEW_TASK_BUDGET = 8;
+
+// Introduction scaffold order: comprehension before recall before
+// production — a learner should meet "can you read it" before "can you
+// write it".
+const TASK_INTRO_ORDER = Object.freeze({
+  form_recognition: 0,
+  listening_recognition: 1,
+  meaning_recall: 2,
+  cued_production: 3
+});
+
+// The review queue a learner actually faces: scheduled-due work first
+// (spaced memory outranks), then a bounded slice of new-task introductions.
+// Superseded components (phrase edited since the memory formed) stay in
+// state but are never presented — counted in `orphaned` for observability.
+export function reviewQueue(db, lessons, now = Date.now()) {
+  const nowMs = Number(now);
+  const due = [];
+  const fresh = [];
+  const seenComponents = new Set();
+  let freshPending = 0;
+  let orphaned = 0;
+  const entries = Object.entries(cardMap(db))
+    .map(([key, raw]) => ({ key, card: deserializeCard(raw) }))
+    .filter((entry) => entry.card)
+    .sort((a, b) => new Date(a.card.due) - new Date(b.card.due) || String(a.key).localeCompare(String(b.key)));
+  // Fresh introductions serve the easiest ability of each component first
+  // (recognition → recall → production), not alphabetical accident.
+  const pendingFresh = entries
+    .filter(({ card }) => isNewCard(card))
+    .map((entry) => ({ ...entry, resolved: taskForKey(entry.key, lessons) }))
+    .filter((entry) => {
+      if (entry.resolved && !entry.resolved.superseded) return true;
+      orphaned++;
+      return false;
+    })
+    .sort((a, b) =>
+      String(a.resolved.componentKey).localeCompare(String(b.resolved.componentKey)) ||
+      (TASK_INTRO_ORDER[a.resolved.taskKind] ?? 9) -
+        (TASK_INTRO_ORDER[b.resolved.taskKind] ?? 9)
+    );
+  const parsedCache = new Map();
+  for (const { key, card } of entries) {
+    const cardAt = new Date(card.due).getTime();
+    const parsed = parsedCache.get(key) ?? parseTaskKey(key);
+    parsedCache.set(key, parsed);
+    if (isNewCard(card)) continue;
+    const resolved = taskForKey(key, lessons);
+    if (!resolved || resolved.superseded) {
+      orphaned++;
+      continue;
+    }
+    if (cardAt <= nowMs) due.push({ key, parsed, card, resolved });
+  }
+  for (const entry of pendingFresh) {
+    freshPending++;
+    if (seenComponents.has(entry.resolved.componentKey)) continue;
+    if (fresh.length >= NEW_TASK_BUDGET) continue;
+    seenComponents.add(entry.resolved.componentKey);
+    fresh.push({ key: entry.key, parsed: parseTaskKey(entry.key), card: entry.card, resolved: entry.resolved });
+  }
+  return { due, fresh, freshPending, orphaned };
+}
+
+// Earliest future due time across SCHEDULED tasks (null when none). New
+// tasks are introductions, not scheduled work, so they don't set it.
 export function nextDueAt(db, now = Date.now()) {
   const nowMs = Number(now);
   const upcoming = Object.values(cardMap(db))
     .map(deserializeCard)
     .filter(Boolean)
+    .filter((card) => !isNewCard(card))
     .map((card) => new Date(card.due).getTime())
     .filter((due) => due > nowMs);
   return upcoming.length ? Math.min(...upcoming) : null;
 }
 
-// taskKey → { lesson, chunk, taskKind } — or null when the content moved.
+// taskKey → { lesson, chunk, taskKind, componentKey, rev, superseded } —
+// or null when the component is gone entirely. A key whose rev predates the
+// current text resolves with `superseded: true`: the memory is real but the
+// phrase it belongs to is retired, so it must not render current content.
 export function taskForKey(key, lessons) {
   const parsed = parseTaskKey(key);
   if (!parsed) return null;
   const lesson = (Array.isArray(lessons) ? lessons : []).find((l) => String(l?.id) === parsed.lessonId);
   const chunk = lesson?.chunks?.find((c) => String(c.id) === parsed.chunkId) || null;
-  return chunk ? { lesson, chunk, taskKind: parsed.taskKind, taskId: key } : null;
+  if (!chunk) return null;
+  const liveRev = contentRev(chunk.target);
+  const superseded = parsed.rev != null && parsed.rev !== liveRev;
+  return {
+    lesson,
+    chunk,
+    taskKind: parsed.taskKind,
+    taskId: key,
+    componentKey: parsed.componentKey,
+    rev: parsed.rev || liveRev,
+    superseded
+  };
 }
 
 export function chunkForKey(key, lessons) {
@@ -170,7 +289,7 @@ export function chunkForKey(key, lessons) {
 
 export function rateTask(db, key, grade, now = Date.now()) {
   const cards = cardMap(db);
-  const normalized = normalizeTaskKey(key);
+  const normalized = normalizeTaskKey(key, now);
   if (!normalized) return null;
   const rating = Rating[grade] != null && typeof grade === 'string'
     ? Rating[grade]
@@ -186,3 +305,7 @@ export function rateTask(db, key, grade, now = Date.now()) {
 export function rateChunk(db, key, grade, now = Date.now()) {
   return rateTask(db, key, grade, now);
 }
+
+// Re-exported so cache migrators resolve rev-less keys through the same
+// single code path (canonical rule — one normalization, everywhere).
+export { normalizeTaskKey, LEGACY_TASK_KIND };

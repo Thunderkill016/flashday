@@ -1,24 +1,36 @@
 /*
  * A1-ARCH-001 regression suite: the evidence-driven learner model.
- * Covers the issue's required categories — separate memory states, legacy
- * migration, deterministic replay, aided-vs-unaided honesty, modality
- * honesty, planner determinism, and the content adapter over all 30 lessons.
+ * Covers the issue's required categories — separate memory states, canonical
+ * legacy migration, revision-safe identity, deterministic replay,
+ * aided-vs-unaided honesty, modality honesty, planner determinism, bounded
+ * review queues, and the content adapter over all 30 lessons.
  */
 import assert from 'node:assert/strict';
 import {
   adaptCourse,
   adaptLesson,
   canDoIdFor,
+  componentId,
+  contentRev,
   normalizeTaskKey,
   parseTaskKey,
+  revAt,
   skillTargetFor,
+  taskKey,
   STEP_TASKS,
   TASK_KINDS
 } from '../src/core/domain.js';
 import { projectLessonEvent, projectReviewEntry, projectAll } from '../src/core/evidence-projection.js';
 import { deriveLearnerState } from '../src/core/learner-state.js';
 import { planNext } from '../src/core/planner.js';
-import { enrollTasks, rebuildFsrsFromLog, dueTasks, rateTask } from '../src/core/scheduler.js';
+import {
+  enrollTasks,
+  rebuildFsrsFromLog,
+  dueTasks,
+  rateTask,
+  reviewQueue,
+  NEW_TASK_BUDGET
+} from '../src/core/scheduler.js';
 import { createInitialDb, hydrateDb, appendLessonEvent, DB_VERSION } from '../src/core/evidence.js';
 import { createSession } from '../src/core/session.js';
 import { LESSONS } from '../src/content/a1/index.js';
@@ -50,17 +62,26 @@ const lessons = [
   { id: 'a1-s1-l2', stage: 1, order: 2, kind: 'lesson', contentVersion: 1, canDo: 'x'.repeat(12), chunks: lesson.chunks }
 ];
 
+const tk = (chunkId, kind, l = lesson) => {
+  const chunk = l.chunks.find((c) => c.id === chunkId);
+  return taskKey(l.id, chunkId, kind, contentRev(chunk.target));
+};
+
 // ── 1. Content adapter: all 30 lessons adapt; malformed input fails loudly ──
 {
   const adapted = adaptCourse(LESSONS);
   assert.equal(adapted.goals.length, 30);
-  const componentCount = adapted.components.size;
-  assert(componentCount >= 30 * 6, 'every chunk becomes a component');
-  assert.equal(adapted.tasks.size, componentCount * TASK_KINDS.length, 'one task per component per kind');
+  const live = [...adapted.components.values()].filter((c) => !c.superseded);
+  const retired = [...adapted.components.values()].filter((c) => c.superseded);
+  assert(live.length >= 30 * 6, 'every chunk becomes a component');
+  assert.equal(adapted.tasks.size, live.length * TASK_KINDS.length, 'one task per live component per kind');
+  assert(retired.length > 0, 'ledger keeps superseded revisions resolvable (s1-l1 c7/c8 changed)');
+  assert(retired.every((c) => c.chunk === null), 'superseded components carry no renderable text');
   for (const task of adapted.tasks.values()) {
     assert(TASK_KINDS.includes(task.taskKind));
     assert(skillTargetFor(task.taskKind), `task ${task.id} resolves a skill target`);
     assert(task.canDoId.startsWith('a1.cando.'));
+    assert(task.id.includes('@'), 'task id carries the component revision');
   }
   assert.equal(canDoIdFor('a1-s1-l1'), 'a1.cando.a1-s1-l1');
   const one = adaptLesson(lesson);
@@ -74,17 +95,43 @@ const lessons = [
   assert.throws(() => adaptLesson({ ...lesson, chunks: [{ id: 'c9', target: 't', meaning: 'm' }] }), /c1–c8/);
 }
 
-// ── 2. Task identity + key normalization ──
+// ── 2. Task identity: revision-aware + key normalization by timestamp ──
 {
-  assert.equal(normalizeTaskKey('a1-s1-l1:c1'), 'a1-s1-l1:c1:meaning_recall', 'legacy key → legacy task');
-  assert.equal(normalizeTaskKey('a1-s1-l1:c1:listening_recognition'), 'a1-s1-l1:c1:listening_recognition');
+  // The a1-s1-l1:c7 rewrite (pre-rev-era) is the canonical counterexample:
+  // "How are you?" and "My name is …" shared chunk id c7. Time-stamped
+  // normalization lands each record on the phrase that was actually live.
+  const oldRev = revAt('a1-s1-l1', 'c7', 1790510000000);   // before the rewrite commit
+  const newRev = revAt('a1-s1-l1', 'c7', 1790530000000);   // after it
+  assert.notEqual(oldRev, newRev, 'text change produced a new revision');
+  const oldKey = normalizeTaskKey('a1-s1-l1:c7', 1790510000000);
+  const newKey = normalizeTaskKey('a1-s1-l1:c7', 1790530000000);
+  assert.equal(oldKey, `a1-s1-l1:c7@${oldRev}:meaning_recall`);
+  assert.equal(newKey, `a1-s1-l1:c7@${newRev}:meaning_recall`);
+  assert.notEqual(oldKey, newKey, 'old memory can never ride the new phrase');
+
+  // Unchanged chunks resolve to the same rev at any timestamp.
+  assert.equal(
+    revAt('a1-s1-l1', 'c1', 1790500000000),
+    revAt('a1-s1-l1', 'c1', 1790530000000),
+    'untouched text keeps one revision across the whole era'
+  );
+
+  // Rev-less 3-segment keys (unreleased intermediate format) resolve too.
+  const c1 = lesson.chunks[0];
+  const revless = normalizeTaskKey('a1-s1-l1:c1:listening_recognition', Date.now());
+  assert.equal(revless, `a1-s1-l1:c1@${revAt('a1-s1-l1', 'c1', Date.now())}:listening_recognition`);
   assert.equal(normalizeTaskKey('junk'), null);
   assert.equal(normalizeTaskKey(''), null);
-  const parsed = parseTaskKey('a1-s1-l1:c2:cued_production');
+  // Synthetic/unmanifested lessons keep a rev-less key — the parser copes.
+  assert.equal(normalizeTaskKey('fake-l:c1', 1), 'fake-l:c1:meaning_recall');
+
+  const parsed = parseTaskKey(taskKey('a1-s1-l2', 'c2', 'cued_production', contentRev('x')));
   assert.deepEqual(
     { lessonId: parsed.lessonId, chunkId: parsed.chunkId, taskKind: parsed.taskKind },
-    { lessonId: 'a1-s1-l1', chunkId: 'c2', taskKind: 'cued_production' }
+    { lessonId: 'a1-s1-l2', chunkId: 'c2', taskKind: 'cued_production' }
   );
+  assert.equal(parsed.rev, contentRev('x'));
+  assert.equal(parsed.componentId, componentId('a1-s1-l2', 'c2', contentRev('x')));
 }
 
 // ── 3. Separate memory states: rating one task leaves siblings untouched ──
@@ -92,9 +139,9 @@ const lessons = [
   const db = createInitialDb();
   enrollTasks(db, lesson, TASK_KINDS, 1000);
   const before = JSON.parse(JSON.stringify(db.fsrs));
-  rateTask(db, 'a1-s1-l1:c1:meaning_recall', 4, 2000); // Easy
+  rateTask(db, tk('c1', 'meaning_recall'), 4, 2000); // Easy
   for (const kind of TASK_KINDS) {
-    const key = `a1-s1-l1:c1:${kind}`;
+    const key = tk('c1', kind);
     if (kind === 'meaning_recall') {
       assert.notDeepEqual(db.fsrs[key], before[key], 'rated task advanced');
     } else {
@@ -102,62 +149,88 @@ const lessons = [
     }
   }
   // Rebuild must reproduce the same separation.
-  db.reviewLog.push({ id: 'r1', kind: 'rate', taskKey: 'a1-s1-l1:c1:meaning_recall', grade: 4, at: 2000 });
+  db.reviewLog.push({ id: 'r1', kind: 'rate', taskKey: tk('c1', 'meaning_recall'), grade: 4, at: 2000 });
   assert.deepEqual(rebuildFsrsFromLog(db.reviewLog), db.fsrs, 'replay preserves per-task state');
 }
 
-// ── 4. DB v2 → v3 migration: fsrs cache key normalization is lossless ──
+// ── 4. Canonical migration: local hydrate ≡ cloud replay, byte-equivalent ──
 {
-  const legacyCard = {
-    due: new Date(5000).toISOString(), stability: 1.2, difficulty: 5,
-    elapsed_days: 1, scheduled_days: 1, learning_steps: 0,
-    reps: 2, lapses: 0, state: 2, last_review: new Date(4000).toISOString()
-  };
+  // A v2-era dataset: two-segment cache keys + the matching durable log.
+  // (Consistent inputs — the v2 cache was built by replaying this same log.)
+  const legacyLog = [
+    { id: 'e1', kind: 'enroll', chunkKey: 'a1-s1-l1:c1', at: 1000 },
+    { id: 'r1', kind: 'rate', chunkKey: 'a1-s1-l1:c1', grade: 3, at: 2000 },
+    { id: 'r2', kind: 'rate', chunkKey: 'a1-s1-l1:c1', grade: 4, at: 90000 },
+    { id: 'e2', kind: 'enroll', chunkKey: 'a1-s1-l1:c2', at: 1100 },
+    { id: 'r3', kind: 'rate', chunkKey: 'a1-s1-l1:c2', grade: 2, at: 3000 }
+  ];
+  const canonical = rebuildFsrsFromLog(legacyLog);
+  // The v2 cache held the same cards under 2-segment keys.
+  const v2Cache = {};
+  for (const [key, card] of Object.entries(canonical)) {
+    const bare = key.split('@')[0]; // l:c
+    v2Cache[bare] = card;
+  }
   const raw = {
     version: 2,
     lessonEvents: [{ id: 'e1', lessonId: 'a1-s1-l1', step: 'prepare', kind: 'drill', payload: {}, support: {}, submittedAt: 1 }],
-    fsrs: { 'a1-s1-l1:c1': legacyCard, 'a1-s1-l1:c2:meaning_recall': legacyCard },
-    reviewLog: [{ id: 'l1', kind: 'enroll', chunkKey: 'a1-s1-l1:c1', at: 100 }],
-    profile: { name: 'x' }
+    fsrs: v2Cache,
+    reviewLog: legacyLog,
+    profile: {}
   };
-  const db = hydrateDb(raw);
-  assert.equal(db.version, DB_VERSION);
-  assert.equal(DB_VERSION, 3, 'schema bumped to v3');
-  assert.equal(db.fsrs['a1-s1-l1:c1:meaning_recall'].reps, 2, 'legacy card survives on meaning_recall');
-  assert.equal(db.fsrs['a1-s1-l1:c1'], undefined, '2-segment key removed from cache');
-  assert.equal(db.fsrs['a1-s1-l1:c2:meaning_recall'].reps, 2, 'already-tasked keys pass through');
-  assert.equal(db.reviewLog.length, 1, 'durable log untouched by cache migration');
-  assert.deepEqual(hydrateDb(db).fsrs, db.fsrs, 'hydrate is idempotent');
-  // And nothing about the learner's review history was guessed across skills:
-  assert.equal(db.fsrs['a1-s1-l1:c1:listening_recognition'], undefined,
-    'no invented cards — other tasks enroll only via real enrol events');
+  const local = hydrateDb(raw).fsrs;
+  const cloud = canonical; // cloud hydrate rebuilds from the merged log
+  assert.deepEqual(
+    Object.keys(local).sort(),
+    Object.keys(cloud).sort(),
+    'local hydrate and cloud replay produce identical task keys'
+  );
+  assert.deepEqual(local, cloud, 'identical cards — byte-equivalent task state');
+  assert(local['a1-s1-l1:c1:meaning_recall'] === undefined || Object.keys(local).every((k) => k.includes('@')),
+    'every task key carries its content revision');
+  assert.equal(
+    Object.keys(local).filter((k) => k.startsWith('a1-s1-l1:c1@')).length, 1,
+    'legacy enroll → meaning_recall only — no invented sibling cards'
+  );
+  assert(local[Object.keys(local).find((k) => k.startsWith('a1-s1-l1:c1@'))].reps === 2,
+    'legacy review history preserved');
+  // Idempotent: hydrating twice changes nothing.
+  assert.deepEqual(hydrateDb(hydrateDb(raw)).fsrs, local, 'hydrate is idempotent');
+  // Cache-only keys the log never mentions are preserved (never dropped).
+  const stray = { ...raw, fsrs: { ...v2Cache, 'a1-s1-l2:c1': v2Cache['a1-s1-l1:c1'] } };
+  const strayHydrated = hydrateDb(stray).fsrs;
+  assert.equal(
+    strayHydrated[normalizeTaskKey('a1-s1-l2:c1', 90000)].reps,
+    v2Cache['a1-s1-l1:c1'].reps,
+    'cache-only card survives — data is never discarded'
+  );
 }
 
 // ── 5. Deterministic replay: merge order must not change outcome ──
 {
   const deviceA = [
-    { id: 'a-en', kind: 'enroll', chunkKey: 'a1-s1-l1:c1', tasks: ['meaning_recall', 'listening_recognition'], at: 100 },
-    { id: 'a-r1', kind: 'rate', taskKey: 'a1-s1-l1:c1:meaning_recall', grade: 3, at: 500 },
-    { id: 'a-r2', kind: 'rate', taskKey: 'a1-s1-l1:c1:listening_recognition', grade: 2, at: 900 }
+    { id: 'a-en', kind: 'enroll', chunkKey: 'a1-s1-l1:c1', tasks: [tk('c1', 'meaning_recall'), tk('c1', 'listening_recognition')], at: 100 },
+    { id: 'a-r1', kind: 'rate', taskKey: tk('c1', 'meaning_recall'), grade: 3, at: 500 },
+    { id: 'a-r2', kind: 'rate', taskKey: tk('c1', 'listening_recognition'), grade: 2, at: 900 }
   ];
   const deviceB = [
-    { id: 'b-r1', kind: 'rate', taskKey: 'a1-s1-l1:c1:meaning_recall', grade: 4, at: 700 },
-    { id: 'b-r2', kind: 'rate', taskKey: 'a1-s1-l1:c2:meaning_recall', grade: 1, at: 300 }
+    { id: 'b-r1', kind: 'rate', taskKey: tk('c1', 'meaning_recall'), grade: 4, at: 700 },
+    { id: 'b-r2', kind: 'rate', taskKey: tk('c2', 'meaning_recall'), grade: 1, at: 300 }
   ];
   const ab = rebuildFsrsFromLog([...deviceA, ...deviceB]);
   const ba = rebuildFsrsFromLog([...deviceB, ...deviceA]);
   const shuffled = rebuildFsrsFromLog([deviceB[1], deviceA[2], deviceB[0], deviceA[1], deviceA[0]]);
   assert.deepEqual(ab, ba, 'merge order irrelevant');
   assert.deepEqual(ab, shuffled, 'canonical (at,id) ordering makes any shuffle identical');
-  assert(ab['a1-s1-l1:c1:meaning_recall'].reps === 2, 'both devices’ ratings replayed');
-  assert.equal(ab['a1-s1-l1:c1:listening_recognition'].reps, 1);
+  assert(ab[tk('c1', 'meaning_recall')].reps === 2, 'both devices’ ratings replayed');
+  assert.equal(ab[tk('c1', 'listening_recognition')].reps, 1);
 }
 
-// ── 6. Evidence honesty: aided flags and modality boundaries ──
+// ── 6. Evidence honesty: aided flags, modality boundaries, component ids ──
 {
   const ev = (over) => ({
     id: over.id || 'e1', lessonId: 'a1-s1-l1', contentVersion: 2, kind: 'listen',
-    step: 'listen', submittedAt: 1, payload: { correct: 3, total: 3 }, support: {}, ...over
+    step: 'listen', submittedAt: 1790530000000, payload: { correct: 3, total: 3 }, support: {}, ...over
   });
   const clean = projectLessonEvent(ev({}), lesson);
   assert.equal(clean.aided, false);
@@ -173,6 +246,26 @@ const lessons = [
   assert.equal(modelled.skillTargetId, 'production.writing');
   assert.equal(modelled.outcome, 'submitted', 'write submits are artifacts, not scores');
 
+  // componentIds are real KnowledgeComponent ids — resolvable in the domain
+  // registry, revision-carrying, and resolved at the event's own timestamp.
+  const registry = adaptCourse(LESSONS).components;
+  const realLesson = LESSONS.find((l) => l.id === 'a1-s1-l1');
+  for (const evId of ['e1', 'e2']) {
+    const projected = projectLessonEvent(ev({ id: evId }), realLesson);
+    for (const id of projected.componentIds) {
+      assert(registry.has(id), `componentId ${id} resolves in adaptCourse registry`);
+    }
+    assert(projected.componentIds.every((id) => id.includes('@')), 'ids carry revisions');
+  }
+  // An event timestamped before the c7 rewrite points at the OLD component.
+  const preRewrite = projectLessonEvent(
+    { ...ev({ id: 'old' }), submittedAt: 1790510000000 },
+    realLesson
+  );
+  const c7id = preRewrite.componentIds.find((id) => id.includes(':c7'));
+  assert.equal(registry.get(c7id)?.superseded, true,
+    'pre-rewrite evidence points at the retired revision of c7');
+
   // Counterexample honesty: a perfect quiz NEVER mints production evidence.
   const drill = projectLessonEvent(
     ev({ id: 'e4', kind: 'drill', step: 'prepare', payload: { correct: 5, total: 5 } }),
@@ -182,13 +275,32 @@ const lessons = [
   assert.notEqual(drill.skillTargetId, 'production.speaking', 'recognition ≠ speaking');
   assert.notEqual(drill.skillTargetId, 'production.writing', 'recognition ≠ writing');
 
-  // Review entries project to their task — and only their task.
-  const rated = projectReviewEntry({ id: 'r1', kind: 'rate', taskKey: 'a1-s1-l1:c1:listening_recognition', grade: 4, at: 5, response: 'x' });
-  assert.equal(rated.taskId, 'a1-s1-l1:c1:listening_recognition');
+  // Review entries project to their task — and only their task — with
+  // honest provenance about whether an observable attempt existed.
+  const rated = projectReviewEntry({
+    id: 'r1', kind: 'rate', taskKey: tk('c1', 'listening_recognition'),
+    grade: 4, at: 5, attempt: 'nghĩa là …', attempted: true, revealed: true, aided: false
+  });
+  assert.equal(rated.taskId, tk('c1', 'listening_recognition'));
   assert.equal(rated.skillTargetId, 'reception.listening');
-  const legacyRated = projectReviewEntry({ id: 'r2', kind: 'rate', chunkKey: 'a1-s1-l1:c1', grade: 1, at: 5 });
-  assert.equal(legacyRated.taskId, 'a1-s1-l1:c1:meaning_recall', 'legacy grade lands on nearest task');
-  assert.equal(legacyRated.outcome, 'again');
+  assert.equal(rated.aided, false, 'observable pre-reveal attempt = unaided retrieval');
+  assert.equal(rated.componentIds.length, 1);
+  assert(registry.has(rated.componentIds[0]) ||
+    rated.componentIds[0] === `a1-s1-l1:c1@${contentRev(lesson.chunks[0].target)}`,
+    'review componentId is the domain component id');
+
+  // Self-report: graded with no frozen attempt after the answer was shown.
+  const selfReport = projectReviewEntry({
+    id: 'r2', kind: 'rate', taskKey: tk('c1', 'meaning_recall'),
+    grade: 3, at: 6, attempt: '', attempted: false, revealed: true, aided: true
+  });
+  assert.equal(selfReport.aided, true, 'no observable attempt + revealed answer = aided');
+
+  // Records too old to carry provenance → null, never a guessed false.
+  const ancient = projectReviewEntry({ id: 'r3', kind: 'rate', chunkKey: 'a1-s1-l1:c1', grade: 1, at: 5 });
+  assert.equal(ancient.aided, null, 'absent provenance is unknown, not false');
+  assert.equal(ancient.taskId, normalizeTaskKey('a1-s1-l1:c1', 5), 'legacy grade lands on nearest task');
+  assert.equal(ancient.outcome, 'again');
   assert.equal(projectReviewEntry({ id: 'e', kind: 'enroll', chunkKey: 'a1-s1-l1:c1', at: 1 }), null,
     'enroll entries are pool facts, not ability evidence');
 
@@ -199,26 +311,43 @@ const lessons = [
   assert.equal(all[0].confidence, null, 'no source gives a confidence score yet');
 }
 
-// ── 7. LearnerState derivation ──
+// ── 7. LearnerState derivation + superseded revisions ──
 {
   const db = createInitialDb();
   enrollTasks(db, lesson, STEP_TASKS.prepare, 1000);
-  db.reviewLog.push({ id: 'r1', kind: 'rate', taskKey: 'a1-s1-l1:c1:meaning_recall', grade: 3, at: 2000 });
-  rateTask(db, 'a1-s1-l1:c1:meaning_recall', 3, 2000);
+  db.reviewLog.push({ id: 'r1', kind: 'rate', taskKey: tk('c1', 'meaning_recall'), grade: 3, at: 2000, attempted: true, revealed: true, aided: false });
+  rateTask(db, tk('c1', 'meaning_recall'), 3, 2000);
   const state = deriveLearnerState(db, [lesson], 3000);
-  const task = state.tasks['a1-s1-l1:c1:meaning_recall'];
+  const task = state.tasks[tk('c1', 'meaning_recall')];
   assert.equal(task.attempts, 1);
   assert.equal(task.lastGrade, 3);
   assert.equal(task.lastAided, false);
   assert.equal(task.isNew, false, 'a rated card is no longer New');
-  const sibling = state.tasks['a1-s1-l1:c1:form_recognition'];
+  const sibling = state.tasks[tk('c1', 'form_recognition')];
   assert.equal(sibling.attempts, 0, 'sibling has no evidence');
   assert.equal(sibling.isNew, true);
   // Same inputs → identical derived state (rebuildable anywhere).
   assert.deepEqual(deriveLearnerState(db, [lesson], 3000), state, 'derivation is deterministic');
+
+  // A card on the OLD revision of a rewritten chunk is superseded — kept in
+  // state, never presented, never counted as current-task progress.
+  const legacyState = createInitialDb();
+  const oldRev = revAt('a1-s1-l1', 'c7', 1790510000000);
+  const oldTaskId = `a1-s1-l1:c7@${oldRev}:meaning_recall`;
+  legacyState.fsrs[oldTaskId] = {
+    due: new Date(1).toISOString(), stability: 5, difficulty: 5,
+    elapsed_days: 1, scheduled_days: 10, learning_steps: 0,
+    reps: 3, lapses: 0, state: 2, last_review: new Date(1790510000000).toISOString()
+  };
+  const derived = deriveLearnerState(legacyState, LESSONS, Date.now());
+  assert.equal(derived.tasks[oldTaskId].superseded, true,
+    'old-revision card is superseded — the phrase it learned was edited');
+  const queue = reviewQueue(legacyState, LESSONS, Date.now());
+  assert.equal(queue.due.length + queue.fresh.length, 0, 'superseded work is never presented');
+  assert.equal(queue.orphaned, 1, 'but it is still counted, not deleted');
 }
 
-// ── 8. Planner: order, determinism, evidence-driven choices ──
+// ── 8. Planner: order, determinism, new cards never hijack the loop ──
 {
   const session = createSession({ storage: memoryStorage() });
   const emptyDb = createInitialDb();
@@ -230,18 +359,25 @@ const lessons = [
   const b = planNext({ db: emptyDb, session, lessons, now: 1 });
   assert.deepEqual(a, b, 'same state + now → same action');
 
-  // Due retrieval tasks outrank new curriculum.
+  // THE REGRESSION: freshly enrolled New cards are introductions, not due
+  // work — a submitted prepare step must NOT trap the learner in review.
   const db = createInitialDb();
   enrollTasks(db, lesson, STEP_TASKS.prepare, 1000);
   const plan = planNext({ db, session, lessons, now: 2000 });
-  assert.equal(plan.kind, 'review', 'due tasks beat next lesson');
-  assert.equal(plan.dueCount, 4, '2 chunks × 2 staged kinds');
-  assert.equal(plan.taskKind, 'form_recognition', 'oldest-due, then task id order');
+  assert.equal(plan.kind, 'next', 'New cards never block curriculum');
+  assert.equal(plan.lessonId, 'a1-s1-l1');
+
+  // SCHEDULED (previously exercised) due tasks DO outrank new curriculum.
+  rateTask(db, tk('c1', 'meaning_recall'), 1, 2000); // Again → due soon
+  const dueFirst = planNext({ db, session, lessons, now: 2000 + 20 * 60 * 1000 });
+  assert.equal(dueFirst.kind, 'review', 'scheduled-due tasks beat next lesson');
+  assert.equal(dueFirst.reason, 'due-tasks');
+  assert.equal(dueFirst.taskKind, 'meaning_recall');
 
   // Resume still beats due review — in-flight work is never stranded.
   session.setLast({ lessonId: 'a1-s1-l2', step: 'listen' });
   session.setDraft('a1-s1-l2', { contentVersion: 1, step: 'listen', answers: { listen: { q1: 1 } } });
-  const resumed = planNext({ db, session, lessons, now: 2000 });
+  const resumed = planNext({ db, session, lessons, now: 2000 + 20 * 60 * 1000 });
   assert.equal(resumed.kind, 'resume', 'draft resume outranks due review');
   assert.equal(resumed.lessonId, 'a1-s1-l2');
 
@@ -271,23 +407,58 @@ const lessons = [
     payload: { correct: 1, total: 4 }, support: {}
   }, 5000);
   enrollTasks(db3, lesson, STEP_TASKS.prepare, 1000);
-  const dueWins = planNext({ db: db3, session: freshSession, lessons, now: 6000 });
+  rateTask(db3, tk('c1', 'meaning_recall'), 1, 2000);
+  const dueWins = planNext({ db: db3, session: freshSession, lessons, now: 2000 + 20 * 60 * 1000 });
   assert.equal(dueWins.kind, 'review', 'due retrieval outranks remediation');
+
+  // Tail fallback: curriculum exhausted + only new tasks → introduce them.
+  const db4 = createInitialDb();
+  for (const l of lessons) {
+    appendLessonEvent(db4, {
+      lessonId: l.id, contentVersion: 1, step: 'prepare', kind: 'drill',
+      payload: { correct: 4, total: 4 }, support: {}
+    }, 5000);
+  }
+  // every step attempted → nothing next/finish; but new cards exist
+  for (const l of lessons) {
+    for (const step of ['read', 'listen', 'write', 'speak']) {
+      appendLessonEvent(db4, {
+        lessonId: l.id, contentVersion: 1, step, kind: step === 'prepare' ? 'drill' : step,
+        payload: { correct: 4, total: 4 }, support: {}
+      }, 6000);
+    }
+  }
+  enrollTasks(db4, lesson, STEP_TASKS.prepare, 1000);
+  const tail = planNext({ db: db4, session: freshSession, lessons, now: 9000 });
+  assert.equal(tail.kind, 'review', 'curriculum done → new-task introduction');
+  assert.equal(tail.reason, 'new-tasks');
 }
 
-// ── 9. Legacy rate entries and new task entries interleave safely ──
+// ── 9. Legacy and new entries interleave; queue stays bounded ──
 {
   const db = createInitialDb();
   db.reviewLog = [
-    { id: 'e1', kind: 'enroll', chunkKey: 'a1-s1-l1:c1', at: 100 },
-    { id: 'old', kind: 'rate', chunkKey: 'a1-s1-l1:c1', grade: 3, at: 500 },
-    { id: 'new', kind: 'rate', taskKey: 'a1-s1-l1:c1:listening_recognition', grade: 4, at: 600 }
+    { id: 'e1', kind: 'enroll', chunkKey: 'a1-s1-l1:c1', at: 1790510000000 },
+    { id: 'old', kind: 'rate', chunkKey: 'a1-s1-l1:c1', grade: 3, at: 1790510000000 + 500 },
+    { id: 'new', kind: 'rate', taskKey: tk('c1', 'listening_recognition'), grade: 4, at: 1790530000000 }
   ];
   db.fsrs = rebuildFsrsFromLog(db.reviewLog);
-  assert.equal(db.fsrs['a1-s1-l1:c1:meaning_recall'].reps, 1, 'legacy rate → meaning_recall only');
-  assert.equal(db.fsrs['a1-s1-l1:c1:listening_recognition'].reps, 1, 'new task rate → its own card');
-  assert.equal(db.fsrs['a1-s1-l1:c1:form_recognition'].reps, 0);
-  assert.equal(dueTasks(db, 1000000).length >= 3, true, 'remaining tasks still due');
+  const legacyTask = normalizeTaskKey('a1-s1-l1:c1', 1790510000000);
+  assert.equal(db.fsrs[legacyTask].reps, 1, 'legacy rate → meaning_recall only');
+  assert.equal(db.fsrs[tk('c1', 'listening_recognition')].reps, 1, 'new task rate → its own card');
+  assert.equal(db.fsrs[tk('c1', 'form_recognition')]?.reps ?? 0, 0, 'unexercised kinds have no card');
+
+  // Bounded queue: a whole lesson's staged tasks never flood one session.
+  const big = createInitialDb();
+  enrollTasks(big, lesson, TASK_KINDS, 1000); // 2 chunks × 4 kinds = 8 new
+  const q = reviewQueue(big, lessons, 2000);
+  assert(q.fresh.length <= NEW_TASK_BUDGET, 'fresh introductions are capped');
+  const perComponent = new Set(q.fresh.map((f) => f.resolved.componentKey));
+  assert.equal(perComponent.size, q.fresh.length, 'sibling bury: ≤1 new task per component per session');
+  assert.equal(q.due.length, 0, 'nothing scheduled-due yet');
+  assert.equal(q.freshPending, 8);
+  assert(q.fresh.every((f) => f.parsed.taskKind === 'form_recognition'),
+    'recognition ability introduced before recall/production');
 }
 
 console.log('FlashDay learner model: 9 checks passed');

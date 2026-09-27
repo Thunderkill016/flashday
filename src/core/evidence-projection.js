@@ -9,12 +9,19 @@
  * - support flags (translation/transcript/model) make evidence `aided`;
  * - multiple choice never projects production evidence;
  * - typed recall is never pronunciation evidence;
- * - review self-grades keep the typed response visible.
+ * - a review grade with no observable pre-reveal response is self-report
+ *   evidence — `aided` is true (the answer was just shown); when the record
+ *   is too old to carry provenance, `aided` is null, never a guessed false;
+ * - componentIds are the domain's real component ids (`lesson:chunk@rev`),
+ *   resolved at the record's own timestamp so pre-edit evidence keeps
+ *   pointing at the phrase that was actually exercised.
  */
 import {
   canDoIdFor,
+  componentId,
   normalizeTaskKey,
   parseTaskKey,
+  revAt,
   skillTargetFor
 } from './domain.js';
 
@@ -54,13 +61,16 @@ function sourceOf(payload) {
 }
 
 // lessonEvent → one EvidenceEvent at lesson scope. componentIds lists the
-// lesson's chunks because a step score cannot be attributed to one chunk
-// (documented limitation in the ADR).
+// lesson's components AT THE EVENT'S OWN TIMESTAMP (a step score cannot be
+// attributed to one chunk — documented limitation in the ADR).
 export function projectLessonEvent(event, lesson) {
   if (!event || typeof event !== 'object') return null;
   const skillTargetId = EVENT_SKILL[event.kind];
   if (!skillTargetId) return null;
-  const componentIds = Array.isArray(lesson?.chunks) ? lesson.chunks.map((c) => String(c.id)) : [];
+  const at = Number(event.submittedAt) || 0;
+  const componentIds = Array.isArray(lesson?.chunks)
+    ? lesson.chunks.map((c) => componentId(lesson.id, c.id, revAt(lesson.id, c.id, at)))
+    : [];
   return {
     id: `ev:${String(event.id)}`,
     sourceEventId: String(event.id),
@@ -74,23 +84,39 @@ export function projectLessonEvent(event, lesson) {
     outcome: event.kind === 'write' || event.kind === 'speak' ? 'submitted' : quizOutcome(event.payload),
     aided: isAided(event.support),
     confidence: null,
-    occurredAt: Number(event.submittedAt) || 0,
+    occurredAt: at,
     contentVersion: Number(event.contentVersion) || 0
   };
 }
 
 // reviewLog entry → task-level EvidenceEvent. Legacy 2-segment chunkKey
-// normalizes to the legacy task kind (ADR: projection, not rewrite).
-// `enroll` entries are pool facts, not ability evidence — skipped.
+// normalizes to the legacy task kind at the entry's timestamp (ADR:
+// projection, not rewrite). `enroll` entries are pool facts, not ability
+// evidence — skipped.
+//
+// Provenance: `aided` reflects what the durable entry can actually prove.
+// A frozen pre-reveal attempt (`attempted: true`) = observable unaided
+// retrieval. Grading with no recorded attempt after the answer was shown =
+// self-report → aided. Records old enough to carry neither field → null
+// (unknown), never silently unaided.
 export function projectReviewEntry(entry) {
   if (!entry || typeof entry !== 'object') return null;
   const key = entry.taskKey ?? entry.chunkKey;
   if (!key) return null;
   if (entry.kind === 'enroll') return null;
-  const taskId = normalizeTaskKey(key);
+  const occurredAt = Number(entry.at ?? entry.reviewedAt ?? entry.submittedAt) || 0;
+  const taskId = normalizeTaskKey(key, occurredAt);
   const parsed = parseTaskKey(taskId);
   if (!parsed) return null;
   const grade = Number(entry.grade);
+  const attempt = typeof entry.attempt === 'string' ? entry.attempt
+    : typeof entry.response === 'string' ? entry.response : undefined;
+  const attempted = entry.attempted != null ? Boolean(entry.attempted)
+    : attempt != null ? attempt.trim().length > 0 : null;
+  const aided = entry.aided != null ? Boolean(entry.aided)
+    : attempted === true ? false
+    : attempted === false ? true
+    : null;
   return {
     id: `rv:${String(entry.id ?? '')}`,
     sourceEventId: entry.id != null ? String(entry.id) : null,
@@ -98,16 +124,18 @@ export function projectReviewEntry(entry) {
     canDoId: canDoIdFor(parsed.lessonId),
     taskId,
     skillTargetId: skillTargetFor(parsed.taskKind),
-    componentIds: [parsed.chunkId],
+    componentIds: [parsed.componentId],
     step: null,
     source: 'review',
     outcome: GRADE_OUTCOME[grade] || 'submitted',
-    aided: Boolean(entry.aided),
+    aided,
+    attempted,
+    revealed: entry.revealed != null ? Boolean(entry.revealed) : null,
     confidence: null,
-    occurredAt: Number(entry.at ?? entry.reviewedAt ?? entry.submittedAt) || 0,
+    occurredAt,
     contentVersion: Number(entry.contentVersion) || 0,
     grade,
-    response: typeof entry.response === 'string' ? entry.response : undefined
+    response: attempt
   };
 }
 

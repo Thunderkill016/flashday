@@ -5,7 +5,7 @@ import { LESSONS, STAGES, lessonById } from '../../content/a1/index.js';
 import { STEPS, computeStreak, lessonStatus, stageStatus, stepsForLesson } from '../../core/progress.js';
 import { planNext } from '../../core/planner.js';
 import { lessonIcon } from '../icons.js';
-import { dueTasks } from '../../core/scheduler.js';
+import { reviewQueue } from '../../core/scheduler.js';
 
 function draftHasContent(draft) {
   if (!draft) return false;
@@ -74,13 +74,19 @@ export function mount(root, ctx) {
   }
   section.appendChild(card);
 
-  // Card 2: due review — real scheduler numbers only
-  const due = dueTasks(db, Date.now()).length;
+  // Card 2: review state — scheduled-due work (memory already exercised)
+  // plus pending new-task introductions, counted separately so a fresh
+  // lesson never masquerades as overdue review.
+  const queue = reviewQueue(db, LESSONS, Date.now());
+  const due = queue.due.length;
   const reviewCard = document.createElement('div');
   reviewCard.className = 'card';
   reviewCard.appendChild(el('h2', 'Ôn đến hạn'));
   reviewCard.appendChild(el('p', due > 0 ? `${due} thẻ đến hạn` : 'Chưa có thẻ đến hạn'));
-  if (due > 0) {
+  if (queue.freshPending > 0) {
+    reviewCard.appendChild(el('p', `+ ${queue.freshPending} thẻ mới chờ làm quen`, 'view-placeholder'));
+  }
+  if (due > 0 || queue.freshPending > 0) {
     const go = document.createElement('a');
     go.className = 'btn-primary';
     go.href = '#/review';
