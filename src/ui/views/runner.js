@@ -10,6 +10,10 @@ import { enrollChunks } from '../../core/scheduler.js';
 import { stepsForLesson } from '../../core/progress.js';
 import { checkTimeGate } from '../../core/time-gate.js';
 import { mountQuiz } from '../components/quiz.js';
+import { pickEnglishVoice, LEARNER_SPEECH_RATE, playButton } from '../speech.js';
+
+// Re-exported: existing tests import the voice picker from this module.
+export { pickEnglishVoice };
 
 const STEP_LABELS = {
   prepare: 'Hiểu mẫu',
@@ -26,25 +30,6 @@ const STEP_KIND = {
   write: 'write',
   speak: 'speak'
 };
-const LEARNER_SPEECH_RATE = 0.85;
-
-export function pickEnglishVoice(voices) {
-  const priority = (voice) => {
-    const lang = voice.lang?.replace('_', '-').toLowerCase();
-    if (lang === 'en-us') return 0;
-    if (lang === 'en-gb') return 1;
-    if (/^en-/.test(lang || '')) return 2;
-    return 3;
-  };
-  return (
-    [...voices]
-      .filter((voice) => priority(voice) < 3)
-      .sort(
-        (a, b) => priority(a) - priority(b) || a.name.localeCompare(b.name, 'en') || a.lang.localeCompare(b.lang, 'en')
-      )[0] || null
-  );
-}
-
 let state = null;
 
 export function mount(root, ctx) {
@@ -305,6 +290,42 @@ function text(tag, content, className) {
   return el;
 }
 
+// Closest model line by shared content words — correction feedback names
+// something concrete, so the learner compares against a real model line.
+function closestModel(textValue, models) {
+  const wordSet = (s) => new Set(String(s).toLowerCase().match(/[a-z']+/g) || []);
+  const mine = wordSet(textValue);
+  let best = models[0] || '';
+  let bestScore = -1;
+  for (const model of models) {
+    const theirs = wordSet(model);
+    const score = [...mine].filter((w) => theirs.has(w)).length;
+    if (score > bestScore) {
+      bestScore = score;
+      best = model;
+    }
+  }
+  return best;
+}
+
+// Words in the learner's attempt that appear in the model get <mark> — a
+// visible "what you got right" instead of a pass/fail verdict.
+function markedAttempt(textValue, model) {
+  const modelWords = new Set(String(model).toLowerCase().match(/[a-z']+/g) || []);
+  const frag = document.createElement('p');
+  frag.className = 'en';
+  for (const part of String(textValue).split(/([a-zA-Z']+)/)) {
+    if (part && modelWords.has(part.toLowerCase())) {
+      const mark = document.createElement('mark');
+      mark.textContent = part;
+      frag.appendChild(mark);
+    } else {
+      frag.appendChild(document.createTextNode(part));
+    }
+  }
+  return frag;
+}
+
 /* ── Step builders ─────────────────────────────────────── */
 
 const buildStep = {
@@ -326,7 +347,11 @@ const buildStep = {
     chunks.className = 'chunk-list';
     for (const chunk of lesson.chunks) {
       const li = document.createElement('li');
-      li.append(text('strong', chunk.target), document.createTextNode(` · ${chunk.meaning}`));
+      li.append(
+        text('strong', chunk.target),
+        document.createTextNode(` · ${chunk.meaning} `),
+        playButton(chunk.target)
+      );
       const detail = document.createElement('details');
       detail.className = 'chunk-example';
       const summary = document.createElement('summary');
@@ -356,7 +381,7 @@ const buildStep = {
     list.className = 'dialogue-lines';
     for (const [en, vi] of lesson.dialogue.lines) {
       const li = document.createElement('li');
-      li.append(text('span', en, 'en'), text('span', vi, 'vi translation'));
+      li.append(playButton(en), text('span', en, 'en'), text('span', vi, 'vi translation'));
       list.appendChild(li);
     }
     pane.appendChild(list);
@@ -551,18 +576,35 @@ const buildStep = {
     const gateNote = text('p', '', 'runner-notice');
     gateNote.hidden = true;
 
+    // Correction loop: after a saved attempt the learner sees their text
+    // against the closest model line, then can retry — attempts are recorded.
+    let attempts = 0;
+    const compare = document.createElement('div');
+    compare.className = 'attempt-compare';
+    compare.hidden = true;
+    const retryBtn = document.createElement('button');
+    retryBtn.type = 'button';
+    retryBtn.className = 'btn-secondary';
+    retryBtn.dataset.role = 'write-retry';
+    retryBtn.textContent = 'Viết lại';
+    retryBtn.hidden = true;
+
     const saveBtn = document.createElement('button');
     saveBtn.type = 'button';
     saveBtn.className = 'btn-primary';
     saveBtn.dataset.role = 'write-save';
     saveBtn.textContent = 'Lưu lần thử';
     saveBtn.hidden = true;
-    pane.append(saveBtn, gateNote);
+    pane.append(saveBtn, gateNote, compare, retryBtn);
 
     modelBtn.addEventListener('click', () => {
       patchDraft({ support: { ...draftSupport(), modelRevealed: true } });
       const modelList = document.createElement('ul');
-      for (const line of lesson.write.model) modelList.appendChild(text('li', line));
+      for (const line of lesson.write.model) {
+        const li = text('li', line);
+        li.appendChild(playButton(line));
+        modelList.appendChild(li);
+      }
       modelArea.append(text('h3', 'Bài mẫu'), modelList);
       const checklist = document.createElement('div');
       checklist.className = 'checklist';
@@ -610,19 +652,39 @@ const buildStep = {
         }
         gateNote.hidden = true;
       }
-      saveBtn.disabled = true; // stays disabled until text/checklist changes
+      saveBtn.disabled = true; // stays disabled until retry or text/checklist changes
       const checklist = [...modelArea.querySelectorAll('[data-check]')].map((box) => box.checked);
+      attempts += 1;
       recordEvent(
         'write',
         {
           responseText: textarea.value,
           declaredFinalTime: declaredInput?.value || undefined,
           checklist,
-          selfReviewed: true
+          selfReviewed: true,
+          attempt: attempts
         },
         { modelRevealed: true }
       );
+      const model = closestModel(textarea.value, lesson.write.model);
+      compare.textContent = '';
+      compare.append(
+        text('p', 'Bài của bạn — từ khớp mẫu được đánh dấu', 'compare-label'),
+        markedAttempt(textarea.value, model),
+        text('p', 'Mẫu gần nhất', 'compare-label'),
+        text('p', model, 'en')
+      );
+      compare.hidden = false;
+      textarea.disabled = true;
+      retryBtn.hidden = false;
       continueLink(pane, 'write');
+    });
+    retryBtn.addEventListener('click', () => {
+      compare.hidden = true;
+      retryBtn.hidden = true;
+      textarea.disabled = false;
+      saveBtn.disabled = false;
+      textarea.focus();
     });
     stepNav(pane, 'write');
   },
@@ -723,7 +785,11 @@ const buildStep = {
     modelBtn.addEventListener('click', () => {
       patchDraft({ support: { ...draftSupport(), modelRevealed: true } });
       const modelList = document.createElement('ul');
-      for (const line of lesson.speak.model) modelList.appendChild(text('li', line));
+      for (const line of lesson.speak.model) {
+        const li = text('li', line);
+        li.appendChild(playButton(line));
+        modelList.appendChild(li);
+      }
       modelArea.append(text('h3', 'Bài mẫu'), modelList);
       const checklist = document.createElement('div');
       checklist.className = 'checklist';
