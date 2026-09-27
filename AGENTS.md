@@ -1,9 +1,23 @@
 # FlashDay — agent working notes
 
-English-learning flashcard app. Static multi-page Vite build hosted on
-Firebase Hosting; Firebase Auth + Firestore are the whole backend.
-`firebase-client.js` wraps both behind a Supabase-shaped API the app
-already spoke.
+English-learning flashcard app (A1 course rebuild). Static multi-page Vite
+build hosted on Firebase Hosting; Firebase Auth + Firestore are the whole
+backend. Product scope: Học · Ôn · Hồ sơ — no library/import/dictionary.
+Course content lives in `src/content/a1/` (30 lessons, validated by
+`src/content/schema.js`); the learning contract is `REBUILD_A1.md` and
+`FlashDay_Design_System.md` — read them before touching product behavior.
+
+## Multi-agent workflow (Devin + Codex)
+
+- GitHub Issues is the single task board. Claim work by labeling the issue
+  `agent:codex` or `agent:devin` before starting; `needs-human` means stop
+  and wait for the user.
+- One agent per branch. Never commit to a branch another agent is using;
+  never edit a file an open PR already touches unless coordinating in the
+  PR thread. Open a PR per task; `npm run verify` must be green first.
+- The user is merge authority. Agents review each other's PRs in comments
+  but do not merge.
+- Deploys (hosting/rules) happen only on explicit user confirmation.
 
 ## Build / verify / deploy
 
