@@ -79,12 +79,16 @@ const TASK_ID = /^([^:]+):([^:@:]+)(?:@([0-9a-f]{8}))?:([a-z_]+)$/;
 
 /* ── content revisions ───────────────────────────────────────────────── */
 
-// fnv1a-32 over the normalized retrieval artifact (the target text). The
-// artifact IS the identity: same text → same rev → history carries over;
-// different text → different rev → a new component, old state parked.
+// fnv1a-32 over the normalized retrieval artifact: the target↔meaning
+// pair IS the semantic identity. Same form + same meaning → same rev →
+// history carries over; a change to either (a new phrase, or the same form
+// taught with a different sense) mints a new component — old FSRS state
+// can never silently transfer to different semantics.
 // Keep in sync with scripts/gen-content-revisions.mjs.
-export function contentRev(text) {
-  const s = String(text ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+export function contentRev(chunk) {
+  const t = String(chunk?.target ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const m = String(chunk?.meaning ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const s = `${t}\u0001${m}`;
   let h = 0x811c9dc5;
   for (let i = 0; i < s.length; i++) {
     h ^= s.codePointAt(i);
@@ -93,20 +97,22 @@ export function contentRev(text) {
   return h.toString(16).padStart(8, '0');
 }
 
-// Which revision of a chunk was live at `atMs`, per the frozen ledger.
-// Missing timestamp → latest known rev; timestamp before the first known
-// segment → earliest rev (data can't predate the content's first text).
-// Unknown chunk (not in the ledger) → null; callers keep the key rev-less.
-export function revAt(lessonId, chunkId, atMs) {
+// The revision a rev-less durable record can honestly claim. A ledger with
+// exactly ONE segment is unambiguous: only one phrase ever lived at that
+// slot, so any record naming the slot refers to it. A multi-segment ledger
+// means the phrase changed — a rev-less record cannot prove which phrase
+// the learner actually saw (commit time ≠ deploy time ≠ seen time), so it
+// resolves to null and the caller PARKS the record instead of guessing.
+// Unknown chunks (no ledger) → null as well.
+export function unambiguousRev(lessonId, chunkId) {
   const segments = CHUNK_REVISION_HISTORY[String(lessonId)]?.[String(chunkId)];
-  if (!Array.isArray(segments) || !segments.length) return null;
-  const at = Number(atMs);
-  if (!Number.isFinite(at)) return segments[segments.length - 1].rev;
-  let rev = segments[0].rev;
-  for (const seg of segments) {
-    if (Number(seg.since) <= at) rev = seg.rev;
-  }
-  return rev;
+  return Array.isArray(segments) && segments.length === 1 ? segments[0].rev : null;
+}
+
+// Number of known revisions for a chunk slot — >1 marks the slot
+// ambiguous for rev-less records.
+export function revisionCount(lessonId, chunkId) {
+  return CHUNK_REVISION_HISTORY[String(lessonId)]?.[String(chunkId)]?.length ?? 0;
 }
 
 /* ── ids ─────────────────────────────────────────────────────────────── */
@@ -147,16 +153,19 @@ export function parseTaskKey(key) {
   };
 }
 
-// Canonicalize any key shape to `l:c@rev:kind`. Rev-less keys resolve `rev`
-// through the ledger at `atMs` — a legacy `l:c7` rated before the lesson-1
-// rewrite lands on the OLD phrase's rev, never on the new text. Unknown
-// chunks keep the rev-less form (no ledger to resolve through).
-export function normalizeTaskKey(key, atMs) {
+// Canonicalize any key shape. Rev-bearing keys pass through verbatim — the
+// rev IS the phrase identity, so no timestamp is needed or trusted.
+// Rev-less keys resolve ONLY through `unambiguousRev`: a single-revision
+// ledger proves the slot always held the same phrase. When the slot saw
+// multiple phrases (or none are recorded) the key stays rev-less — the
+// parked form that downstream code counts as `ambiguous` and never
+// presents. Pure and timestamp-free: same key → same result, always.
+export function normalizeTaskKey(key) {
   const text = String(key ?? '');
   const parsed = parseTaskKey(text);
   if (parsed) {
     if (parsed.rev) return text;
-    const rev = revAt(parsed.lessonId, parsed.chunkId, atMs);
+    const rev = unambiguousRev(parsed.lessonId, parsed.chunkId);
     return rev ? taskKey(parsed.lessonId, parsed.chunkId, parsed.taskKind, rev) : text;
   }
   // 2-segment legacy `lesson:chunk` → its honest nearest task.
@@ -164,8 +173,7 @@ export function normalizeTaskKey(key, atMs) {
   if (first > 0 && first === text.lastIndexOf(':')) {
     const lessonId = text.slice(0, first);
     const chunkId = text.slice(first + 1);
-    const rev = revAt(lessonId, chunkId, atMs);
-    return taskKey(lessonId, chunkId, LEGACY_TASK_KIND, rev);
+    return taskKey(lessonId, chunkId, LEGACY_TASK_KIND, unambiguousRev(lessonId, chunkId));
   }
   return null;
 }
@@ -193,13 +201,14 @@ export function adaptLesson(lesson) {
     seen.add(chunk.id);
     if (typeof chunk.target !== 'string' || !chunk.target.trim()) bad(lesson.id, `chunk ${chunk.id} missing target`);
     if (typeof chunk.meaning !== 'string' || !chunk.meaning.trim()) bad(lesson.id, `chunk ${chunk.id} missing meaning`);
-    const rev = contentRev(chunk.target);
+    const rev = contentRev(chunk);
     return {
       id: componentId(lesson.id, chunk.id, rev),
       lessonId: String(lesson.id),
       chunkId: String(chunk.id),
       rev,
       superseded: false,
+      ambiguous: false,
       kind: 'lexical_chunk',
       chunk
     };
@@ -262,9 +271,29 @@ export function adaptCourse(lessons) {
           chunkId,
           rev,
           superseded: true,
+          ambiguous: false,
           kind: 'lexical_chunk',
           chunk: null
         });
+      }
+      // A slot that ever held more than one phrase gets a bare
+      // `lesson:chunk` component: the referent for rev-less durable records
+      // whose true phrase cannot be proven. `ambiguous: true` — resolvable
+      // in the registry, never schedulable, never renderable.
+      if (segments.length > 1) {
+        const slotId = componentKey(lessonId, chunkId);
+        if (!components.has(slotId)) {
+          components.set(slotId, {
+            id: slotId,
+            lessonId,
+            chunkId,
+            rev: null,
+            superseded: false,
+            ambiguous: true,
+            kind: 'lexical_chunk',
+            chunk: null
+          });
+        }
       }
     }
   }

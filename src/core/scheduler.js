@@ -72,10 +72,10 @@ function entryTaskKeys(entry) {
     const raw = String(task).includes(':')
       ? String(task)
       : `${entry.chunkKey}:${task}`;
-    return normalizeTaskKey(raw, entry.at);
+    return normalizeTaskKey(raw);
   }).filter(Boolean);
   if (keys.length) return keys;
-  const legacy = normalizeTaskKey(entry?.chunkKey, entry?.at);
+  const legacy = normalizeTaskKey(entry?.chunkKey);
   return legacy ? [legacy] : [];
 }
 
@@ -93,12 +93,13 @@ export function enrollTasks(db, lesson, kinds, now = Date.now()) {
   const wanted = (Array.isArray(kinds) ? kinds : TASK_KINDS).filter((k) => TASK_KINDS.includes(k));
   const enrolled = [];
   for (const chunk of Array.isArray(lesson?.chunks) ? lesson.chunks : []) {
-    if (typeof chunk?.target !== 'string' || !chunk.target.trim()) {
-      // A target-less chunk would fingerprint to the empty-string rev and
-      // mint phantom cards no real component owns — fail loudly instead.
-      throw new Error(`enrollTasks ${lesson?.id}: chunk ${chunk?.id} has no target text`);
+    if (typeof chunk?.target !== 'string' || !chunk.target.trim() ||
+        typeof chunk?.meaning !== 'string' || !chunk.meaning.trim()) {
+      // A chunk without its full retrieval artifact would fingerprint to a
+      // phantom rev and mint cards no real component owns — fail loudly.
+      throw new Error(`enrollTasks ${lesson?.id}: chunk ${chunk?.id} has no target/meaning text`);
     }
-    const rev = contentRev(chunk.target);
+    const rev = contentRev(chunk);
     const missingKeys = wanted
       .map((kind) => taskKey(lesson.id, chunk.id, kind, rev))
       .filter((key) => !cards[key]);
@@ -126,20 +127,28 @@ export function enrollChunks(db, lesson, now = Date.now()) {
 
 // Deterministic replay: enrollment creates task cards, ratings advance the
 // addressed task only. Sorting by (at, id) makes a merged two-device log
-// replay identically to sequential application. Returns a fresh card map
-// keyed by taskKey (callers assign it to db.fsrs).
+// replay identically to sequential application — and an entry with a
+// missing/garbage timestamp replays at EPOCH ZERO, never at "now": the
+// function must return the same map for the same input on every run.
+// Returns a fresh card map keyed by taskKey (callers assign it to db.fsrs).
+const REPLAY_EPOCH_MS = 0;
+function replayTime(at) {
+  const ms = Number(at);
+  return Number.isFinite(ms) ? ms : REPLAY_EPOCH_MS;
+}
+
 export function rebuildFsrsFromLog(reviewLog, enrolledKeys = []) {
   const cards = {};
   const enroll = (key, at) => {
-    const normalized = normalizeTaskKey(key, at);
+    const normalized = normalizeTaskKey(key);
     if (normalized && !cards[normalized]) {
-      cards[normalized] = serializeCard(createEmptyCard(new Date(Number(at) || Date.now())));
+      cards[normalized] = serializeCard(createEmptyCard(new Date(replayTime(at))));
     }
   };
-  for (const key of Array.isArray(enrolledKeys) ? enrolledKeys : []) enroll(key, Date.now());
+  for (const key of Array.isArray(enrolledKeys) ? enrolledKeys : []) enroll(key, REPLAY_EPOCH_MS);
   const ordered = [...(Array.isArray(reviewLog) ? reviewLog : [])]
     .filter((entry) => entry?.chunkKey || entry?.taskKey)
-    .sort((a, b) => (Number(a.at) || 0) - (Number(b.at) || 0) || String(a.id || '').localeCompare(String(b.id || '')));
+    .sort((a, b) => replayTime(a.at) - replayTime(b.at) || String(a.id || '').localeCompare(String(b.id || '')));
   for (const entry of ordered) {
     const kind = entry.kind === 'enroll' ? 'enroll' : 'rate';
     if (kind === 'enroll') {
@@ -148,9 +157,9 @@ export function rebuildFsrsFromLog(reviewLog, enrolledKeys = []) {
     }
     const rating = ratingFromBespokeScore(entry.grade);
     if (rating == null) continue;
-    const key = normalizeTaskKey(entry.taskKey ?? entry.chunkKey, entry.at);
+    const key = normalizeTaskKey(entry.taskKey ?? entry.chunkKey);
     if (!key) continue;
-    const at = new Date(Number(entry.at) || Date.now());
+    const at = new Date(replayTime(entry.at));
     const card = deserializeCard(cards[key]) || createEmptyCard(at);
     cards[key] = serializeCard(scheduler.next(card, at, rating).card);
   }
@@ -164,7 +173,10 @@ export function rebuildFsrsFromLog(reviewLog, enrolledKeys = []) {
 export function dueTasks(db, now = Date.now(), lessons = null) {
   const nowMs = Number(now);
   return Object.entries(cardMap(db))
-    .map(([key, raw]) => ({ key: normalizeTaskKey(key) || key, parsed: parseTaskKey(key), card: deserializeCard(raw) }))
+    .map(([key, raw]) => {
+      const normalized = normalizeTaskKey(key) || key;
+      return { key: normalized, parsed: parseTaskKey(normalized), card: deserializeCard(raw) };
+    })
     .filter((entry) => entry.parsed && entry.card && !isNewCard(entry.card) && new Date(entry.card.due).getTime() <= nowMs)
     .filter((entry) => {
       if (!lessons) return true;
@@ -214,7 +226,7 @@ export function reviewQueue(db, lessons, now = Date.now()) {
     .filter(({ card }) => isNewCard(card))
     .map((entry) => ({ ...entry, resolved: taskForKey(entry.key, lessons) }))
     .filter((entry) => {
-      if (entry.resolved && !entry.resolved.superseded) return true;
+      if (entry.resolved && !entry.resolved.superseded && !entry.resolved.ambiguous) return true;
       orphaned++;
       return false;
     })
@@ -230,7 +242,7 @@ export function reviewQueue(db, lessons, now = Date.now()) {
     parsedCache.set(key, parsed);
     if (isNewCard(card)) continue;
     const resolved = taskForKey(key, lessons);
-    if (!resolved || resolved.superseded) {
+    if (!resolved || resolved.superseded || resolved.ambiguous) {
       orphaned++;
       continue;
     }
@@ -259,18 +271,21 @@ export function nextDueAt(db, now = Date.now()) {
   return upcoming.length ? Math.min(...upcoming) : null;
 }
 
-// taskKey → { lesson, chunk, taskKind, componentKey, rev, superseded } —
-// or null when the component is gone entirely. A key whose rev predates the
-// current text resolves with `superseded: true`: the memory is real but the
-// phrase it belongs to is retired, so it must not render current content.
+// taskKey → { lesson, chunk, taskKind, componentKey, rev, superseded,
+// ambiguous } — or null when the component is gone entirely. A key whose
+// rev predates the current text resolves `superseded`: the memory is real
+// but the phrase it belongs to is retired. A rev-less key resolves
+// `ambiguous`: the durable record cannot prove which phrase it exercised
+// (or none are recorded), so it is parked — never presented.
 export function taskForKey(key, lessons) {
   const parsed = parseTaskKey(key);
   if (!parsed) return null;
   const lesson = (Array.isArray(lessons) ? lessons : []).find((l) => String(l?.id) === parsed.lessonId);
   const chunk = lesson?.chunks?.find((c) => String(c.id) === parsed.chunkId) || null;
   if (!chunk) return null;
-  const liveRev = contentRev(chunk.target);
+  const liveRev = contentRev(chunk);
   const superseded = parsed.rev != null && parsed.rev !== liveRev;
+  const ambiguous = parsed.rev == null;
   return {
     lesson,
     chunk,
@@ -278,7 +293,8 @@ export function taskForKey(key, lessons) {
     taskId: key,
     componentKey: parsed.componentKey,
     rev: parsed.rev || liveRev,
-    superseded
+    superseded,
+    ambiguous
   };
 }
 
@@ -289,7 +305,7 @@ export function chunkForKey(key, lessons) {
 
 export function rateTask(db, key, grade, now = Date.now()) {
   const cards = cardMap(db);
-  const normalized = normalizeTaskKey(key, now);
+  const normalized = normalizeTaskKey(key);
   if (!normalized) return null;
   const rating = Rating[grade] != null && typeof grade === 'string'
     ? Rating[grade]

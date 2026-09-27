@@ -4,6 +4,7 @@ import { createInitialDb, hydrateDb, appendLessonEvent } from '../src/core/evide
 import { createPersistentStore } from '../src/core/store.js';
 import { dbKey } from '../src/core/namespace.js';
 import { enrollChunks, rebuildFsrsFromLog, rateChunk } from '../src/core/scheduler.js';
+import { contentRev } from '../src/core/domain.js';
 
 // In-memory stand-ins for localStorage and the supabase-shaped client —
 // same surface the real firebase-client exposes: from(t).upsert/select/
@@ -129,9 +130,9 @@ globalThis.CustomEvent = class CustomEvent {
   const storage = memStorage();
   const store = makeStore(storage);
   // Fixture chunk must match the real content — revision-aware identity
-  // fingerprints the target text, so a synthetic target would mint phantom
-  // components that don't exist in the real ledger.
-  const lesson = { id: 'a1-s1-l1', chunks: [{ id: 'c1', target: 'Hello, I’m …', meaning: 'Xin chào, tôi là …' }] };
+  // fingerprints the target↔meaning pair, so a synthetic text would mint
+  // phantom components that don't exist in the real ledger.
+  const lesson = { id: 'a1-s1-l1', chunks: [{ id: 'c1', target: 'Hello, I’m …', meaning: 'Chào, tôi là …' }] };
 
   // Device B already pushed: one event + enroll + rate in the cloud.
   const client = fakeClient('u2');
@@ -167,7 +168,8 @@ globalThis.CustomEvent = class CustomEvent {
   // Both devices' legacy entries landed on meaning_recall only — the staged
   // enroll keeps its four task cards, ratings hit the one card.
   const meaningKey = Object.keys(merged.fsrs).find((k) => k.endsWith(':meaning_recall'));
-  assert.match(meaningKey, /^a1-s1-l1:c1@9859465e:meaning_recall$/, 'real-revision task key');
+  const realRev = contentRev(lesson.chunks[0]);
+  assert.equal(meaningKey, `a1-s1-l1:c1@${realRev}:meaning_recall`, 'real-revision task key');
   assert.equal(merged.fsrs[meaningKey].reps, 2, 'both devices’ ratings replayed');
   assert.equal(
     Object.keys(merged.fsrs).filter((k) => k.startsWith('a1-s1-l1:c1@')).length, 4,

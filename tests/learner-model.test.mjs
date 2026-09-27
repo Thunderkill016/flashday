@@ -14,12 +14,14 @@ import {
   contentRev,
   normalizeTaskKey,
   parseTaskKey,
-  revAt,
+  unambiguousRev,
+  revisionCount,
   skillTargetFor,
   taskKey,
   STEP_TASKS,
   TASK_KINDS
 } from '../src/core/domain.js';
+import { CHUNK_REVISION_HISTORY } from '../src/content/revisions.js';
 import { projectLessonEvent, projectReviewEntry, projectAll } from '../src/core/evidence-projection.js';
 import { deriveLearnerState } from '../src/core/learner-state.js';
 import { planNext } from '../src/core/planner.js';
@@ -64,19 +66,23 @@ const lessons = [
 
 const tk = (chunkId, kind, l = lesson) => {
   const chunk = l.chunks.find((c) => c.id === chunkId);
-  return taskKey(l.id, chunkId, kind, contentRev(chunk.target));
+  return taskKey(l.id, chunkId, kind, contentRev(chunk));
 };
 
 // ── 1. Content adapter: all 30 lessons adapt; malformed input fails loudly ──
 {
   const adapted = adaptCourse(LESSONS);
   assert.equal(adapted.goals.length, 30);
-  const live = [...adapted.components.values()].filter((c) => !c.superseded);
+  const live = [...adapted.components.values()].filter((c) => c.chunk !== null && !c.superseded && !c.ambiguous);
   const retired = [...adapted.components.values()].filter((c) => c.superseded);
+  const ambiguousSlots = [...adapted.components.values()].filter((c) => c.ambiguous);
   assert(live.length >= 30 * 6, 'every chunk becomes a component');
   assert.equal(adapted.tasks.size, live.length * TASK_KINDS.length, 'one task per live component per kind');
   assert(retired.length > 0, 'ledger keeps superseded revisions resolvable (s1-l1 c7/c8 changed)');
   assert(retired.every((c) => c.chunk === null), 'superseded components carry no renderable text');
+  assert(ambiguousSlots.length > 0, 'multi-revision slots register an ambiguous component (no tasks)');
+  assert(ambiguousSlots.every((c) => c.id.split(':').length === 2 && c.chunk === null && !c.superseded),
+    'ambiguous slot components are bare l:c ids, not schedulable phrases');
   for (const task of adapted.tasks.values()) {
     assert(TASK_KINDS.includes(task.taskKind));
     assert(skillTargetFor(task.taskKind), `task ${task.id} resolves a skill target`);
@@ -95,43 +101,52 @@ const tk = (chunkId, kind, l = lesson) => {
   assert.throws(() => adaptLesson({ ...lesson, chunks: [{ id: 'c9', target: 't', meaning: 'm' }] }), /c1–c8/);
 }
 
-// ── 2. Task identity: revision-aware + key normalization by timestamp ──
+// ── 2. Task identity: revision-aware; ambiguous legacy records PARK ──
 {
-  // The a1-s1-l1:c7 rewrite (pre-rev-era) is the canonical counterexample:
-  // "How are you?" and "My name is …" shared chunk id c7. Time-stamped
-  // normalization lands each record on the phrase that was actually live.
-  const oldRev = revAt('a1-s1-l1', 'c7', 1790510000000);   // before the rewrite commit
-  const newRev = revAt('a1-s1-l1', 'c7', 1790530000000);   // after it
+  // The a1-s1-l1:c7 rewrite is the canonical counterexample: "How are you?"
+  // and "My name is …" shared chunk id c7. The ledger records both phrases.
+  const c7segs = CHUNK_REVISION_HISTORY['a1-s1-l1'].c7;
+  assert.equal(c7segs.length, 2, 'c7 has two recorded revisions');
+  const [oldRev, newRev] = [c7segs[0].rev, c7segs[1].rev];
   assert.notEqual(oldRev, newRev, 'text change produced a new revision');
-  const oldKey = normalizeTaskKey('a1-s1-l1:c7', 1790510000000);
-  const newKey = normalizeTaskKey('a1-s1-l1:c7', 1790530000000);
-  assert.equal(oldKey, `a1-s1-l1:c7@${oldRev}:meaning_recall`);
-  assert.equal(newKey, `a1-s1-l1:c7@${newRev}:meaning_recall`);
+  assert.equal(revisionCount('a1-s1-l1', 'c7'), 2);
+  assert.equal(unambiguousRev('a1-s1-l1', 'c7'), null, 'multi-rev slot: no honest rev for a rev-less record');
+
+  // Honest rule: a rev-less legacy key on a multi-revision slot cannot be
+  // attributed to either phrase — it PARKS as `l:c:kind` (kept, never
+  // presented), instead of guessing via commit timestamps.
+  const parked = normalizeTaskKey('a1-s1-l1:c7');
+  assert.equal(parked, 'a1-s1-l1:c7:meaning_recall', 'ambiguous legacy key parks rev-less');
+  assert.equal(normalizeTaskKey('a1-s1-l1:c7'), parked, 'deterministic — no timestamp, ever');
+
+  // Explicit rev-bearing keys carry the phrase identity in-band — they
+  // resolve verbatim and stay distinct for the two different phrases.
+  const oldKey = `a1-s1-l1:c7@${oldRev}:meaning_recall`;
+  const newKey = `a1-s1-l1:c7@${newRev}:meaning_recall`;
   assert.notEqual(oldKey, newKey, 'old memory can never ride the new phrase');
+  assert.equal(normalizeTaskKey(oldKey), oldKey, 'rev-bearing keys pass through verbatim');
 
-  // Unchanged chunks resolve to the same rev at any timestamp.
-  assert.equal(
-    revAt('a1-s1-l1', 'c1', 1790500000000),
-    revAt('a1-s1-l1', 'c1', 1790530000000),
-    'untouched text keeps one revision across the whole era'
-  );
-
-  // Rev-less 3-segment keys (unreleased intermediate format) resolve too.
-  const c1 = lesson.chunks[0];
-  const revless = normalizeTaskKey('a1-s1-l1:c1:listening_recognition', Date.now());
-  assert.equal(revless, `a1-s1-l1:c1@${revAt('a1-s1-l1', 'c1', Date.now())}:listening_recognition`);
+  // Unchanged chunks have a single-revision ledger → rev-less resolves
+  // unambiguously (only one phrase ever lived at that slot).
+  assert.equal(revisionCount('a1-s1-l1', 'c1'), 1);
+  const c1rev = unambiguousRev('a1-s1-l1', 'c1');
+  assert(c1rev, 'single-rev chunk resolves');
+  assert.equal(normalizeTaskKey('a1-s1-l1:c1'), `a1-s1-l1:c1@${c1rev}:meaning_recall`);
+  const revless = normalizeTaskKey('a1-s1-l1:c1:listening_recognition');
+  assert.equal(revless, `a1-s1-l1:c1@${c1rev}:listening_recognition`);
   assert.equal(normalizeTaskKey('junk'), null);
   assert.equal(normalizeTaskKey(''), null);
-  // Synthetic/unmanifested lessons keep a rev-less key — the parser copes.
-  assert.equal(normalizeTaskKey('fake-l:c1', 1), 'fake-l:c1:meaning_recall');
+  // Unmanifested lessons keep the rev-less parked form — no ledger to
+  // prove identity with.
+  assert.equal(normalizeTaskKey('fake-l:c1'), 'fake-l:c1:meaning_recall');
 
-  const parsed = parseTaskKey(taskKey('a1-s1-l2', 'c2', 'cued_production', contentRev('x')));
+  const parsed = parseTaskKey(taskKey('a1-s1-l2', 'c2', 'cued_production', contentRev({ target: 'x', meaning: 'y' })));
   assert.deepEqual(
     { lessonId: parsed.lessonId, chunkId: parsed.chunkId, taskKind: parsed.taskKind },
     { lessonId: 'a1-s1-l2', chunkId: 'c2', taskKind: 'cued_production' }
   );
-  assert.equal(parsed.rev, contentRev('x'));
-  assert.equal(parsed.componentId, componentId('a1-s1-l2', 'c2', contentRev('x')));
+  assert.equal(parsed.rev, contentRev({ target: 'x', meaning: 'y' }));
+  assert.equal(parsed.componentId, componentId('a1-s1-l2', 'c2', contentRev({ target: 'x', meaning: 'y' })));
 }
 
 // ── 3. Separate memory states: rating one task leaves siblings untouched ──
@@ -196,14 +211,15 @@ const tk = (chunkId, kind, l = lesson) => {
     'legacy review history preserved');
   // Idempotent: hydrating twice changes nothing.
   assert.deepEqual(hydrateDb(hydrateDb(raw)).fsrs, local, 'hydrate is idempotent');
-  // Cache-only keys the log never mentions are preserved (never dropped).
-  const stray = { ...raw, fsrs: { ...v2Cache, 'a1-s1-l2:c1': v2Cache['a1-s1-l1:c1'] } };
-  const strayHydrated = hydrateDb(stray).fsrs;
-  assert.equal(
-    strayHydrated[normalizeTaskKey('a1-s1-l2:c1', 90000)].reps,
-    v2Cache['a1-s1-l1:c1'].reps,
-    'cache-only card survives — data is never discarded'
-  );
+  // db.fsrs is a PURE derived cache: a stale cache key the log never
+  // recorded must not leak into state — machine A (stale cache) and
+  // machine B (no cache) hydrate the same log to the same state.
+  const stale = { ...raw, fsrs: { ...v2Cache, 'a1-s1-l2:c1': v2Cache['a1-s1-l1:c1'] } };
+  const staleHydrated = hydrateDb(stale).fsrs;
+  assert.deepEqual(staleHydrated, local,
+    'stale cache changes nothing — the log alone determines state');
+  const emptyCache = hydrateDb({ ...raw, fsrs: {} }).fsrs;
+  assert.deepEqual(emptyCache, local, 'no cache at all produces the same state');
 }
 
 // ── 5. Deterministic replay: merge order must not change outcome ──
@@ -247,7 +263,9 @@ const tk = (chunkId, kind, l = lesson) => {
   assert.equal(modelled.outcome, 'submitted', 'write submits are artifacts, not scores');
 
   // componentIds are real KnowledgeComponent ids — resolvable in the domain
-  // registry, revision-carrying, and resolved at the event's own timestamp.
+  // registry. Single-revision chunks emit their rev'd id; multi-revision
+  // chunks emit the bare slot id (a step-level event cannot prove which
+  // phrase was on screen) — it resolves to the registry's ambiguous slot.
   const registry = adaptCourse(LESSONS).components;
   const realLesson = LESSONS.find((l) => l.id === 'a1-s1-l1');
   for (const evId of ['e1', 'e2']) {
@@ -255,16 +273,14 @@ const tk = (chunkId, kind, l = lesson) => {
     for (const id of projected.componentIds) {
       assert(registry.has(id), `componentId ${id} resolves in adaptCourse registry`);
     }
-    assert(projected.componentIds.every((id) => id.includes('@')), 'ids carry revisions');
   }
-  // An event timestamped before the c7 rewrite points at the OLD component.
-  const preRewrite = projectLessonEvent(
-    { ...ev({ id: 'old' }), submittedAt: 1790510000000 },
-    realLesson
-  );
-  const c7id = preRewrite.componentIds.find((id) => id.includes(':c7'));
-  assert.equal(registry.get(c7id)?.superseded, true,
-    'pre-rewrite evidence points at the retired revision of c7');
+  // c7 is multi-revision → its projected id is the ambiguous slot `l:c`,
+  // not a guessed phrase.
+  const c7ref = projectLessonEvent(ev({ id: 'ec7' }), realLesson)
+    .componentIds.find((id) => id.includes(':c7') || id.endsWith(':c7'));
+  assert.equal(c7ref, 'a1-s1-l1:c7', 'multi-rev slot projects the ambiguous bare id');
+  assert.equal(registry.get(c7ref)?.ambiguous, true,
+    'bare slot id resolves to the ambiguous component — honest, never guessed');
 
   // Counterexample honesty: a perfect quiz NEVER mints production evidence.
   const drill = projectLessonEvent(
@@ -276,30 +292,47 @@ const tk = (chunkId, kind, l = lesson) => {
   assert.notEqual(drill.skillTargetId, 'production.writing', 'recognition ≠ writing');
 
   // Review entries project to their task — and only their task — with
-  // honest provenance about whether an observable attempt existed.
+  // provenance split into OBSERVED attempt vs SELF-REPORTED grade.
   const rated = projectReviewEntry({
     id: 'r1', kind: 'rate', taskKey: tk('c1', 'listening_recognition'),
-    grade: 4, at: 5, attempt: 'nghĩa là …', attempted: true, revealed: true, aided: false
+    grade: 4, at: 5, attempt: 'nghĩa là …', attempted: true,
+    attemptScore: 0.4, revealed: true, aided: false
   });
   assert.equal(rated.taskId, tk('c1', 'listening_recognition'));
   assert.equal(rated.skillTargetId, 'reception.listening');
   assert.equal(rated.aided, false, 'observable pre-reveal attempt = unaided retrieval');
   assert.equal(rated.componentIds.length, 1);
   assert(registry.has(rated.componentIds[0]) ||
-    rated.componentIds[0] === `a1-s1-l1:c1@${contentRev(lesson.chunks[0].target)}`,
+    rated.componentIds[0] === `a1-s1-l1:c1@${contentRev(lesson.chunks[0])}`,
     'review componentId is the domain component id');
+
+  // THE COUNTEREXAMPLE: wrong attempt → reveal → self-grade Easy must
+  // record BOTH facts honestly — observed weak attempt AND self-claimed
+  // easy — never laundered into unaided success.
+  const inflated = projectReviewEntry({
+    id: 'r1b', kind: 'rate', taskKey: tk('c1', 'meaning_recall'),
+    grade: 4, at: 7, attempt: 'wrong words here', attempted: true,
+    attemptScore: 0.2, revealed: true, aided: false
+  });
+  assert.equal(inflated.attempted, true);
+  assert.equal(inflated.attemptScore, 0.2, 'observed attempt quality stays on record');
+  assert.equal(inflated.outcome, 'easy', 'the self-grade is recorded as given');
+  assert.equal(inflated.selfReported, true, 'the grade is self-report, not observed ability');
+  assert.equal(inflated.aided, false, 'aided only answers "was an attempt observed"');
 
   // Self-report: graded with no frozen attempt after the answer was shown.
   const selfReport = projectReviewEntry({
     id: 'r2', kind: 'rate', taskKey: tk('c1', 'meaning_recall'),
-    grade: 3, at: 6, attempt: '', attempted: false, revealed: true, aided: true
+    grade: 3, at: 6, attempt: '', attempted: false, attemptScore: null, revealed: true, aided: true
   });
   assert.equal(selfReport.aided, true, 'no observable attempt + revealed answer = aided');
+  assert.equal(selfReport.selfReported, true);
 
   // Records too old to carry provenance → null, never a guessed false.
   const ancient = projectReviewEntry({ id: 'r3', kind: 'rate', chunkKey: 'a1-s1-l1:c1', grade: 1, at: 5 });
   assert.equal(ancient.aided, null, 'absent provenance is unknown, not false');
-  assert.equal(ancient.taskId, normalizeTaskKey('a1-s1-l1:c1', 5), 'legacy grade lands on nearest task');
+  assert.equal(ancient.attempted, null);
+  assert.equal(ancient.taskId, normalizeTaskKey('a1-s1-l1:c1'), 'legacy grade lands on nearest task');
   assert.equal(ancient.outcome, 'again');
   assert.equal(projectReviewEntry({ id: 'e', kind: 'enroll', chunkKey: 'a1-s1-l1:c1', at: 1 }), null,
     'enroll entries are pool facts, not ability evidence');
@@ -332,19 +365,26 @@ const tk = (chunkId, kind, l = lesson) => {
   // A card on the OLD revision of a rewritten chunk is superseded — kept in
   // state, never presented, never counted as current-task progress.
   const legacyState = createInitialDb();
-  const oldRev = revAt('a1-s1-l1', 'c7', 1790510000000);
+  const oldRev = CHUNK_REVISION_HISTORY['a1-s1-l1'].c7[0].rev; // the retired phrase
   const oldTaskId = `a1-s1-l1:c7@${oldRev}:meaning_recall`;
-  legacyState.fsrs[oldTaskId] = {
+  const staleCard = {
     due: new Date(1).toISOString(), stability: 5, difficulty: 5,
     elapsed_days: 1, scheduled_days: 10, learning_steps: 0,
     reps: 3, lapses: 0, state: 2, last_review: new Date(1790510000000).toISOString()
   };
+  legacyState.fsrs[oldTaskId] = staleCard;
+  // …and a rev-less legacy card on the same multi-revision slot: parked.
+  const parkedId = 'a1-s1-l1:c7:meaning_recall';
+  legacyState.fsrs[parkedId] = { ...staleCard };
   const derived = deriveLearnerState(legacyState, LESSONS, Date.now());
   assert.equal(derived.tasks[oldTaskId].superseded, true,
     'old-revision card is superseded — the phrase it learned was edited');
+  assert.equal(derived.tasks[parkedId].ambiguous, true,
+    'rev-less record on a multi-revision slot is ambiguous — parked, not guessed');
   const queue = reviewQueue(legacyState, LESSONS, Date.now());
-  assert.equal(queue.due.length + queue.fresh.length, 0, 'superseded work is never presented');
-  assert.equal(queue.orphaned, 1, 'but it is still counted, not deleted');
+  assert.equal(queue.due.length + queue.fresh.length, 0,
+    'superseded and ambiguous work is never presented');
+  assert.equal(queue.orphaned, 2, 'both are counted, not deleted');
 }
 
 // ── 8. Planner: order, determinism, new cards never hijack the loop ──
@@ -443,7 +483,7 @@ const tk = (chunkId, kind, l = lesson) => {
     { id: 'new', kind: 'rate', taskKey: tk('c1', 'listening_recognition'), grade: 4, at: 1790530000000 }
   ];
   db.fsrs = rebuildFsrsFromLog(db.reviewLog);
-  const legacyTask = normalizeTaskKey('a1-s1-l1:c1', 1790510000000);
+  const legacyTask = normalizeTaskKey('a1-s1-l1:c1');
   assert.equal(db.fsrs[legacyTask].reps, 1, 'legacy rate → meaning_recall only');
   assert.equal(db.fsrs[tk('c1', 'listening_recognition')].reps, 1, 'new task rate → its own card');
   assert.equal(db.fsrs[tk('c1', 'form_recognition')]?.reps ?? 0, 0, 'unexercised kinds have no card');
@@ -461,4 +501,30 @@ const tk = (chunkId, kind, l = lesson) => {
     'recognition ability introduced before recall/production');
 }
 
-console.log('FlashDay learner model: 9 checks passed');
+// ── 10. Rebuild is deterministic even for corrupt timestamps ──
+{
+  // A record with a missing/garbage `at` must replay identically every
+  // run — never at wall-clock "now".
+  const corrupt = [
+    { id: 'e1', kind: 'enroll', chunkKey: 'a1-s1-l1:c1' },
+    { id: 'r1', kind: 'rate', chunkKey: 'a1-s1-l1:c1', grade: 3 },
+    { id: 'r2', kind: 'rate', chunkKey: 'a1-s1-l1:c1', grade: 4, at: 'garbage' }
+  ];
+  const first = rebuildFsrsFromLog(corrupt);
+  const second = rebuildFsrsFromLog(corrupt);
+  assert.deepEqual(first, second, 'same input → same state on every run');
+  const key = Object.keys(first)[0];
+  assert.equal(first[key].reps, 2);
+  assert(Number.isFinite(new Date(first[key].due).getTime()), 'card parses');
+  assert(new Date(first[key].due).getTime() < Date.now(),
+    'corrupt timestamp → epoch-anchored schedule, not wall clock');
+  // And sort order: epoch-0 entries sort first, ties break by id.
+  const mixed = [
+    { id: 'late', kind: 'rate', chunkKey: 'a1-s1-l1:c1', grade: 2, at: 5000 },
+    { id: 'early-noat', kind: 'enroll', chunkKey: 'a1-s1-l1:c1' }
+  ];
+  assert.deepEqual(rebuildFsrsFromLog(mixed), rebuildFsrsFromLog([...mixed].reverse()),
+    'order in the array never matters');
+}
+
+console.log('FlashDay learner model: 10 checks passed');

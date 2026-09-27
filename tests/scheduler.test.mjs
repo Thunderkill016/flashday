@@ -32,7 +32,7 @@ const lesson = {
 
 const tk = (chunkId, kind) => {
   const chunk = lesson.chunks.find((c) => c.id === chunkId);
-  return taskKey(lesson.id, chunkId, kind, contentRev(chunk.target));
+  return taskKey(lesson.id, chunkId, kind, contentRev(chunk));
 };
 
 // Staged enrollment: prepare introduces only its two task kinds; each chunk
@@ -137,7 +137,7 @@ const tk = (chunkId, kind) => {
     { id: 'r2', kind: 'rate', chunkKey: 'a1-s1-l1:c1', grade: 4, at: 90000 }
   ];
   const rebuilt = rebuildFsrsFromLog(legacyLog);
-  const c1Rev = normalizeTaskKey('a1-s1-l1:c1', 2000).split('@')[1].split(':')[0];
+  const c1Rev = normalizeTaskKey('a1-s1-l1:c1').split('@')[1].split(':')[0];
   const legacyTask = `a1-s1-l1:c1@${c1Rev}:${LEGACY_TASK_KIND}`;
   assert.equal(rebuilt[legacyTask].reps, 2, 'legacy rates keep their history on meaning_recall');
   const taskKeys = Object.keys(rebuilt).filter((k) => k.startsWith('a1-s1-l1:c1@'));

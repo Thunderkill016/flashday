@@ -177,17 +177,18 @@ function renderCard(host) {
 
   const entry = state.queue[state.index];
   const resolved = entry.resolved || null;
-  state.current = { revealed: false, attempt: '' };
+  state.current = { revealed: false, attempt: '', attemptScore: null };
 
   const counter = el('p', `${state.index + 1}/${state.total}`, 'review-counter');
   const card = document.createElement('div');
   card.className = 'card review-card';
 
-  if (!resolved || resolved.superseded) {
-    // The phrase this memory belongs to was edited since — the schedule
-    // state is kept (never deleted), but it can't be presented as if it
-    // were today's text.
-    card.appendChild(el('p', 'Thẻ này thuộc nội dung đã thay đổi — bỏ qua.'));
+  if (!resolved || resolved.superseded || resolved.ambiguous) {
+    // superseded: the phrase this memory belongs to was edited since.
+    // ambiguous: the record cannot prove which phrase it exercised
+    // (multi-revision slot, rev-less key). Either way the schedule is
+    // kept (never deleted) but never presented as current content.
+    card.appendChild(el('p', 'Thẻ này thuộc nội dung cũ hoặc không xác định được phiên bản — bỏ qua.'));
     const skip = document.createElement('button');
     skip.type = 'button';
     skip.className = 'btn-secondary';
@@ -248,6 +249,10 @@ function renderCard(host) {
           grade,
           attempt: state.current.attempt,
           attempted,
+          // Observed retrieval quality — the match score of the frozen
+          // pre-reveal attempt — recorded separately from the self-grade.
+          // A wrong attempt graded "Dễ" stays exactly that on record.
+          attemptScore: attempted ? state.current.attemptScore : null,
           revealed: true,
           // Grading with no observable pre-reveal attempt is self-report —
           // the answer was on screen. Never record that as unaided.
@@ -278,6 +283,7 @@ function renderCard(host) {
     revealBtn.hidden = true;
     if (state.current.attempt.trim()) {
       const matches = matchSpeech(expectedAnswer(chunk, taskKind), state.current.attempt);
+      state.current.attemptScore = matches.score;
       const suggested = matches.score >= 0.9 ? 3 : matches.score >= 0.5 ? 2 : 1;
       const suggestion = el(
         'p',

@@ -68,17 +68,21 @@ explicitly rejected key-bound AI.
 FSRS schedules **retrieval tasks**, not chunks: card id
 `lessonId:chunkId@rev:taskKind` (`form_recognition`, `meaning_recall`,
 `listening_recognition`, `cued_production` — `src/core/domain.js`). `rev`
-is a content fingerprint (`contentRev(target)`); editing a chunk's target
-mints a NEW component — the old memory is superseded, never transferred.
-`src/content/revisions.js` is a generated frozen ledger of pre-fingerprint
-text revisions; regenerate it with `node scripts/gen-content-revisions.mjs`
-after history-changing content edits, never edit by hand.
+is a semantic fingerprint of the target↔meaning pair
+(`contentRev(chunk)`); editing either mints a NEW component — the old
+memory is superseded, never transferred. `src/content/revisions.js` is a
+generated frozen ledger of pre-fingerprint revisions; regenerate it with
+`node scripts/gen-content-revisions.mjs`, never edit by hand.
 Enrollment is staged by step (`STEP_TASKS`); `reviewLog` is the durable
-truth and the ONLY path to task state — `rebuildFsrsFromLog` runs on both
-local and cloud hydrate so devices converge. Legacy 2-segment `chunkKey`s
-normalize to `meaning_recall` at the entry's own timestamp — never rewrite
-the log. Review grades are gated on reveal (frozen pre-reveal attempt +
-`attempted`/`revealed`/`aided` in the log); new (never-rated) cards are
+truth and the ONLY path to task state — `hydrateDb` sets
+`fsrs = rebuildFsrsFromLog(reviewLog)` and never consults the stored
+cache, so devices converge byte-equivalent. Rev-less legacy keys resolve
+ONLY when the ledger proves a single revision (`unambiguousRev`); on
+multi-revision slots they PARK as rev-less `ambiguous` cards — kept,
+counted, never presented. Replay is timestamp-deterministic: corrupt `at`
+values land on epoch 0, never `Date.now()`. Review grades are gated on
+reveal (frozen pre-reveal `attempt`/`attemptScore` + `revealed`/`aided`;
+grades are always `selfReported`); new (never-rated) cards are
 introductions, not due work — `reviewQueue()` bounds them
 (`NEW_TASK_BUDGET`, one-per-component sibling bury).
 Evidence projection lives in `src/core/evidence-projection.js` (aided vs

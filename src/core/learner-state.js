@@ -28,7 +28,7 @@ function lessonsIndex(lessons) {
 // no longer resolves (content removed entirely).
 function liveRevFor(lessonsById, lessonId, chunkId) {
   const chunk = lessonsById.get(String(lessonId))?.chunks?.find((c) => String(c.id) === String(chunkId));
-  return chunk ? contentRev(chunk.target) : null;
+  return chunk ? contentRev(chunk) : null;
 }
 
 export function deriveLearnerState(db, lessons, now = Date.now()) {
@@ -59,8 +59,12 @@ export function deriveLearnerState(db, lessons, now = Date.now()) {
       lastGrade: null,
       lastAided: null,
       lastResponse: null,
+      lastAttemptScore: null,
       lastAt: null,
       superseded: parsed.rev != null && parsed.rev !== liveRev,
+      // rev-less keys parked by normalizeTaskKey (multi-revision slot or no
+      // ledger): the record cannot prove which phrase it exercised.
+      ambiguous: parsed.rev == null,
       isNew: Number(card.state ?? State.New) === State.New && Number(card.reps || 0) === 0,
       isDue: dueAt <= nowMs,
       dueAt
@@ -86,8 +90,10 @@ export function deriveLearnerState(db, lessons, now = Date.now()) {
       lastGrade: null,
       lastAided: null,
       lastResponse: null,
+      lastAttemptScore: null,
       lastAt: null,
       superseded: false,
+      ambiguous: parsed?.rev == null,
       isNew: true,
       isDue: false,
       dueAt: null
@@ -99,6 +105,7 @@ export function deriveLearnerState(db, lessons, now = Date.now()) {
       slot.lastGrade = ev.grade ?? null;
       slot.lastAided = ev.aided ?? null;
       slot.lastResponse = ev.response ?? null;
+      slot.lastAttemptScore = ev.attemptScore ?? null;
     }
   }
 

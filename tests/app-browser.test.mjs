@@ -383,6 +383,11 @@ try {
     assert.equal(rateEntries[0].aided, false, 'typed-before-reveal = unaided evidence');
     assert.equal(rateEntries[0].revealed, true);
     assert.equal(rateEntries[0].attempt, 'Hello, I’m …', 'attempt frozen verbatim at reveal');
+    // Observed quality recorded separately from the self-grade: typing the
+    // EN form against a VI expected answer is a weak observable match even
+    // though the learner pressed "Nhớ".
+    assert(typeof rateEntries[0].attemptScore === 'number' && rateEntries[0].attemptScore < 0.9,
+      `attemptScore records observed quality, got ${rateEntries[0].attemptScore}`);
     const logLen = await page.evaluate((key) => {
       const db = JSON.parse(localStorage.getItem(key) || '{}');
       return (db.reviewLog || []).filter((e) => e.kind !== 'enroll').length;

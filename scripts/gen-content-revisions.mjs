@@ -32,8 +32,12 @@ function git(...args) {
 }
 
 // Same fingerprint as src/core/domain.js contentRev — keep in sync.
-function fingerprint(text) {
-  const s = String(text ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+// The artifact is the target↔meaning pair: a sense change under the same
+// English form is a different component.
+function fingerprint(chunk) {
+  const t = String(chunk?.target ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const m = String(chunk?.meaning ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const s = `${t}\u0001${m}`;
   let h = 0x811c9dc5;
   for (let i = 0; i < s.length; i++) {
     h ^= s.codePointAt(i);
@@ -70,7 +74,7 @@ try {
       const perChunk = (history[lesson.id] ||= {});
       for (const chunk of lesson.chunks) {
         if (typeof chunk?.id !== 'string' || typeof chunk?.target !== 'string') continue;
-        const rev = fingerprint(chunk.target);
+        const rev = fingerprint(chunk);
         const segments = (perChunk[chunk.id] ||= []);
         const last = segments[segments.length - 1];
         if (!last) segments.push({ rev, since: ms });

@@ -1,6 +1,6 @@
 # ADR: Learning core v3 — evidence-driven learner model (A1-ARCH-001)
 
-Status: proposed (rev 2 — post-review fixes) — 2026-09-28
+Status: proposed (rev 3 — post-review round 2) — 2026-09-28
 Issue: #30 — Replace chunk-only progress with evidence-driven learner model
 
 ## Problem
@@ -53,57 +53,74 @@ transcript matching is not acoustic pronunciation assessment
 `cued_production` badge reads "Viết lại" — a typed writing task must never
 imply speaking evidence.
 
-### Identity — revision-aware (round-2 fix)
+### Identity — revision-aware, semantic fingerprint (round-3 fix)
 
 Chunk ids `c1…c8` are positional. The repo already rewrote
 `a1-s1-l1:c7/c8` in place ("How are you?" / "I'm fine…" → "My name is…" /
 "And you?"), so `lesson:chunk:kind` identity would transfer one phrase's
 FSRS memory onto a different phrase.
 
-The fix: a KnowledgeComponent is `lesson:chunk@rev` where `rev =
-contentRev(chunk.target)` — a deterministic fingerprint (fnv1a-32 over the
-normalized target text) of the retrieval artifact itself.
+A KnowledgeComponent is `lesson:chunk@rev` where `rev =
+contentRev(chunk)` — a deterministic fingerprint (fnv1a-32) over the
+normalized **target↔meaning pair**. The pair is the semantic identity:
+the same English form taught with a different meaning is a different
+component; a text or meaning change under the same slot both mint a new
+component.
 
-- **Edit preserves identity** when the target text is unchanged (same text
-  → same rev → history carries over).
-- **Edit invalidates identity** when the target text changes (new rev → a
-  new component; the old component is `superseded` — kept in state, counted,
-  never presented as if it were today's text).
-- Trivial whitespace/case edits do not change the rev (normalization).
+- **Edit preserves identity** when the pair is unchanged (history carries
+  over); **invalidates** when either side changes (old component becomes
+  `superseded` — kept in state, counted, never presented as today's text).
+- Trivial whitespace/case edits do not change the rev.
 
 `src/content/revisions.js` is a generated, frozen ledger
 (`scripts/gen-content-revisions.mjs`) mapping each `lesson:chunk` to its
-historical revisions with `since` timestamps mined from git history. It is
-what lets **rev-less legacy keys resolve honestly**: `revAt(lesson, chunk,
-at)` returns the revision that was live at the record's own timestamp, so a
-rate logged before the c7 rewrite lands on the old phrase's component,
-never the new one.
+historical revisions mined from git history.
 
-`adaptCourse()` registers live components AND every ledger revision —
-superseded revisions stay resolvable (`chunk: null`, `superseded: true`),
-so old evidence keeps pointing at a real (retired) component instead of
-dangling.
+**How rev-less legacy keys resolve — honest, never timestamp-guessed:**
+`normalizeTaskKey` is pure and timestamp-free. A rev-less key resolves to
+a rev only when the ledger proves the slot held exactly ONE phrase
+(`unambiguousRev` — single-segment history). When the slot saw multiple
+phrases — or none are recorded — the record cannot prove which phrase the
+learner exercised (commit time ≠ deploy time ≠ seen time), so the key
+stays rev-less: the card is **parked** — kept in state, counted as
+`ambiguous`/`orphaned` in every queue, never presented, never attributed
+to a guessed phrase. New writes always carry the current rev inline, so
+the ambiguity class only exists for pre-fingerprint records.
+
+`adaptCourse()` registers three component forms: live (`chunk` attached),
+superseded ledger revisions (`chunk: null`, `superseded: true`), and
+ambiguous slots (`lesson:chunk` bare id, `chunk: null`, `ambiguous:
+true`) for multi-revision chunks — so every projected componentId,
+including honestly-parked ones, resolves in the registry.
 
 RetrievalTask id: `${lessonId}:${chunkId}@${rev}:${taskKind}`. Legacy
-shapes parse too: `l:c:kind` (rev-less) and `l:c` (pre-task-era) both
-normalize through `revAt` at the record's timestamp.
+shapes parse too: `l:c:kind` and `l:c` normalize through the
+unambiguous-or-park rule above.
 
 ## Evidence honesty (round-2 fix)
 
 `src/core/evidence-projection.js` projects durable records to evidence:
 
 - `lessonEvents` → lesson-level evidence. `componentIds` are the real
-  domain component ids (`lesson:chunk@rev`), resolved at the event's own
-  `submittedAt` — pre-edit events keep pointing at the retired revision.
+  domain component ids: single-revision chunks emit `lesson:chunk@rev`;
+  multi-revision chunks emit the bare slot id `lesson:chunk` (a step score
+  cannot prove which phrase was on screen) — resolvable to the registry's
+  ambiguous component.
 - `reviewLog` rate entries → task-level evidence (`taskId`, grade outcome,
   provenance fields).
+- **Provenance is two separate facts, never conflated** (round-3 fix):
+  - *Observed retrieval*: `attempt` + `attempted` + `attemptScore` — the
+    response frozen at reveal, with its deterministic match score.
+  - *Self-report*: `grade` is always `selfReported: true` — the learner
+    marked it. A wrong attempt graded "Easy" records both facts: observed
+    weak attempt AND self-claimed easy. Nothing is laundered into
+    unaided success.
+  - `aided` answers only "was there observable unaided retrieval":
+    `false` when a pre-reveal attempt exists, `true` when grading
+    followed a bare reveal, `null` when the record is too old to say.
 - **Provenance, recorded not inferred**: `review.js` freezes the typed
-  response at reveal time and writes `attempt`, `attempted`, `revealed`,
-  `aided` on every new rate entry. A grade with an observable pre-reveal
-  attempt is unaided retrieval (`aided: false`); grading with no recorded
-  attempt after the answer was shown is self-report (`aided: true`).
-  Entries too old to carry provenance project `aided: null` — unknown is
-  never laundered into `false`.
+  response at reveal time and writes `attempt`, `attempted`,
+  `attemptScore`, `revealed`, `aided` on every new rate entry.
 - **No grade before reveal**: the click handler and the keyboard handler
   both gate on `state.current.revealed`; the grade row lives inside the
   hidden back panel *and* the flag is checked — a score produced before
@@ -129,27 +146,33 @@ Two strategies were weighed:
 2. **Projection (chosen)**: the raw log is never modified. Replay
    normalizes legacy keys; `db.fsrs` stays a rebuildable cache.
 
-### Canonical rule
+### Canonical rule (round-3 fix)
 
-There is exactly ONE path to task state: `rebuildFsrsFromLog(reviewLog)`.
-Local `hydrateDb()` runs it on the stored log; cloud hydrate runs it on the
-merged log — the same durable inputs produce the same state on every
-device, byte-equivalent (regression test: `tests/learner-model.test.mjs` §4).
+There is exactly ONE path to task state: `rebuildFsrsFromLog(reviewLog)`,
+and `db.fsrs` is a **pure derived cache** — `hydrateDb()` sets
+`fsrs = rebuild(reviewLog)` and never consults the stored cache. A stale
+or hand-edited cache cannot alter learner state; machine A with a stale
+cache and machine B with none hydrate the same log to byte-equal state.
+Keys that exist only in a cache are not durable evidence and are dropped,
+not guessed (reviewLog has existed since the first persisted schema, so
+legitimate work is never cache-only).
 
-The stored `db.fsrs` cache only fills keys the log never mentions
-(pre-log/lost-log data — preserved, never discarded); on any conflict the
-log wins.
+Replay is also deterministic in the face of corrupt data: a missing or
+invalid `at` replays at epoch 0 — never at wall-clock `Date.now()` —
+so the same log always produces the same map on every run.
 
 Rules:
 
 - Legacy `chunkKey` (`lesson:chunk`, 2 segments) on any entry →
-  `meaning_recall` task at the entry's timestamp. Rationale: the old review
-  card asked for VI→EN recall — meaning_recall is its honest nearest match.
-  It is *not* cloned to other kinds. **A legacy `enroll` creates exactly
-  one task card** — the earlier draft expanded it to all four, which could
-  mint listening/writing cards a learner never exercised.
+  `meaning_recall` task. Rationale: the old review card asked for
+  VI→EN recall — meaning_recall is its honest nearest match. It is *not*
+  cloned to other kinds. **A legacy `enroll` creates exactly one task
+  card** — the earlier draft expanded it to all four, which could mint
+  listening/writing cards a learner never exercised.
+- Rev-less keys resolve only when the ledger is unambiguous (single
+  revision); otherwise they park — see Identity.
 - Enroll entries with `tasks` (mid-era format: bare kind names) resolve
-  each kind through `revAt` at the entry's timestamp.
+  each kind through the same unambiguous-or-park rule.
 - New `enroll` entries record `tasks: [full revision-aware task ids]` —
   replay never has to guess which phrase was enrolled.
 - New `rate` entries write `taskKey` (4 segments with rev). They also write
@@ -225,13 +248,17 @@ the freshest failure is the one the learner still carries.
 
 ## Known limitations / non-goals
 
-- Quiz evidence is lesson-level (components = the whole chunk set, resolved
-  at event time). Making it component-exact requires tagging each drill
-  with the chunk it probes — follow-up for A1-CONTENT-001.
-- Review grading is still self-marked at the scoring level — but
-  provenance is now recorded (frozen attempt, reveal flag, aided flag), so
-  a "Nhớ" with an empty typed response is observable self-report, not
-  silent certainty.
+- Quiz evidence is lesson-level (components = the whole chunk set;
+  multi-revision chunks project the ambiguous slot id). Making it
+  component-exact requires tagging each drill with the chunk it probes —
+  follow-up for A1-CONTENT-001.
+- Review grading is still self-marked — but observed retrieval
+  (`attempt`/`attemptScore`) and self-report (`grade`, always
+  `selfReported`) are now separate durable facts, so inflated
+  self-grading stays visible rather than laundered into certainty.
+- Legacy records on multi-revision slots are parked (ambiguous), so a
+  learner with pre-fingerprint history on rewritten chunks restarts those
+  phrases fresh — honest cost of unattributable records.
 - Dictation, match-pairs, word bank and pronunciation checks produce UI
   feedback but no durable evidence events yet.
 - `db.fsrs` is still a cache; truth = `reviewLog` + `lessonEvents`.

@@ -2,7 +2,6 @@
  * Learner evidence store: the durable, append-only record of submitted work.
  * Drafts live in session.js; only submitted attempts land here (rule 2).
  */
-import { normalizeTaskKey } from './domain.js';
 import { rebuildFsrsFromLog } from './scheduler.js';
 
 // v3: FSRS card identity moved from chunk (`lesson:chunk`) to retrieval task
@@ -16,29 +15,13 @@ export function createInitialDb() {
   return { version: DB_VERSION, lessonEvents: [], fsrs: {}, reviewLog: [], profile: {} };
 }
 
-// Cache fallback for keys the durable log never mentions (pre-log or
-// lost-log data — preserved, never guessed). Legacy 2-segment keys become
-// `…@rev:meaning_recall`, the rev resolved at the card's own last_review
-// timestamp so a post-rewrite edit can't claim pre-rewrite history.
-// Idempotent — re-running on an already-normalized map changes nothing.
-function migrateFsrsKeys(raw) {
-  const migrated = {};
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return migrated;
-  for (const [key, card] of Object.entries(raw)) {
-    const at = Date.parse(card?.last_review ?? card?.due ?? '');
-    const normalized = normalizeTaskKey(key, Number.isFinite(at) ? at : undefined);
-    if (!normalized) continue;
-    const isLegacy = key !== normalized;
-    if (isLegacy && migrated[normalized] !== undefined) continue;
-    migrated[normalized] = card;
-  }
-  return migrated;
-}
-
-// Canonical task state: ONE path for local and cloud hydration — replay the
-// durable reviewLog. The stored cache only fills keys the log never
-// mentions; on any conflict the log wins, so the same durable inputs always
-// produce the same state on every device.
+// Canonical task state: ONE path, everywhere — `db.fsrs` is a pure derived
+// cache, rebuilt from the durable reviewLog on every hydrate. The stored
+// `fsrs` map is NEVER consulted: a stale or hand-edited cache cannot alter
+// learner state, and two devices holding the same log produce byte-equal
+// state. Keys that exist only in a stale cache are not durable evidence —
+// they are dropped, not guessed (reviewLog has existed since the first
+// persisted schema, so anything absent from it was never recorded work).
 export function hydrateDb(raw) {
   if (!raw || typeof raw !== 'object' || !Array.isArray(raw.lessonEvents)) {
     return createInitialDb();
@@ -47,7 +30,7 @@ export function hydrateDb(raw) {
   return {
     version: DB_VERSION,
     lessonEvents: raw.lessonEvents,
-    fsrs: { ...migrateFsrsKeys(raw.fsrs), ...rebuildFsrsFromLog(reviewLog) },
+    fsrs: rebuildFsrsFromLog(reviewLog),
     reviewLog,
     profile: raw.profile && typeof raw.profile === 'object' ? raw.profile : {}
   };

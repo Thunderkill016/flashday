@@ -21,7 +21,7 @@ import {
   componentId,
   normalizeTaskKey,
   parseTaskKey,
-  revAt,
+  unambiguousRev,
   skillTargetFor
 } from './domain.js';
 
@@ -61,15 +61,18 @@ function sourceOf(payload) {
 }
 
 // lessonEvent → one EvidenceEvent at lesson scope. componentIds lists the
-// lesson's components AT THE EVENT'S OWN TIMESTAMP (a step score cannot be
-// attributed to one chunk — documented limitation in the ADR).
+// lesson's components — for chunks with a single-revision ledger entry the
+// rev is unambiguous (one phrase ever lived there); for chunks whose text
+// changed, a step-level event cannot prove which phrase the learner saw,
+// so the bare slot id `lesson:chunk` is emitted (resolves to the registry's
+// ambiguous component — honest "some phrase at this slot", not a guess).
 export function projectLessonEvent(event, lesson) {
   if (!event || typeof event !== 'object') return null;
   const skillTargetId = EVENT_SKILL[event.kind];
   if (!skillTargetId) return null;
   const at = Number(event.submittedAt) || 0;
   const componentIds = Array.isArray(lesson?.chunks)
-    ? lesson.chunks.map((c) => componentId(lesson.id, c.id, revAt(lesson.id, c.id, at)))
+    ? lesson.chunks.map((c) => componentId(lesson.id, c.id, unambiguousRev(lesson.id, c.id)))
     : [];
   return {
     id: `ev:${String(event.id)}`,
@@ -90,22 +93,24 @@ export function projectLessonEvent(event, lesson) {
 }
 
 // reviewLog entry → task-level EvidenceEvent. Legacy 2-segment chunkKey
-// normalizes to the legacy task kind at the entry's timestamp (ADR:
-// projection, not rewrite). `enroll` entries are pool facts, not ability
-// evidence — skipped.
+// normalizes to the legacy task kind (ADR: projection, not rewrite);
+// rev-less keys on multi-revision chunks stay rev-less → parked.
+// `enroll` entries are pool facts, not ability evidence — skipped.
 //
-// Provenance: `aided` reflects what the durable entry can actually prove.
-// A frozen pre-reveal attempt (`attempted: true`) = observable unaided
-// retrieval. Grading with no recorded attempt after the answer was shown =
-// self-report → aided. Records old enough to carry neither field → null
-// (unknown), never silently unaided.
+// Provenance is two separate facts, never conflated:
+// - OBSERVED retrieval: `attempted` + `attempt` + `attemptScore` — the
+//   response frozen at reveal, with its deterministic match score.
+// - SELF-REPORT: `grade` is always `selfReported` — the learner marked it.
+//   `aided` answers "was there observable unaided retrieval": false only
+//   when a pre-reveal attempt was actually recorded; true when grading
+//   followed a bare reveal; null when the record is too old to say.
 export function projectReviewEntry(entry) {
   if (!entry || typeof entry !== 'object') return null;
   const key = entry.taskKey ?? entry.chunkKey;
   if (!key) return null;
   if (entry.kind === 'enroll') return null;
   const occurredAt = Number(entry.at ?? entry.reviewedAt ?? entry.submittedAt) || 0;
-  const taskId = normalizeTaskKey(key, occurredAt);
+  const taskId = normalizeTaskKey(key);
   const parsed = parseTaskKey(taskId);
   if (!parsed) return null;
   const grade = Number(entry.grade);
@@ -113,6 +118,9 @@ export function projectReviewEntry(entry) {
     : typeof entry.response === 'string' ? entry.response : undefined;
   const attempted = entry.attempted != null ? Boolean(entry.attempted)
     : attempt != null ? attempt.trim().length > 0 : null;
+  const attemptScore = Number.isFinite(Number(entry.attemptScore))
+    ? Number(entry.attemptScore)
+    : null;
   const aided = entry.aided != null ? Boolean(entry.aided)
     : attempted === true ? false
     : attempted === false ? true
@@ -130,7 +138,12 @@ export function projectReviewEntry(entry) {
     outcome: GRADE_OUTCOME[grade] || 'submitted',
     aided,
     attempted,
+    attemptScore,
     revealed: entry.revealed != null ? Boolean(entry.revealed) : null,
+    // The grade itself is always a self-report — never upgrade it to
+    // observed ability. Observed ability is what `attempt`/`attemptScore`
+    // carry; a wrong attempt graded "Easy" is exactly that on record.
+    selfReported: true,
     confidence: null,
     occurredAt,
     contentVersion: Number(entry.contentVersion) || 0,
