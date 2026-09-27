@@ -20,7 +20,10 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 let browser;
 let passed = 0;
-const check = (name) => { passed++; console.log(`  ✓ ${name}`); };
+const check = (name) => {
+  passed++;
+  console.log(`  ✓ ${name}`);
+};
 
 try {
   browser = await chromium.launch({ executablePath, headless: true });
@@ -85,12 +88,20 @@ try {
     await readPane.locator('.quiz-question').nth(0).locator('.quiz-option').nth(0).click();
     await readPane.locator('.quiz-question').nth(1).locator('.quiz-option').nth(1).click();
     await sleep(1200);
-    await page.evaluate(() => { window.location.hash = `#/lesson/${'a1-s1-l1'}/listen`; });
+    await page.evaluate(() => {
+      window.location.hash = `#/lesson/${'a1-s1-l1'}/listen`;
+    });
     await page.waitForSelector('.runner-pane[data-step="listen"]:not([hidden])');
-    await page.evaluate(() => { window.location.hash = `#/lesson/${'a1-s1-l1'}/read`; });
+    await page.evaluate(() => {
+      window.location.hash = `#/lesson/${'a1-s1-l1'}/read`;
+    });
     await page.waitForSelector('.runner-pane[data-step="read"]:not([hidden])');
     const pane = page.locator('.runner-pane[data-step="read"]');
-    assert.equal(await pane.locator('.quiz').getAttribute('data-quiz-mount'), stamp, 'quiz DOM must be the same mounted node');
+    assert.equal(
+      await pane.locator('.quiz').getAttribute('data-quiz-mount'),
+      stamp,
+      'quiz DOM must be the same mounted node'
+    );
     assert.equal(await pane.locator('.quiz-question').nth(0).locator('input').nth(0).isChecked(), true);
     assert.equal(await pane.locator('.quiz-question').nth(1).locator('input').nth(1).isChecked(), true);
     await context.close();
@@ -111,7 +122,11 @@ try {
     assert.equal(await pane.locator('.quiz-hint:not([hidden])').count(), 3, 'hints show for wrong answers');
     assert.equal(await pane.locator('.quiz-retry').isVisible(), true);
     await pane.locator('.quiz-retry').click();
-    assert.equal(await pane.locator('.quiz-question').nth(0).locator('input').nth(0).isEnabled(), true, 'options re-enabled');
+    assert.equal(
+      await pane.locator('.quiz-question').nth(0).locator('input').nth(0).isEnabled(),
+      true,
+      'options re-enabled'
+    );
     // answer correctly
     await pane.locator('.quiz-question').nth(0).locator('.quiz-option').nth(0).click();
     await pane.locator('.quiz-question').nth(1).locator('.quiz-option').nth(1).click();
@@ -134,14 +149,21 @@ try {
     await page.goto(`${origin}app/?preview#/lesson/${L1}/write`);
     await page.locator('.runner-pane[data-step="write"] .write-area').fill('old draft text');
     await sleep(1200);
-    await page.evaluate(({ key, lessonId }) => {
-      const session = JSON.parse(localStorage.getItem(key));
-      session.drafts[lessonId].contentVersion = 99;
-      localStorage.setItem(key, JSON.stringify(session));
-    }, { key: SESSION_KEY, lessonId: L1 });
+    await page.evaluate(
+      ({ key, lessonId }) => {
+        const session = JSON.parse(localStorage.getItem(key));
+        session.drafts[lessonId].contentVersion = 99;
+        localStorage.setItem(key, JSON.stringify(session));
+      },
+      { key: SESSION_KEY, lessonId: L1 }
+    );
     await page.reload();
     await page.waitForSelector('[data-role="stale-notice"]');
-    assert.equal(await page.locator('.runner-pane[data-step="write"] .write-area').inputValue(), '', 'stale draft must not replay answers');
+    assert.equal(
+      await page.locator('.runner-pane[data-step="write"] .write-area').inputValue(),
+      '',
+      'stale draft must not replay answers'
+    );
     await context.close();
     check('stale draft → notice, empty textarea');
   }
@@ -194,6 +216,7 @@ try {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
     const page = await context.newPage();
     await page.goto(`${origin}app/?preview#/lesson/a1-s1-l5/prepare`);
+    await page.locator('.runner-pane[data-step="read"]').waitFor();
     assert.equal(await page.locator('.step-pill').count(), 4, 'checkpoint hides the prepare step');
     assert.equal(await page.locator('.runner-pane[data-step="read"]').isVisible(), true);
     assert.equal(await page.locator('.runner-pane[data-step="prepare"]').count(), 0);
@@ -227,9 +250,15 @@ try {
     await readPane.locator('.quiz-submit').click();
     assert.equal(await readPane.locator('.quiz-retry').isVisible(), true);
 
-    await page.evaluate(() => { window.location.hash = '#/lesson/a1-s1-l1/write'; });
+    await page.evaluate(() => {
+      window.location.hash = '#/lesson/a1-s1-l1/write';
+    });
     const writePane = page.locator('.runner-pane[data-step="write"]');
-    assert.equal(await writePane.locator('[data-role="write-save"]').isVisible(), false, 'Lưu lần thử hidden before Xem mẫu');
+    assert.equal(
+      await writePane.locator('[data-role="write-save"]').isVisible(),
+      false,
+      'Lưu lần thử hidden before Xem mẫu'
+    );
     // empty text → Xem mẫu stays disabled
     assert.equal(await writePane.locator('[data-role="model-toggle"]').isEnabled(), false);
     await writePane.locator('.write-area').fill('Hi I am Linh');

@@ -16,7 +16,12 @@ const ok = () => checks++;
 
 // canonical.js is the origin policy enforcer — it must be the first script
 // in every HTML entry so it runs before Firebase initialises (lesson 8).
-for (const [name, html] of [['landing', landing], ['app', app], ['login', compactHtml(login)], ['auth', compactHtml(auth)]]) {
+for (const [name, html] of [
+  ['landing', landing],
+  ['app', app],
+  ['login', compactHtml(login)],
+  ['auth', compactHtml(auth)]
+]) {
   const canonicalAt = html.indexOf('src="/canonical.js"');
   const headAt = html.indexOf('</head>');
   const moduleAt = html.indexOf('type="module"');
@@ -38,7 +43,8 @@ ok();
 
 // App shell: module entries + the three tabs + preview badge hook.
 assert.match(app, /src="\.\.\/product-bootstrap\.js"/);
-assert.match(app, /src="\.\.\/src\/ui\/app\.js"/);
+assert.doesNotMatch(app, /src="\.\.\/src\/ui\/app\.js"/);
+assert.match(productBootstrap, /import\('\.\/src\/ui\/app\.js'\)/);
 assert.match(app, /href="\.\.\/app\.css"/);
 for (const label of ['Học', 'Ôn', 'Hồ sơ']) assert(app.includes(`>${label}<`), `app tab ${label} missing`);
 assert.match(app, /id="previewBadge"/);
@@ -48,11 +54,24 @@ ok();
 // Login page keeps every id the glue touches — renaming one silently breaks
 // sign-in, reset, or the password toggle.
 for (const id of [
-  'auth-form', 'auth-tabs', 'auth-title', 'auth-sub', 'auth-providers',
-  'auth-google-btn', 'auth-divider', 'email-field', 'email',
-  'password-field', 'password', 'password-confirm-field', 'password-confirm',
-  'toggle-password', 'forgot-password', 'return-to-signin',
-  'auth-submit-btn', 'auth-status'
+  'auth-form',
+  'auth-tabs',
+  'auth-title',
+  'auth-sub',
+  'auth-providers',
+  'auth-google-btn',
+  'auth-divider',
+  'email-field',
+  'email',
+  'password-field',
+  'password',
+  'password-confirm-field',
+  'password-confirm',
+  'toggle-password',
+  'forgot-password',
+  'return-to-signin',
+  'auth-submit-btn',
+  'auth-status'
 ]) {
   assert(login.includes(`id="${id}"`), `login missing #${id}`);
 }
@@ -69,10 +88,25 @@ for (const input of ['index.html', 'app/index.html', 'login/index.html', 'auth/i
 ok();
 
 // firebase.json headers: no-cache on every page pattern, immutable on assets.
-for (const pattern of ['"/"', '"/login"', '"/login/**"', '"/app"', '"/app/**"', '"/auth"', '"/auth/**"', '"**/*.html"', '"/canonical.js"']) {
-  assert(firebaseJson.includes(`"source": ${pattern.replace(/"/g, '"')}`) || firebaseJson.includes(`"source": ${pattern}`), `firebase.json missing source ${pattern}`);
+for (const pattern of [
+  '"/"',
+  '"/login"',
+  '"/login/**"',
+  '"/app"',
+  '"/app/**"',
+  '"/auth"',
+  '"/auth/**"',
+  '"**/*.html"',
+  '"/canonical.js"'
+]) {
+  assert(
+    firebaseJson.includes(`"source": ${pattern.replace(/"/g, '"')}`) || firebaseJson.includes(`"source": ${pattern}`),
+    `firebase.json missing source ${pattern}`
+  );
 }
-const noCacheBlocks = (firebaseJson.match(/"Cache-Control",\s*"value":\s*"no-cache"/g) || firebaseJson.match(/no-cache/g)).length;
+const noCacheBlocks = (
+  firebaseJson.match(/"Cache-Control",\s*"value":\s*"no-cache"/g) || firebaseJson.match(/no-cache/g)
+).length;
 assert(noCacheBlocks >= 8, 'every page pattern must be no-cache');
 assert.match(firebaseJson, /"\/assets\/\*\*"/);
 assert.match(firebaseJson, /max-age=31536000, immutable/);
