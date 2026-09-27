@@ -449,6 +449,115 @@ try {
     check('write compare + retry records attempt 2');
   }
 
+  // ── 14. AI tutor paths (mocked): explain, write review, roleplay ──
+  {
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+    });
+    await context.addInitScript(() => {
+      window.__FLASHDAY_TUTOR__ = {
+        available: true,
+        explainWrong: async () => 'Giải thích AI mẫu: chủ ngữ "I" đi với "am".',
+        reviewWriting: async () => ({
+          correct: false,
+          errors: [{ said: 'i', fix: 'I', why: 'Viết hoa chữ đầu câu.' }],
+          better: 'I’m Linh. I’m from Hue.',
+          praise: 'Bạn đã nói đúng tên và quê mình.',
+        }),
+        startRoleplay: () => ({
+          partnerName: 'Sam',
+          history: [],
+          start: async () => 'Hi! I’m Sam. What’s your name?',
+          send: async () => 'Nice to meet you. Where are you from?',
+          feedback: async () => ({
+            items: [
+              { check: 'Chào và giới thiệu tên', ok: true, note: 'Đã chào và nói tên.' },
+              { check: 'Hỏi tên và quê người kia', ok: true, note: 'Đã hỏi lại.' },
+              { check: 'Câu đáp lịch sự', ok: false, note: 'Chưa nói "Nice to meet you".' },
+            ],
+            corrections: [{ said: 'i linh', better: 'I’m Linh' }],
+            summary: 'Hội thoại đủ ý — mức A1.',
+          }),
+        }),
+      };
+    });
+    const page = await context.newPage();
+
+    // Explain my answer: wrong drill answer → AI button → explanation text
+    await goto(page, `${origin}app/?preview#/lesson/${L1}/prepare`);
+    const preparePane = page.locator('.runner-pane[data-step="prepare"]');
+    for (let i = 0; i < 4; i++) {
+      await preparePane.locator('.quiz-question').nth(i).locator('.quiz-option').nth(2).click();
+    }
+    await preparePane.locator('.quiz-submit').click();
+    const explainBtn = preparePane.locator('.quiz-question').nth(0).locator('.quiz-explain-btn');
+    assert.equal(await explainBtn.isVisible(), true, 'AI explain button on wrong answer');
+    await explainBtn.click();
+    await preparePane.locator('.quiz-explain:not([hidden])').waitFor();
+    assert.match(await preparePane.locator('.quiz-explain').first().textContent(), /AI mẫu/);
+
+    // Write review: save → AI feedback with error + suggestion
+    await goto(page, `${origin}app/?preview#/lesson/${L1}/write`);
+    const writePane = page.locator('.runner-pane[data-step="write"]');
+    await writePane.locator('.write-area').fill('i am linh. i from hue.');
+    await writePane.locator('[data-role="model-toggle"]').click();
+    await writePane.locator('[data-role="write-save"]').click();
+    await writePane.locator('[data-role="ai-review"]:not([hidden])').waitFor();
+    const reviewText = await writePane.locator('[data-role="ai-review"]').textContent();
+    assert.match(reviewText, /Viết hoa chữ đầu câu/);
+    assert.match(reviewText, /I’m Linh/);
+
+    // Roleplay: start → partner opener → learner turn → AI graded checklist
+    await goto(page, `${origin}app/?preview#/lesson/${L1}/speak`);
+    const speakPane = page.locator('.runner-pane[data-step="speak"]');
+    await speakPane.locator('[data-role="roleplay-start"]').click();
+    await speakPane.locator('.roleplay-msg.roleplay-partner').waitFor();
+    await speakPane.locator('.roleplay-input').fill('Hi Sam. I am Linh. I am from Hue.');
+    await speakPane.locator('.roleplay-send').click();
+    await speakPane.locator('.roleplay-msg.roleplay-partner').nth(1).waitFor();
+    assert.equal(await speakPane.locator('.roleplay-msg').count(), 3, 'opener + learner + reply in log');
+    await speakPane.locator('[data-role="roleplay-end"]').click();
+    await speakPane.locator('[data-role="roleplay-feedback"]:not([hidden])').waitFor();
+    const fbText = await speakPane.locator('[data-role="roleplay-feedback"]').textContent();
+    assert.match(fbText, /2\/3 mục đạt/);
+    assert.match(fbText, /i linh.*I’m Linh/s);
+    const speakEvents = await page.evaluate((key) => {
+      const db = JSON.parse(localStorage.getItem(key) || '{}');
+      return (db.lessonEvents || []).filter((e) => e.kind === 'speak' && e.payload?.roleplay);
+    }, DB_KEY);
+    assert.equal(speakEvents.length, 1, 'roleplay recorded as speak event');
+    assert.deepEqual(
+      [speakEvents[0].payload.correct, speakEvents[0].payload.total],
+      [2, 3],
+      'AI checklist mapped onto correct/total'
+    );
+    await context.close();
+    check('AI explain + write review + roleplay end-to-end (mocked tutor)');
+  }
+
+  // ── 15. No tutor → AI affordances absent, static flow intact ──
+  {
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+    });
+    await context.addInitScript(() => {
+      window.__FLASHDAY_TUTOR__ = { available: false };
+    });
+    const page = await context.newPage();
+    await goto(page, `${origin}app/?preview#/lesson/${L1}/prepare`);
+    const preparePane = page.locator('.runner-pane[data-step="prepare"]');
+    for (let i = 0; i < 4; i++) {
+      await preparePane.locator('.quiz-question').nth(i).locator('.quiz-option').nth(2).click();
+    }
+    await preparePane.locator('.quiz-submit').click();
+    assert.equal(await preparePane.locator('.quiz-explain-btn').count(), 0, 'no AI button without tutor');
+    await goto(page, `${origin}app/?preview#/lesson/${L1}/speak`);
+    assert.equal(await page.locator('[data-role="roleplay"]').count(), 0, 'no roleplay block without tutor');
+    assert.equal(await page.locator('[data-role="spoke"]').isVisible(), true, 'self-report flow still present');
+    await context.close();
+    check('tutor absent → static fallbacks only');
+  }
+
   console.log(`FlashDay app browser tests: ${passed} groups passed`);
 } finally {
   await browser?.close();

@@ -5,7 +5,7 @@
  */
 let mountCounter = 0;
 
-export function mountQuiz(el, questions, { onSubmit, initialAnswers = {}, onAnswerChange } = {}) {
+export function mountQuiz(el, questions, { onSubmit, initialAnswers = {}, onAnswerChange, onExplain } = {}) {
   const mountStamp = `quiz-${++mountCounter}`;
   el.dataset.quizMount = mountStamp;
   el.classList.add('quiz');
@@ -49,7 +49,40 @@ export function mountQuiz(el, questions, { onSubmit, initialAnswers = {}, onAnsw
     hint.hidden = true;
     if (question.hint) hint.textContent = `Gợi ý: ${question.hint}`;
     fieldset.appendChild(hint);
-    return { fieldset, optionsEl, hint, inputs: () => [...optionsEl.querySelectorAll('input')] };
+
+    // "Explain my answer" (Duolingo Max-style): after a wrong submit the
+    // learner can ask the AI tutor why THEIR choice fails — the hint stays
+    // for when AI is unavailable.
+    let explainBtn = null;
+    const explainOut = document.createElement('p');
+    explainOut.className = 'quiz-explain';
+    explainOut.hidden = true;
+    fieldset.appendChild(explainOut);
+    if (onExplain) {
+      explainBtn = document.createElement('button');
+      explainBtn.type = 'button';
+      explainBtn.className = 'btn-secondary quiz-explain-btn';
+      explainBtn.textContent = 'Giải thích với AI';
+      explainBtn.hidden = true;
+      explainBtn.addEventListener('click', async () => {
+        explainBtn.disabled = true;
+        explainBtn.textContent = 'AI đang nghĩ…';
+        try {
+          const answer = await onExplain(question, Number(answers[index]));
+          if (explainOut.isConnected) {
+            explainOut.textContent = answer;
+            explainOut.hidden = false;
+          }
+        } catch {
+          explainBtn.textContent = 'Giải thích với AI';
+          explainBtn.disabled = false;
+          return;
+        }
+        explainBtn.hidden = true;
+      });
+      fieldset.appendChild(explainBtn);
+    }
+    return { fieldset, optionsEl, hint, explainBtn, explainOut, inputs: () => [...optionsEl.querySelectorAll('input')] };
   });
 
   const submitBtn = document.createElement('button');
@@ -85,6 +118,7 @@ export function mountQuiz(el, questions, { onSubmit, initialAnswers = {}, onAnsw
       const showHint = !isRight && Boolean(questions[index].hint);
       q.hint.hidden = !showHint;
       if (showHint) hintsViewed++;
+      if (q.explainBtn) q.explainBtn.hidden = isRight;
     });
     setInputsDisabled(true);
     submitBtn.hidden = true;
@@ -100,6 +134,13 @@ export function mountQuiz(el, questions, { onSubmit, initialAnswers = {}, onAnsw
       delete q.fieldset.dataset.result;
       q.optionsEl.classList.remove('is-correct', 'is-wrong');
       q.hint.hidden = true;
+      if (q.explainBtn) {
+        q.explainBtn.hidden = true;
+        q.explainBtn.disabled = false;
+        q.explainBtn.textContent = 'Giải thích với AI';
+      }
+      q.explainOut.hidden = true;
+      q.explainOut.textContent = '';
     }
     retryBtn.hidden = true;
     submitBtn.hidden = false;
