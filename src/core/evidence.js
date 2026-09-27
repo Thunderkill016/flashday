@@ -2,12 +2,33 @@
  * Learner evidence store: the durable, append-only record of submitted work.
  * Drafts live in session.js; only submitted attempts land here (rule 2).
  */
-export const DB_VERSION = 2;
+import { normalizeTaskKey } from './domain.js';
+
+// v3: FSRS card identity moved from chunk (`lesson:chunk`) to retrieval task
+// (`lesson:chunk:taskKind`). The cache map is key-normalized on hydrate;
+// the durable reviewLog is never rewritten (docs/adr/learning-core-v3.md).
+export const DB_VERSION = 3;
 
 export const LESSON_EVENT_KINDS = Object.freeze(['drill', 'read', 'listen', 'write', 'speak']);
 
 export function createInitialDb() {
   return { version: DB_VERSION, lessonEvents: [], fsrs: {}, reviewLog: [], profile: {} };
+}
+
+// v2→v3 cache migration: legacy 2-segment keys become `…:meaning_recall`
+// (their honest nearest task). A task-keyed entry always wins a collision.
+// Idempotent — re-running on an already-normalized map changes nothing.
+function migrateFsrsKeys(raw) {
+  const migrated = {};
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return migrated;
+  for (const [key, card] of Object.entries(raw)) {
+    const normalized = normalizeTaskKey(key);
+    if (!normalized) continue;
+    const isLegacy = key !== normalized;
+    if (isLegacy && migrated[normalized] !== undefined) continue;
+    migrated[normalized] = card;
+  }
+  return migrated;
 }
 
 export function hydrateDb(raw) {
@@ -17,7 +38,7 @@ export function hydrateDb(raw) {
   return {
     version: DB_VERSION,
     lessonEvents: raw.lessonEvents,
-    fsrs: raw.fsrs && typeof raw.fsrs === 'object' ? raw.fsrs : {},
+    fsrs: migrateFsrsKeys(raw.fsrs),
     reviewLog: Array.isArray(raw.reviewLog) ? raw.reviewLog : [],
     profile: raw.profile && typeof raw.profile === 'object' ? raw.profile : {}
   };

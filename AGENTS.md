@@ -63,6 +63,20 @@ model is small, never trust raw replies. Test mocks go through
 `window.__FLASHDAY_TUTOR__`. Do NOT add a cloud/API-key path — the user
 explicitly rejected key-bound AI.
 
+## Learning core v3 (A1-ARCH-001)
+
+FSRS schedules **retrieval tasks**, not chunks: card id
+`lessonId:chunkId:taskKind` (`form_recognition`, `meaning_recall`,
+`listening_recognition`, `cued_production` — `src/core/domain.js`).
+Enrollment is staged by step (`STEP_TASKS`); `reviewLog` is the durable
+truth, `db.fsrs` a rebuildable cache. Legacy 2-segment `chunkKey`s
+normalize to `meaning_recall` at replay — never rewrite the log.
+Evidence projection lives in `src/core/evidence-projection.js` (aided vs
+unaided honesty rules), derived state in `src/core/learner-state.js`, and
+the deterministic next-action policy in `src/core/planner.js` — AI never
+chooses what the learner studies next. Full rationale:
+`docs/adr/learning-core-v3.md`.
+
 ## Pages and auth flow
 
 | Route        | File             | Role                                   |

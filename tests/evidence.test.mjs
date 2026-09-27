@@ -4,7 +4,7 @@ import { DB_VERSION, appendLessonEvent, createInitialDb, hydrateDb } from '../sr
 {
   const db = createInitialDb();
   assert.equal(db.version, DB_VERSION);
-  assert.equal(DB_VERSION, 2);
+  assert.equal(DB_VERSION, 3);
   assert.deepEqual(db.lessonEvents, []);
   assert.deepEqual(db.fsrs, {});
 }

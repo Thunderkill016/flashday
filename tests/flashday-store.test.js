@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createPersistentStore } from '../src/core/store.js';
-import { createInitialDb, hydrateDb } from '../src/core/evidence.js';
+import { createInitialDb, hydrateDb, DB_VERSION } from '../src/core/evidence.js';
 import { DB_BASE_KEY } from '../src/core/namespace.js';
 
 function memoryStorage(initial = {}) {
@@ -49,7 +49,7 @@ let checks = 0;
 {
   const storage = memoryStorage({ [KEY]: '{broken json' });
   const store = createPersistentStore({ storage, key: KEY, hydrate: hydrateDb, fallback: createInitialDb });
-  assert.equal(store.getState().version, 2, 'malformed storage must fall back to a valid DB');
+  assert.equal(store.getState().version, DB_VERSION, 'malformed storage must fall back to a valid DB');
   checks++;
 }
 
