@@ -4,7 +4,7 @@
 // a mastery claim.
 import { LESSONS } from '../../content/a1/index.js';
 import { chunkForKey, dueChunks, nextDueAt, rateChunk } from '../../core/scheduler.js';
-import { playButton } from '../speech.js';
+import { playButton, matchSpeech } from '../speech.js';
 
 const GRADES = [
   { grade: 1, label: 'Quên', key: '1' },
@@ -140,6 +140,22 @@ function renderCard(host) {
   revealBtn.addEventListener('click', () => {
     back.hidden = false;
     revealBtn.hidden = true;
+    // Production recall assist: a typed attempt gets scored against the
+    // target and one grade lights up — the learner still self-marks, but
+    // with evidence instead of vibes (testing-effect research).
+    if (answer.value.trim()) {
+      const match = matchSpeech(chunk.target, answer.value);
+      const suggested = match.score >= 0.9 ? 3 : match.score >= 0.5 ? 2 : 1;
+      const suggestion = el(
+        'p',
+        `Bạn gõ khớp ${Math.round(match.score * 100)}% — gợi ý chấm: ${GRADES[suggested - 1].label}`,
+        'review-suggestion'
+      );
+      back.insertBefore(suggestion, gradeRow);
+      gradeRow
+        .querySelector(`[data-grade="${suggested}"]`)
+        ?.classList.add('suggested');
+    }
   });
 
   card.append(answer, revealBtn, back);

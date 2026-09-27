@@ -42,6 +42,7 @@ export function createMockTutor(overrides = {}) {
     }),
     startRoleplay: ({ partnerName = 'Sam' } = {}) => ({
       partnerName,
+      history: [],
       start: async () => `Hi! I’m ${partnerName}. What’s your name?`,
       send: async (text) =>
         `Hi! I’m ${partnerName}. Nice to meet you. Where are you from?`,
@@ -54,6 +55,45 @@ export function createMockTutor(overrides = {}) {
         corrections: [],
         summary: 'Hội thoại đủ ý — mức A1.'
       })
+    }),
+    assessPronunciation: async () => ({
+      score: 86,
+      unclear: ['meet'],
+      tip: 'Nhấn rõ âm /t/ cuối “meet” — người Việt hay nuốt âm cuối.'
+    }),
+    generateDrills: async () => ({
+      questions: [
+        {
+          q: 'She ___ from London.',
+          options: ['is', 'am', 'are'],
+          answer: 0,
+          hint: 'she đi với is.'
+        },
+        {
+          q: 'Bạn muốn đáp lại "Nice to meet you.":',
+          options: ['Nice to meet you too.', 'I am Mai.', 'See you.'],
+          answer: 0,
+          hint: 'Thêm too = cũng vậy.'
+        }
+      ]
+    }),
+    generateVariant: async () => ({
+      title: 'Ở quán cà phê',
+      lines: [
+        ['Emma: Hi! I’m Emma. What’s your name?', 'Emma: Chào! Mình là Emma. Bạn tên gì?'],
+        ['Binh: I’m Binh. Nice to meet you.', 'Binh: Mình là Bình. Rất vui được gặp bạn.'],
+        ['Emma: Nice to meet you too. Where are you from?', 'Emma: Mình cũng vậy. Bạn đến từ đâu?'],
+        ['Binh: I’m from Hanoi. And you?', 'Binh: Mình đến từ Hà Nội. Còn bạn?'],
+        ['Emma: I’m from Sydney, Australia.', 'Emma: Mình đến từ Sydney, Úc.']
+      ],
+      questions: [
+        {
+          q: 'Binh đến từ đâu?',
+          options: ['Hà Nội', 'Sydney', 'Đà Nẵng'],
+          answer: 0,
+          hint: 'Binh nói: "I’m from Hanoi."'
+        }
+      ]
     }),
     ...overrides
   };
@@ -150,6 +190,78 @@ function createTutor(ctx) {
       return JSON.parse(stripJsonFence(raw));
     },
 
+    // ELSA-style scripted scoring: send the learner's actual recording to the
+    // model — it hears dropped final sounds and misheard words that a
+    // transcript match can never catch. Audio goes as inlineData (base64).
+    async assessPronunciation({ target, audioBlob }) {
+      const m = await model();
+      const data = await blobToBase64(audioBlob);
+      const raw = await generate(
+        m,
+        [
+          { text: [
+            'Bạn là máy chấm phát âm cho học viên Việt mức A1.',
+            'Nghe đoạn ghi âm học viên đọc câu mẫu, trả về CHỈ JSON (không markdown):',
+            '{"score": số 0-100, "unclear": [từ nghe không rõ/sai], "tip": string}',
+            '- score: mức độ nghe-hiểu-được (không chấm giọng bản ngữ).',
+            '- unclear: tối đa 3 từ trong câu mẫu nghe lệch/không rõ.',
+            '- tip: 1 câu tiếng Việt chỉ điểm phát âm cần sửa nhất (vd âm cuối).',
+            `Câu mẫu: "${target}"`
+          ].join('\n') },
+          { inlineData: { data, mimeType: audioBlob.type || 'audio/webm' } }
+        ]
+      );
+      return JSON.parse(stripJsonFence(raw));
+    },
+
+    // Mastery learning: after wrong answers, generate fresh items on exactly
+    // the missed points so the learner re-tests the gap, not the whole quiz.
+    async generateDrills({ lessonTitle, sourceText, wrong }) {
+      const m = await model();
+      const raw = await generate(
+        m,
+        [
+          'Bạn là người ra đề tiếng Anh mức A1 cho học viên Việt.',
+          `Học viên vừa sai các câu sau. Tạo đúng ${Math.min(3, Math.max(2, wrong.length))} câu trắc nghiệm MỚI luyện đúng các điểm đó (không chép lại câu cũ).`,
+          'Trả về CHỈ JSON: {"questions": [{"q": string, "options": [3 string], "answer": 0|1|2, "hint": string}]}',
+          '- Mỗi câu chỉ có MỘT đáp án đúng; distractor gần đúng nhưng sai rõ.',
+          '- hint: tiếng Việt, giải thích vì sao đáp án đúng (1 câu).',
+          '- Ngôn ngữ chỉ dùng từ/mẫu trong phạm vi bài.',
+          '',
+          `Bài: ${lessonTitle}`,
+          `Ngôn ngữ đã dạy: ${sourceText}`,
+          '',
+          'Các câu học viên đã sai:',
+          ...wrong.map(
+            (w) => `- Hỏi: ${w.question} | Chọn sai: "${w.chosen}" | Đúng: "${w.correct}"`
+          )
+        ].join('\n')
+      );
+      return JSON.parse(stripJsonFence(raw));
+    },
+
+    // The loop's VARY CONTEXT strand: same target language, new situation,
+    // new names — a second exposure that isn't a re-read.
+    async generateVariant({ canDo, patternName, chunkTargets, currentTitle, countLines }) {
+      const m = await model();
+      const raw = await generate(
+        m,
+        [
+          'Bạn là tác giả hội thoại tiếng Anh mức A1 cho học viên Việt.',
+          'Viết một hội thoại MỚI (khác tình huống, khác tên nhân vật) dùng CÙNG mẫu câu mục tiêu của bài.',
+          'Trả về CHỈ JSON:',
+          '{"title": string (tình huống, tiếng Việt), "lines": [[english, vietnamese] ...], "questions": [{"q": string (tiếng Việt), "options": [3 string], "answer": 0|1|2, "hint": string}]}',
+          `- lines: ${countLines} lượt, câu ngắn tự nhiên đúng mẫu; mỗi lượt kèm dịch Việt.`,
+          '- questions: 2 câu hỏi đọc-hiểu, đáp án nằm trong hội thoại, 1 đáp án đúng.',
+          `- Mục tiêu bài: ${canDo}`,
+          `- Mẫu chính: ${patternName}`,
+          `- Cụm phải tái dùng: ${chunkTargets.join(' | ')}`,
+          `- KHÔNG lặp lại tình huống hiện có: ${currentTitle}`
+        ].join('\n')
+      );
+      return JSON.parse(stripJsonFence(raw));
+    },
+
     startRoleplay({ scenario, roleA, roleB, partnerName, partnerOrigin, checklist, targetPhrases }) {
       let chat = null;
       const history = [];
@@ -238,6 +350,15 @@ function createTutor(ctx) {
   };
 
   return tutor;
+}
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(String(reader.result).split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
 }
 
 function stripJsonFence(text) {
