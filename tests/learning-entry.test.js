@@ -110,8 +110,11 @@ const C=require('../flashday-cloud.js');
 {
   assert.equal(L.mentionsTime('See you at seven.'),true);
   assert.equal(L.mentionsTime('How about 8:30?'),true);
+  assert.equal(L.mentionsTime('See you at 7 pm.'),true);
   assert.equal(L.mentionsTime('Sounds good, noon works.'),true);
   assert.equal(L.mentionsTime('No problem at all.'),false);
+  // Regression: the verb "am" must not count as the "7 am" marker.
+  assert.equal(L.mentionsTime('Sorry, I am not sure that works for me.'),false);
   assert.equal(L.mentionsTime(''),false);
 }
 

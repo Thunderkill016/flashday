@@ -370,10 +370,13 @@
 
   function cleanMissionValue(value,maxLength){return String(value??'').trim().slice(0,maxLength);}
 
+  // "am"/"pm" are deliberately absent — 'am' collides with the verb "am"
+  // and a bare "pm" carries no time. Digit-bearing tokens (7, 7pm, 18:30)
+  // and time-of-day words are the signal.
   const TIME_TOKENS=new Set([
     'one','two','three','four','five','six','seven','eight','nine','ten',
-    'eleven','twelve','noon','midnight',"o'clock",'am','pm','morning',
-    'afternoon','evening','tonight','half','quarter','minutes','hour'
+    'eleven','twelve','noon','midnight',"o'clock",'morning',
+    'afternoon','evening','tonight'
   ]);
 
   function mentionsTime(text){
