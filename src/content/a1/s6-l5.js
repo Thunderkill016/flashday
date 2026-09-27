@@ -8,7 +8,7 @@ export default {
   stage: 6,
   order: 5,
   kind: 'checkpoint',
-  contentVersion: 2,
+  contentVersion: 3,
   title: 'Checkpoint: chuyến đi cuối tuần',
   canDo: 'Nghe và đọc một câu chuyện ngắn về chuyến đi, sau đó kể lại chuyến đi của chính mình bằng tin nhắn và lời nói — dùng gần hết vốn A1 đã học.',
 
@@ -32,7 +32,7 @@ export default {
     { id: 'c5', target: 'We had lunch at a small restaurant.', meaning: 'Chúng tôi ăn trưa ở một quán nhỏ.', example: 'We had lunch at a small restaurant near the river.', exampleVi: 'Chúng tôi ăn trưa ở quán nhỏ gần sông.' },
     { id: 'c6', target: 'I went to the market.', meaning: 'Tôi đã đi chợ.', example: 'In the afternoon I went to the market and saw a nice hat.', exampleVi: 'Chiều đó tôi đi chợ và thấy một cái mũ đẹp.' },
     { id: 'c7', target: 'I was tired but happy.', meaning: 'Tôi mệt nhưng vui.', example: 'On Sunday night I was tired but happy.', exampleVi: 'Tối Chủ nhật tôi mệt nhưng vui.' },
-    { id: 'c8', target: 'Do you want to come?', meaning: 'Bạn muốn đi cùng không?', example: 'Next month we’re going to Da Lat. Do you want to come next time?', exampleVi: 'Tháng sau tụi mình đi Đà Nẵng. Lần sau bạn muốn đi cùng không?' },
+    { id: 'c8', target: 'Do you want to come?', meaning: 'Bạn muốn đi cùng không?', example: 'Next month we’re going to Da Lat. Do you want to come next time?', exampleVi: 'Tháng sau tụi mình đi Đà Lạt. Lần sau bạn muốn đi cùng không?' },
   ],
 
   drills: [
@@ -40,7 +40,7 @@ export default {
     { q: 'The tickets ___ cheap. (rẻ)', options: ['were', 'was', 'are'], answer: 0, hint: 'tickets → were.' },
     { q: 'We ___ seafood for dinner. (đã ăn)', options: ['ate', 'eated', 'eat'], answer: 0, hint: 'eat → ate.' },
     { q: 'Next month we ___ going to visit Da Nang.', options: ['are', 'is', 'was'], answer: 0, hint: 'we → are.' },
-    { q: 'Kể thời gian đúng thứ tự:', options: ['on Saturday at six', 'at six on Saturday is also OK', 'Cả hai thứ tự trên đều được'], answer: 2, hint: 'Nói "on Saturday morning at six" hay "at six on Saturday" đều tự nhiên.' },
+    { q: 'Last weekend I ___ to Hue. (đã đi)', options: ['went', 'goed', 'gone'], answer: 0, hint: 'go → went (bất quy tắc).' },
   ],
 
   dialogue: {
@@ -53,7 +53,7 @@ export default {
       ['Trang: What did you do there?', 'Trang: Ở đó các cậu làm gì?'],
       ['Lan: We went to the old town near the river. Then we had lunch at a small restaurant. The beef noodle soup was amazing!', 'Lan: Tụi tớ đi phố cổ gần sông. Rồi ăn trưa ở quán nhỏ. Bún bò ngon tuyệt!'],
       ['Lan: In the afternoon I went to the market and saw a nice hat for my mum.', 'Lan: Chiều đó tớ đi chợ và thấy một cái mũ đẹp cho mẹ.'],
-      ['Lan: On Sunday night I was tired but happy. Next month we’re going to Da Lat — do you want to come?', 'Lan: Tối Chủ nhật tớ mệt nhưng vui. Tháng sau tụi tớ đi Đà Nẵng — cậu muốn đi cùng không?'],
+      ['Lan: On Sunday night I was tired but happy. Next month we’re going to Da Lat — do you want to come?', 'Lan: Tối Chủ nhật tớ mệt nhưng vui. Tháng sau tụi tớ đi Đà Lạt — cậu muốn đi cùng không?'],
     ],
     questions: [
       { q: 'Lan đi Huế bằng gì?', options: ['Tàu hỏa', 'Xe buýt', 'Xe máy'], answer: 0, hint: '"We went by train".' },

@@ -4,14 +4,14 @@ export default {
   stage: 2,
   order: 1,
   kind: 'lesson',
-  contentVersion: 1,
+  contentVersion: 2,
   title: 'Mấy giờ rồi? Hôm nay thứ mấy?',
   canDo: 'Hỏi và nói giờ (giờ chẵn, giờ rưỡi, giờ lẻ theo phút), nói ngày trong tuần và giờ mở/đóng cửa.',
 
   pattern: {
     name: 'What time is it? / It’s … / at … / on …',
     rule:
-      'Hỏi giờ: "What time is it?". Trả lời "It’s + giờ": 7:00 = seven (o’clock); 7:30 = seven thirty (hoặc half past seven); 7:15 = seven fifteen; 7:45 = seven forty-five. Dùng "at + giờ" (at seven) và "on + ngày" (on Monday). Sáng/tối: a.m. / p.m. hoặc "in the morning / evening".',
+      'Hỏi giờ: "What time is it?". Trả lời "It’s + giờ": 7:00 = seven (o’clock); 7:30 = seven thirty (hoặc half past seven); 7:15 = seven fifteen (hoặc a quarter past seven); 7:45 = seven forty-five. Dùng "at + giờ" (at seven) và "on + ngày" (on Monday). Sáng/tối: a.m. / p.m. hoặc "in the morning / evening".',
     examples: [
       ['What time is it? — It’s seven thirty.', 'Mấy giờ rồi? — Bảy giờ rưỡi.'],
       ['The shop opens at nine.', 'Cửa hàng mở lúc chín giờ.'],

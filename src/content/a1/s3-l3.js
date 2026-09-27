@@ -4,7 +4,7 @@ export default {
   stage: 3,
   order: 3,
   kind: 'lesson',
-  contentVersion: 1,
+  contentVersion: 2,
   title: 'Đi bằng gì? Mua vé',
   canDo: 'Nói mình đi làm/đi học bằng gì, hỏi xe/tàu nào đến đâu, mua vé và hỏi giá, giờ chạy.',
 
@@ -22,7 +22,7 @@ export default {
   chunks: [
     { id: 'c1', target: 'How do you get to …?', meaning: 'Bạn đến … bằng gì?', example: 'How do you get to work?', exampleVi: 'Bạn đi làm bằng gì?' },
     { id: 'c2', target: 'by bus / by train / by motorbike', meaning: 'bằng xe buýt / tàu / xe máy', example: 'I go to school by bus.', exampleVi: 'Tôi đi học bằng xe buýt.' },
-    { id: 'c3', target: 'on foot', meaning: 'đi bộ', example: 'I go to the market on foot.', exampleVi: 'Tôi đi chợ bằng cách đi bộ.' },
+    { id: 'c3', target: 'on foot', meaning: 'đi bộ', example: 'I go to the market on foot.', exampleVi: 'Tôi đi bộ đến chợ.' },
     { id: 'c4', target: 'A ticket to …, please.', meaning: 'Cho một vé đi …', example: 'A ticket to Hanoi, please.', exampleVi: 'Cho một vé đi Hà Nội.' },
     { id: 'c5', target: 'How much is it?', meaning: 'Bao nhiêu tiền?', example: 'Two tickets. How much is it?', exampleVi: 'Hai vé. Bao nhiêu tiền?' },
     { id: 'c6', target: 'Which bus goes to …?', meaning: 'Xe buýt nào đi …?', example: 'Which bus goes to the airport?', exampleVi: 'Xe buýt nào đi sân bay?' },
