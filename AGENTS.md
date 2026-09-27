@@ -49,15 +49,19 @@ canonical origin, path + query preserved.
 
 ## AI tutor (`src/ai/tutor.js`)
 
-On-device inference only — Chrome's built-in `LanguageModel` (Gemini Nano):
-no API key, no quota, no network calls, nothing leaves the learner's device.
-Where the API is absent (non-Chrome, unsupported hardware) `tutor.available`
-is false and every AI control falls back to the static flow — never render a
-dead button. First use may trigger a one-time model download; progress is
-surfaced via `tutor.setStatusSink` in the runner. Structured output goes
-through `responseConstraint` (JSON Schema); mocks for tests go through
-`window.__FLASHDAY_TUTOR__`. Do NOT add a cloud/Gemini-API-key path — the
-user explicitly rejected key-bound AI.
+On-device inference only — Transformers.js running
+`onnx-community/Qwen3-1.7B-ONNX` in the browser (WebGPU `q4f16`, WASM `q4`
+fallback): no API key, no quota, nothing leaves the learner's device.
+Qwen3-1.7B was picked as the strongest browser-viable instruct model on
+Hugging Face for A1 tutoring (multilingual Vietnamese+English, public repo,
+~1.1 GB one-time download, browser-cached; progress via `tutor.setStatusSink`).
+If model load/generation fails the tutor marks itself dead and every AI
+control falls back to the static flow — never render a dead button. Qwen3
+thinking mode is suppressed (`enable_thinking:false` + `/no_think` + strip).
+Structured output is enforced by prompt + `parseJson` brace-extraction — the
+model is small, never trust raw replies. Test mocks go through
+`window.__FLASHDAY_TUTOR__`. Do NOT add a cloud/API-key path — the user
+explicitly rejected key-bound AI.
 
 ## Pages and auth flow
 
