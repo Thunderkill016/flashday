@@ -96,7 +96,13 @@ nhân, nhu cầu cụ thể). Người học Việt: chú ý phát âm đuôi -s
 từ–danh từ, mạo từ, thì hiện tại đơn ngôi 3.
 
 Bài 5 mỗi chặng là **checkpoint**: không dạy mới, gom 4 bài trước vào một tình
-huống dài hơn; runner ẩn "Hiểu mẫu" theo `kind:'checkpoint'`.
+huống dài hơn; runner ẩn "Hiểu mẫu" theo `kind:'checkpoint'`. Cụ thể: mọi
+`chunks[].target` và đáp án đúng của drill ở checkpoint phải tái sử dụng ngôn
+ngữ đã dạy trong 4 bài trước của cùng chặng (từ `pattern.examples`,
+`chunks[].target`/`example`, hoặc đáp án drill của các bài đó). Từ mới chỉ
+được xuất hiện trong `dialogue.lines`/`listening.text` khi có dịch tiếng
+Việt kèm theo, không là mục tiêu đánh giá, và câu hỏi đọc/nghe vẫn trả lời
+được nhờ ngữ cảnh + bản dịch.
 
 | Chặng | Chủ đề                       | Bài 1–4 (can-do)                                                                                                                   | Checkpoint (bài 5)                |
 | ----- | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
