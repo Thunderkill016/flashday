@@ -35,16 +35,20 @@ try {
     for (const label of ['Học', 'Ôn', 'Hồ sơ']) {
       assert.equal(await page.locator('.app-tab', { hasText: label }).count(), 1, `tab ${label}`);
     }
+    // hasText inside the selector makes locator actions wait for the NEW h1 —
+    // asserting bare textContent() would return the previous view's heading
+    // during the async hashchange→route window (CI flake).
+    const h1 = (text) => page.locator('#view h1', { hasText: text });
     await page.locator('.app-tab', { hasText: 'Ôn' }).click();
-    assert.equal(await page.locator('#view h1').textContent(), 'Ôn tập');
+    assert.equal(await h1('Ôn tập').textContent(), 'Ôn tập');
     await page.locator('.app-tab', { hasText: 'Hồ sơ' }).click();
-    assert.equal(await page.locator('#view h1').textContent(), 'Hồ sơ');
+    assert.equal(await h1('Hồ sơ').textContent(), 'Hồ sơ');
     await page.locator('.app-tab', { hasText: 'Học' }).click();
-    assert.equal(await page.locator('#view h1').textContent(), 'Hôm nay');
+    assert.equal(await h1('Hôm nay').textContent(), 'Hôm nay');
     await page.goto(`${origin}app/?preview#/path`);
-    assert.equal(await page.locator('#view h1').textContent(), 'Lộ trình');
+    assert.equal(await h1('Lộ trình').textContent(), 'Lộ trình');
     await page.goto(`${origin}app/?preview#/summary/${L1}`);
-    assert.equal(await page.locator('#view h1').textContent(), 'Kết quả buổi học');
+    assert.equal(await h1('Kết quả buổi học').textContent(), 'Kết quả buổi học');
     await page.goto(`${origin}app/?preview#/lesson/${L1}/listen`);
     assert.equal(await page.locator('.runner-pane[data-step]').count(), 5);
     let visible = 0;
