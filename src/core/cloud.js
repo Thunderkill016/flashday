@@ -7,7 +7,6 @@
  */
 import { dbKey } from './namespace.js';
 import { hydrateDb } from './evidence.js';
-import { rebuildFsrsFromLog } from './scheduler.js';
 
 // Async work belongs to the client, account and storage namespace that
 // started it. Switching away and back still invalidates the old generation.
@@ -252,12 +251,13 @@ export function createCloudSync({ client, store, storage, onStatus }) {
       const reviewLog = (mergedPayload.reviewLog || [])
         .sort((a, b) => (Number(a.at) || 0) - (Number(b.at) || 0)
           || String(a.id || '').localeCompare(String(b.id || '')));
+      // hydrateDb derives fsrs from the log itself — same canonical path
+      // as local hydration, so merged state is byte-equal everywhere.
       const merged = hydrateDb({
         version: 2,
         lessonEvents: mergedEvents,
         reviewLog,
-        profile: mergedPayload.profile,
-        fsrs: rebuildFsrsFromLog(reviewLog)
+        profile: mergedPayload.profile
       });
       store.replace(merged);
       // Only REMOTE ids are already in the cloud — marking local-only events

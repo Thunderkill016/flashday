@@ -6,7 +6,8 @@
 import { lessonById } from '../../content/a1/index.js';
 import { restoreDraft } from '../../core/session.js';
 import { appendLessonEvent } from '../../core/evidence.js';
-import { enrollChunks } from '../../core/scheduler.js';
+import { enrollTasks } from '../../core/scheduler.js';
+import { STEP_TASKS, TASK_KINDS } from '../../core/domain.js';
 import { stepsForLesson } from '../../core/progress.js';
 import { checkTimeGate } from '../../core/time-gate.js';
 import { mountQuiz } from '../components/quiz.js';
@@ -282,10 +283,12 @@ function recordEvent(step, payload, support) {
       payload,
       support
     });
-    // Chunks join the review pool when the drills are submitted (§3 rule:
-    // no "add to review" button). Checkpoints have no prepare step, so
-    // their chunks enroll on the first submitted step instead (idempotent).
-    if (step === 'prepare' || lesson.kind === 'checkpoint') enrollChunks(db, lesson);
+    // Retrieval tasks join the pool when their modality is exercised
+    // (staged enrollment, docs/adr/learning-core-v3.md): prepare →
+    // form_recognition + meaning_recall, listen → listening_recognition,
+    // write → cued_production. Checkpoints have no prepare step, so their
+    // chunks enroll all tasks on the first submitted step (idempotent).
+    enrollTasks(db, lesson, lesson.kind === 'checkpoint' ? TASK_KINDS : STEP_TASKS[step]);
   });
   // Clear that step's draft answers; write/speak text stays until summary.
   if (step === 'prepare' || step === 'read' || step === 'listen') {

@@ -1,7 +1,7 @@
 // Kết quả buổi học — per-step activity table from the lesson's own events.
 import { computeStreak, stepsForLesson } from '../../core/progress.js';
-import { dueChunks } from '../../core/scheduler.js';
-import { lessonById, nextLesson } from '../../content/a1/index.js';
+import { dueTasks } from '../../core/scheduler.js';
+import { LESSONS, lessonById, nextLesson } from '../../content/a1/index.js';
 import { playFeedback } from '../sound.js';
 
 const STEP_LABELS = {
@@ -98,17 +98,17 @@ export function mount(root, ctx) {
   }
   section.appendChild(table);
 
-  // Enrolled chunks for this lesson
+  // Enrolled retrieval tasks for this lesson (one card per ability × chunk)
   const enrolled = Object.keys(db.fsrs || {}).filter((key) => key.startsWith(`${lesson.id}:`)).length;
   const enrolledLine = document.createElement('p');
   enrolledLine.className = 'view-placeholder';
   enrolledLine.textContent = enrolled
-    ? `Cụm đã vào bộ ôn: ${enrolled}`
-    : `Cụm đã vào bộ ôn: chưa có — nộp phần ${STEP_LABELS[steps[0]]} để thêm`;
+    ? `Thẻ ôn đã tạo: ${enrolled} (mỗi cụm luyện nhiều kỹ năng)`
+    : `Thẻ ôn đã tạo: chưa có — nộp phần ${STEP_LABELS[steps[0]]} để thêm`;
   section.appendChild(enrolledLine);
 
   // Next action
-  const due = dueChunks(db, Date.now()).length;
+  const due = dueTasks(db, Date.now(), LESSONS).length;
   const nav = document.createElement('div');
   nav.className = 'runner-nav';
   const action = document.createElement('a');
@@ -118,7 +118,7 @@ export function mount(root, ctx) {
     action.textContent = `Làm phần ${STEP_LABELS[todoSteps[0]]}`;
   } else if (due > 0) {
     action.href = '#/review';
-    action.textContent = `Ôn ${due} cụm đến hạn`;
+    action.textContent = `Ôn ${due} thẻ đến hạn`;
   } else {
     const next = nextLesson(lesson.id);
     action.href = next ? `#/lesson/${next.id}/${stepsForLesson(next)[0]}` : '#/path';

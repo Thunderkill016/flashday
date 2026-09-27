@@ -63,6 +63,34 @@ model is small, never trust raw replies. Test mocks go through
 `window.__FLASHDAY_TUTOR__`. Do NOT add a cloud/API-key path — the user
 explicitly rejected key-bound AI.
 
+## Learning core v3 (A1-ARCH-001)
+
+FSRS schedules **retrieval tasks**, not chunks: card id
+`lessonId:chunkId@rev:taskKind` (`form_recognition`, `meaning_recall`,
+`listening_recognition`, `cued_production` — `src/core/domain.js`). `rev`
+is a semantic fingerprint of the target↔meaning pair
+(`contentRev(chunk)`); editing either mints a NEW component — the old
+memory is superseded, never transferred. `src/content/revisions.js` is a
+generated frozen ledger of pre-fingerprint revisions; regenerate it with
+`node scripts/gen-content-revisions.mjs`, never edit by hand.
+Enrollment is staged by step (`STEP_TASKS`); `reviewLog` is the durable
+truth and the ONLY path to task state — `hydrateDb` sets
+`fsrs = rebuildFsrsFromLog(reviewLog)` and never consults the stored
+cache, so devices converge byte-equivalent. Rev-less legacy keys resolve
+ONLY when the ledger proves a single revision (`unambiguousRev`); on
+multi-revision slots they PARK as rev-less `ambiguous` cards — kept,
+counted, never presented. Replay is timestamp-deterministic: corrupt `at`
+values land on epoch 0, never `Date.now()`. Review grades are gated on
+reveal (frozen pre-reveal `attempt`/`attemptScore` + `revealed`/`aided`;
+grades are always `selfReported`); new (never-rated) cards are
+introductions, not due work — `reviewQueue()` bounds them
+(`NEW_TASK_BUDGET`, one-per-component sibling bury).
+Evidence projection lives in `src/core/evidence-projection.js` (aided vs
+unaided honesty rules), derived state in `src/core/learner-state.js`, and
+the deterministic next-action policy in `src/core/planner.js` — AI never
+chooses what the learner studies next. Full rationale:
+`docs/adr/learning-core-v3.md`.
+
 ## Pages and auth flow
 
 | Route        | File             | Role                                   |

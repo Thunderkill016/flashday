@@ -245,7 +245,7 @@ try {
       const db = JSON.parse(localStorage.getItem(key) || '{}');
       return Object.keys(db.fsrs || {}).filter((k) => k.startsWith('a1-s1-l5:')).length;
     }, DB_KEY);
-    assert.equal(enrolled, 6, 'checkpoint read submit enrolls its 6 chunks');
+    assert.equal(enrolled, 24, 'checkpoint read submit enrolls all 4 tasks × 6 chunks');
     await context.close();
     check('checkpoint → 4 steps, lands on read, enrolls chunks');
   }
@@ -308,9 +308,11 @@ try {
       const db = JSON.parse(localStorage.getItem(key) || '{}');
       return Object.keys(db.fsrs || {}).length;
     }, DB_KEY);
-    assert.equal(enrolled, 8, 'drill submit enrolls all 8 chunks');
+    assert.equal(enrolled, 16, 'drill submit enrolls prepare tasks for all 8 chunks');
     await goto(page, `${origin}app/?preview#/today`);
-    assert.match(await page.locator('#view').textContent(), /8 cụm đến hạn/, 'new FSRS cards are due immediately');
+    const todayText = await page.locator('#view').textContent();
+    assert.match(todayText, /Chưa có thẻ đến hạn/, 'brand-new tasks are introductions, not due review');
+    assert.match(todayText, /16 thẻ mới chờ làm quen/, 'new-task pool counted separately');
     // path pill for s1-l1 shows step progress after the drill submit
     await goto(page, `${origin}app/?preview#/path`);
     const pill = page.locator('.path-lessons li', { hasText: 'Chào hỏi và giới thiệu' }).locator('.path-status');
@@ -338,8 +340,26 @@ try {
     await pane.locator('.quiz-submit').click();
 
     await goto(page, `${origin}app/?preview#/review`);
+    // Bounded introduction: 16 new tasks exist but the session is capped —
+    // one new task per component, at most NEW_TASK_BUDGET per mount.
     assert.equal(await page.locator('.review-counter').textContent(), '1/8');
+    assert.equal(await page.locator('[data-role="fresh-badge"]').count(), 1, 'new card flagged as introduction');
     assert.equal(await page.locator('.review-target').isVisible(), false, 'answer hidden before reveal');
+    // Task-graded cards: sibling bury serves the recognition ability first —
+    // the badge names the ability being retrieved.
+    assert.equal(await page.locator('[data-task-kind]').textContent(), 'Nhìn hiểu');
+    assert.equal(await page.locator('.review-front-en').isVisible(), true, 'recognition front shows the EN form');
+    // REGRESSION (review): keyboard grades must be inert before reveal —
+    // a grade produced before seeing the answer panel is uninterpretable
+    // evidence and must never reach the log.
+    await page.keyboard.press('2');
+    await sleep(100);
+    const ratesAfterPreKey = await page.evaluate((key) => {
+      const db = JSON.parse(localStorage.getItem(key) || '{}');
+      return (db.reviewLog || []).filter((e) => e.kind === 'rate').length;
+    }, DB_KEY);
+    assert.equal(ratesAfterPreKey, 0, 'keyboard grade before reveal writes nothing');
+    assert.equal(await page.locator('.review-counter').textContent(), '1/8', 'still on card 1');
     // typed production recall → diff score + suggested grade on reveal
     await page.locator('.review-card .write-area').fill('Hello, I’m …');
     await page.locator('[data-role="reveal"]').click();
@@ -348,13 +368,37 @@ try {
     assert.equal(await page.locator('.grade-btn.suggested').count(), 1, 'one grade lights up');
     await page.locator('[data-grade="3"]').click(); // Nhớ
     assert.equal(await page.locator('.review-counter').textContent(), '2/8');
+    // Sibling bury: the next card is c2's recognition task, not c1's
+    // meaning_recall sibling — one ability per component per session.
+    assert.equal(await page.locator('[data-task-kind]').textContent(), 'Nhìn hiểu');
+    const rateEntries = await page.evaluate((key) => {
+      const db = JSON.parse(localStorage.getItem(key) || '{}');
+      return (db.reviewLog || []).filter((e) => e.kind === 'rate');
+    }, DB_KEY);
+    assert.match(rateEntries[0].taskKey, /^a1-s1-l1:c1@[0-9a-f]{8}:form_recognition$/,
+      'rate lands on the revision-carrying task key');
+    // Provenance: observable pre-reveal attempt → unaided; the attempt text
+    // is frozen at reveal and both facts are durable.
+    assert.equal(rateEntries[0].attempted, true, 'frozen attempt exists');
+    assert.equal(rateEntries[0].aided, false, 'typed-before-reveal = unaided evidence');
+    assert.equal(rateEntries[0].revealed, true);
+    assert.equal(rateEntries[0].attempt, 'Hello, I’m …', 'attempt frozen verbatim at reveal');
+    // Observed quality recorded separately from the self-grade: typing the
+    // EN form against a VI expected answer is a weak observable match even
+    // though the learner pressed "Nhớ".
+    assert(typeof rateEntries[0].attemptScore === 'number' && rateEntries[0].attemptScore < 0.9,
+      `attemptScore records observed quality, got ${rateEntries[0].attemptScore}`);
     const logLen = await page.evaluate((key) => {
       const db = JSON.parse(localStorage.getItem(key) || '{}');
       return (db.reviewLog || []).filter((e) => e.kind !== 'enroll').length;
     }, DB_KEY);
     assert.equal(logLen, 1, 'grade appends a reviewLog entry (enroll entries are separate)');
     await reload(page);
-    assert.equal(await page.locator('.review-counter').textContent(), '1/7', 'graded card no longer due');
+    // Remount: c1's remaining sibling (meaning_recall) is now c1's next
+    // introduction — the queue is a fresh bounded snapshot, not a leak.
+    assert.equal(await page.locator('.review-counter').textContent(), '1/8', 'graded card no longer in queue');
+    assert.equal(await page.locator('[data-task-kind]').textContent(), 'Nhớ cụm từ',
+      'c1’s next pending ability surfaces after reload');
     await context.close();
     check('review reveal → grade → persisted scheduling');
   }
@@ -713,9 +757,12 @@ try {
     assert.equal(stageBarWidth, '20%', `stage bar ${stageBarWidth} after 1/5 lessons`);
     assert.ok((await page.locator('.path-lesson-icon').count()) >= 5, 'lesson icons present');
 
-    // Review recap: grade all enrolled cards → per-grade session summary
+    // Review recap: grade all enrolled task cards → per-grade session
+    // summary. A full lesson stages 32 task cards (8 chunks × prepare 2 +
+    // listen 1 + write 1 kinds).
     await goto(page, `${origin}app/?preview#/review`);
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 40; i++) {
+      if (await page.locator('[data-role="review-recap"]').count()) break;
       const reveal = page.locator('[data-role="reveal"]');
       if (!(await reveal.count())) break;
       await reveal.click();
