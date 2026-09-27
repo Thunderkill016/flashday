@@ -25,7 +25,8 @@ const C = require('../flashday-cloud.js');
     scheduler: 'bespoke-language-policy+fsrs6', memoryScheduler: 'ts', languagePolicy: 'bespoke',
     fsrsGrades: { 'unit-1': 3 },
     telemetry: { presentedAt: 500, firstAttemptAt: 700, revealedAt: 900, recallLatencyMs: 400, sourceViewedPreReveal: false, audioPlays: 2 },
-    error: { stage: 'miss', types: ['missing-target', 'word-form'], missedUnits: ['unit-1'], firstAttempt: 'I am my way', finalAttempt: 'I am on my way', corrected: true, retryCount: 1 },
+    error: { stage: 'miss', types: ['missing-target', 'word-form'], missedUnits: ['unit-1'], firstMissed: ['unit-1'], firstAttempt: 'I am my way', finalAttempt: 'I am on my way', corrected: true, retryCount: 1 },
+    evidence: { kind: 'word-diff', aided: true, unaidedUnits: [], aidedUnits: ['unit-1'] },
     memory: { 'unit-1': { grade: 3, before: null, after: { stability: 2.5, difficulty: 5.1, scheduled_days: 2 } } }
   }, 'deck-1'));
   assert.strictEqual(event.mode, 'listen');
@@ -46,6 +47,8 @@ const C = require('../flashday-cloud.js');
   assert.deepStrictEqual(event.error.missedUnits, ['unit-1']);
   assert.strictEqual(event.error.corrected, true);
   assert.strictEqual(event.error.retryCount, 1);
+  assert.deepStrictEqual(event.error.firstMissed, ['unit-1'], 'first-attempt misses must survive cloud round-trip');
+  assert.deepStrictEqual(event.evidence, { kind: 'word-diff', aided: true, unaidedUnits: [], aidedUnits: ['unit-1'] }, 'evidence split must survive cloud round-trip');
 }
 
 {

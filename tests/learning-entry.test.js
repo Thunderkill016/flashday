@@ -152,6 +152,21 @@ const C=require('../flashday-cloud.js');
 }
 
 {
+  // Unit-use gate: a transfer that never produces the target cannot close
+  // the produce step. Accepted/forms variants still count as the unit.
+  const T0=1_700_000_000_000;
+  const db=D.createInitialDb([],1000);
+  const item=D.addItem(db,{target:'on my way',meaning:'đang trên đường',forms:['I am on my way']});
+  db.events=[{id:'e1',mode:'write',cardId:'c1',unitIds:[item.id],ratings:{[item.id]:3},answeredAt:T0}];
+  assert.throws(
+    ()=>L.submitUnitTransferAttempt(db,{unitId:item.id,responseText:'I went home early yesterday.'}),
+    /chưa dùng/,'a sentence without the unit is not a transfer'
+  );
+  const ok=L.submitUnitTransferAttempt(db,{unitId:item.id,responseText:'Sorry, I am on my way now.'});
+  assert.equal(ok.unitId,item.id,'a form variant satisfies the unit-use gate');
+}
+
+{
   // Assisted production must NOT trigger transfer: unit missed in the diff,
   // or learner peeked at the source before revealing.
   const DAY=24*60*60*1000;

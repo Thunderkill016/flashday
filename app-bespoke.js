@@ -644,6 +644,7 @@
         // finalMissing narrows it to units still absent in the last attempt.
         missedUnits: [...new Set([...errorLoop.firstMissed, ...cls.missingUnits, ...missedUnits])],
         finalMissing: [...cls.missingUnits],
+        firstMissed: [...errorLoop.firstMissed],
         firstAttempt: errorLoop.firstAttempt || attempt.text,
         finalAttempt: attempt.text,
         corrected: cls.corrected,

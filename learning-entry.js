@@ -391,11 +391,18 @@
   function submitUnitTransferAttempt(db,raw={},now=Date.now()){
     if(!db||typeof db!=='object')throw new Error('FlashDay DB is required');
     const unitId=cleanMissionValue(raw.unitId,160);
-    if(!unitId||!(Array.isArray(db.items)&&db.items.some(item=>String(item?.id)===unitId)))throw new Error('Unit transfer không hợp lệ.');
+    const item=(Array.isArray(db?.items)?db.items:[]).find(entry=>String(entry?.id)===unitId);
+    if(!unitId||!item)throw new Error('Unit transfer không hợp lệ.');
     const responseText=cleanMissionValue(raw.responseText,1600);
     if(!responseText)throw new Error('Hãy viết câu mới trước khi lưu.');
     db.transferAttempts=Array.isArray(db.transferAttempts)?db.transferAttempts:[];
     if(db.transferAttempts.some(a=>a&&a.kind==='unit'&&String(a.unitId)===unitId))throw new Error('Transfer cho Unit này đã được lưu.');
+    // A transfer only counts if the unit is actually in the new sentence —
+    // otherwise "writing any English" would close the produce step without
+    // producing the target. Forms/accepted variants count as the unit.
+    const forms=[item.target,...(Array.isArray(item.forms)?item.forms:[]),...(Array.isArray(item.accepted)?item.accepted:[])].filter(Boolean);
+    if(!forms.some(form=>phraseAppears(responseText,form)))
+      throw new Error(`Câu chưa dùng “${item.target}” — viết lại có cụm này.`);
     const submittedAt=Number.isFinite(Number(raw.submittedAt))?Number(raw.submittedAt):Number(now);
     const attempt={
       id:cleanMissionValue(raw.id,200)||`unit-transfer_${submittedAt}_${Math.random().toString(36).slice(2,10)}`,

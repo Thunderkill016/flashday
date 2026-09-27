@@ -257,10 +257,17 @@
       .filter(Boolean)
       .slice(0, 24);
     const stage = ['exact', 'close', 'miss', 'empty', 'self-check'].includes(raw.stage) ? raw.stage : '';
+    const firstMissed = (Array.isArray(raw.firstMissed) ? raw.firstMissed : [])
+      .map((id) => clean(id, 160))
+      .filter(Boolean)
+      .slice(0, 24);
     return {
       stage,
       types,
       missedUnits,
+      // firstMissed = units absent in the FIRST unaided attempt — the
+      // evidence layer uses it to separate unaided recall from aided recall.
+      firstMissed,
       firstAttempt: clean(raw.firstAttempt, 1200),
       finalAttempt: clean(raw.finalAttempt, 1200),
       corrected: Boolean(raw.corrected),

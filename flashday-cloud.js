@@ -96,6 +96,7 @@
       fsrs_grades: optMap(event.fsrsGrades),
       telemetry: optMap(event.telemetry),
       error: optMap(event.error),
+      evidence: optMap(event.evidence),
       memory: optMap(event.memory),
       is_reported: Boolean(event.isReported),
       answered_at: new Date(Number(event.answeredAt) || Date.now()).toISOString()
@@ -122,6 +123,7 @@
       fsrsGrades: optMap(row.fsrs_grades),
       telemetry: optMap(row.telemetry),
       error: optMap(row.error),
+      evidence: optMap(row.evidence),
       memory: optMap(row.memory),
       isReported: Boolean(row.is_reported),
       answeredAt: Date.parse(row.answered_at) || Date.now()

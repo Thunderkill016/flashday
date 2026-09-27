@@ -155,4 +155,29 @@ function dbFixture() {
   assert.strictEqual(clean.event.ratings.u1, 3, 'unaided successful recall keeps Good credit');
 }
 
-console.log('FlashDay Bespoke adapter P0: 12 checks passed');
+{
+  // M3 evidence split: the event must state HOW the attempt was judged and
+  // which units were produced without aid — otherwise 'Nhớ' on a self-check
+  // card is indistinguishable from a word-diffed unaided recall.
+  const db = dbFixture();
+  const sel = A.selectNext(db, 1000);
+  const writeClean = A.finalizeCard(db, { ...sel, mode: 'write' }, { u1: 3 }, {
+    response: { text: "I'm on my way." }, nowMs: 2000
+  });
+  const writeEvt = writeClean.event;
+  assert.strictEqual(writeEvt.evidence.kind, 'word-diff');
+  assert.deepStrictEqual(writeEvt.evidence.unaidedUnits, ['u1'], 'clean write attempt = unaided evidence for all tagged units');
+  assert.strictEqual(writeEvt.evidence.aided, false);
+  // aided flag: retry or source-peek must mark the event aided.
+  const db2 = dbFixture();
+  const aided = A.finalizeCard(db2, { ...A.selectNext(db2, 1000), mode: 'write' }, { u1: 2 }, {
+    response: { text: 'x' },
+    error: { stage: 'close', types: ['word-form'], missedUnits: ['u1'], finalMissing: [], firstMissed: ['u1'], corrected: true, retryCount: 1 },
+    nowMs: 2000
+  });
+  assert.strictEqual(aided.event.evidence.aided, true, 'a retry loop must mark evidence as aided');
+  assert.deepStrictEqual(aided.event.evidence.unaidedUnits, [], 'unit missed on first attempt is not unaided evidence');
+  assert.deepStrictEqual(aided.event.evidence.aidedUnits, ['u1']);
+}
+
+console.log('FlashDay Bespoke adapter P0: 15 checks passed');

@@ -155,7 +155,7 @@ service cloud.firestore {
                       'answered_at', 'created_at',
                       'sentence', 'native_sentence', 'capture_id', 'rotation', 'source',
                       'scheduler', 'memory_scheduler', 'language_policy',
-                      'fsrs_grades', 'telemetry', 'error', 'memory'])
+                      'fsrs_grades', 'telemetry', 'error', 'evidence', 'memory'])
         && idMatchesPath(docId)
         && validString(d.deck_id, 1, 200)
         && validString(d.card_id, 1, 200)
@@ -172,6 +172,7 @@ service cloud.firestore {
         && validString(d.language_policy, 0, 200)
         && isSmallMap(d.fsrs_grades) && isSmallMap(d.telemetry) && isSmallMap(d.memory)
         && (!('error' in d) || isSmallMap(d.error))
+        && (!('evidence' in d) || isSmallMap(d.evidence))
         && d.is_reported is bool
         && isIsoDateString(d.answered_at)
         && isIsoDateString(d.created_at);

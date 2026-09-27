@@ -320,15 +320,38 @@
     const types=(Array.isArray(src.types)?src.types:[]).map((t)=>String(t||'').slice(0,40)).filter((t)=>ERROR_TYPE_SET.has(t)).slice(0,8);
     const missedUnits=(Array.isArray(src.missedUnits)?src.missedUnits:[]).map((id)=>String(id||'').slice(0,160)).filter(Boolean).slice(0,24);
     const finalMissing=(Array.isArray(src.finalMissing)?src.finalMissing:[]).map((id)=>String(id||'').slice(0,160)).filter(Boolean).slice(0,24);
+    const firstMissed=(Array.isArray(src.firstMissed)?src.firstMissed:[]).map((id)=>String(id||'').slice(0,160)).filter(Boolean).slice(0,24);
     return {
       stage:ERROR_STAGES.has(src.stage)?src.stage:'',
       types,
       missedUnits,
       finalMissing,
+      firstMissed,
       firstAttempt:String(src.firstAttempt||'').slice(0,1200),
       finalAttempt:String(src.finalAttempt||'').slice(0,1200),
       corrected:Boolean(src.corrected),
       retryCount:Math.max(0,Math.min(9,Math.round(Number(src.retryCount)||0)))
+    };
+  }
+
+  // M3 evidence split — a scalar rating cannot tell "produced unaided in the
+  // first attempt" apart from "needed the correction loop". The event keeps
+  // three explicit facts: what instrument judged the attempt (word-diff vs
+  // confirmed ASR vs pure self-check), whether any aid was used, and which
+  // tagged units were produced without aid. Self-check modes honestly report
+  // empty unit lists — self-rating is scheduling input, not recall evidence.
+  const EVIDENCE_KINDS=new Set(['word-diff','confirmed-asr','self-check']);
+  function buildEvidence({mode,response={},telemetry={},error=null,unitIds=[]}){
+    const kind=mode===B.Mode.WRITE?'word-diff'
+      :mode===B.Mode.SPEAK&&response?.asrConfirmed?'confirmed-asr'
+      :'self-check';
+    const instrumented=kind!=='self-check';
+    const firstMissed=new Set(Array.isArray(error?.firstMissed)?error.firstMissed.map(String):[]);
+    return {
+      kind,
+      aided:Boolean(telemetry?.sourceViewedPreReveal)||Number(error?.retryCount)>0,
+      unaidedUnits:instrumented?unitIds.filter((id)=>!firstMissed.has(String(id))):[],
+      aidedUnits:instrumented?unitIds.filter((id)=>firstMissed.has(String(id))):[]
     };
   }
 
@@ -401,6 +424,7 @@
       stimulus:normalizeStimulus(stimulus),
       telemetry:normalizeTelemetry(telemetry,nowMs),
       error:normalizeError(error),
+      evidence:buildEvidence({mode:selection.mode,response,telemetry,error,unitIds}),
       memory,
       answeredAt:nowMs,
       scheduler:F?HYBRID_SCHEDULER:'google-bespoke-port',

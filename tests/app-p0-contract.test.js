@@ -65,6 +65,12 @@ assert(adapter.includes("MODE_LADDER=['read','listen','write','speak']"), 'mode 
 assert(firestoreRules.includes("'error'"), 'rules allowlist must accept the error record');
 assert(cloud.includes('error: optMap(event.error)'), 'cloud mapping must persist the error record');
 assert(cloud.includes('error: optMap(row.error)'), 'cloud mapping must restore the error record');
+// Evidence split (kind/aided/unaidedUnits) is learner-visible truth — the
+// cloud write path and the rules allowlist must carry it like the error record.
+assert(cloud.includes('evidence: optMap(event.evidence)'), 'cloud mapping must persist the evidence record');
+assert(cloud.includes('evidence: optMap(row.evidence)'), 'cloud mapping must restore the evidence record');
+assert(firestoreRules.includes("'evidence'"), 'rules allowlist must accept the evidence field');
+assert(adapter.includes('firstMissed'), 'the first-attempt miss snapshot must feed the evidence split');
 
 // Memory search is table stakes (LingQ/Anki both ship it): the toolbar input
 // must exist and renderMemory must filter on target + meaning + source context.
