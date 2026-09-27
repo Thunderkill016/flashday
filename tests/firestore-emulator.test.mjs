@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { createRequire } from "node:module";
 import {
   initializeTestEnvironment,
   assertFails,
@@ -10,8 +9,8 @@ import {
   readFirestorePage,
   writeProgressTransaction,
   PROGRESS_MAX_JSON_BYTES,
-} from "../cloud-compat.mjs";
-const C = createRequire(import.meta.url)("../flashday-cloud.js");
+} from "../src/auth/cloud-compat.mjs";
+import { mergeProgressPayload } from "../src/core/cloud.js";
 
 // Hard stop rather than accidentally test against a real Firebase project.
 if (!process.env.FIRESTORE_EMULATOR_HOST)
@@ -39,10 +38,9 @@ try {
     deck_id: "deck",
     updated_at: "2026-09-27T00:00:00.000Z",
     payload: {
-      transferAttempts: [{ id }],
-      comprehensionChecks: [{ id }],
-      encounters: [{ id: "shared", at: 10, kinds: [id] }],
-      fsrsProgress: { stale: id },
+      lessonEvents: [{ id }],
+      reviewLog: [{ id: `log-${id}` }],
+      fsrs: { stale: id },
     },
   });
   await Promise.all([
@@ -51,36 +49,32 @@ try {
       sdk.doc(first.db, path),
       makeRow("first"),
       "alice",
-      C.mergeProgressPayload,
+      mergeProgressPayload,
     ),
     writeProgressTransaction(
       second,
       sdk.doc(second.db, path),
       makeRow("second"),
       "alice",
-      C.mergeProgressPayload,
+      mergeProgressPayload,
     ),
   ]);
   const stored = (await sdk.getDoc(sdk.doc(first.db, path))).data();
   assert.deepEqual(
-    stored.payload.transferAttempts.map((row) => row.id).sort(),
+    stored.payload.lessonEvents.map((row) => row.id).sort(),
     ["first", "second"],
   );
-  assert.equal(stored.payload.comprehensionChecks.length, 2);
-  assert.deepEqual(stored.payload.encounters[0].kinds.sort(), [
-    "first",
-    "second",
-  ]);
-  assert.equal(stored.payload.fsrsProgress, null);
+  assert.equal(stored.payload.reviewLog.length, 2);
+  assert.equal(stored.payload.fsrs, null);
   await writeProgressTransaction(
     first,
     sdk.doc(first.db, path),
     makeRow("first"),
     "alice",
-    C.mergeProgressPayload,
+    mergeProgressPayload,
   );
   assert.equal(
-    (await sdk.getDoc(sdk.doc(first.db, path))).data().payload.transferAttempts
+    (await sdk.getDoc(sdk.doc(first.db, path))).data().payload.lessonEvents
       .length,
     2,
   );
@@ -93,7 +87,7 @@ try {
         payload: { large: "x".repeat(PROGRESS_MAX_JSON_BYTES) },
       },
       "alice",
-      C.mergeProgressPayload,
+      mergeProgressPayload,
     ),
     /vượt giới hạn/,
   );

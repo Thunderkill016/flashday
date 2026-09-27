@@ -9,7 +9,7 @@ import {
   enterApp,
   isPasswordLongEnough,
   requiresNewPasswordPolicy,
-} from '../flashday-auth.mjs';
+} from '../src/auth/flashday-auth.mjs';
 
 assert.equal(
   authRedirectUrl('https://flashday.web.app', '/app/'),

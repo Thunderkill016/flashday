@@ -10,7 +10,7 @@ import {
   taskState,
   rankDueTasks,
   ratingFromBespokeScore
-} from '../fsrs-scheduler.mjs';
+} from '../src/core/fsrs.mjs';
 
 assert.equal(FSRS_ALGORITHM, 'FSRS-6');
 assert.match(FSRS_SOURCE, /ts-fsrs@v5\.4\.2/);

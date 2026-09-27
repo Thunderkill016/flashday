@@ -7,7 +7,7 @@ import {
   paginateRows,
   rowDocId,
   sortRows
-} from '../cloud-compat.mjs';
+} from '../src/auth/cloud-compat.mjs';
 
 // mapAuthError keeps authErrorMessage's recognised substrings.
 const cases = [
@@ -139,9 +139,8 @@ console.log('cloud-compat tests passed');
 
 // Transaction retry simulation: two stale devices must preserve both histories.
 {
-  const { createRequire } = await import('node:module');
-  const C = createRequire(import.meta.url)('../flashday-cloud.js');
-  const { writeProgressTransaction, PROGRESS_MAX_JSON_BYTES } = await import('../cloud-compat.mjs');
+  const { mergeProgressPayload } = await import('../src/core/cloud.js');
+  const { writeProgressTransaction, PROGRESS_MAX_JSON_BYTES } = await import('../src/auth/cloud-compat.mjs');
   let stored = { created_at: '2026-01-01T00:00:00.000Z', payload: {} };
   let revision = 0;
   let conflicts = 0;
@@ -165,25 +164,22 @@ console.log('cloud-compat tests passed');
   const target = { id: 'owner' };
   await Promise.all(['device-a','device-b'].map(id => writeProgressTransaction(fs,target,{
     created_at:'2099-01-01T00:00:00.000Z',
-    payload:{transferAttempts:[{id}],comprehensionChecks:[{id}],
-      encounters:[{id:'shared',at:id==='device-a'?10:20,kinds:[id]}],
-      fsrsProgress:{stale:id}}
-  },'owner',C.mergeProgressPayload)));
+    payload:{lessonEvents:[{id}],reviewLog:[{id:`log-${id}`}],
+      fsrs:{stale:id}}
+  },'owner',mergeProgressPayload)));
   assert.ok(conflicts > 0, 'fixture must exercise a conflicting transaction retry');
-  assert.deepEqual(stored.payload.transferAttempts.map(a=>a.id).sort(),['device-a','device-b']);
-  assert.equal(stored.payload.comprehensionChecks.length,2);
-  assert.deepEqual(stored.payload.encounters[0].kinds.sort(),['device-a','device-b']);
-  assert.equal(stored.payload.encounters[0].at,10);
-  assert.equal(stored.payload.fsrsProgress,null);
+  assert.deepEqual(stored.payload.lessonEvents.map(a=>a.id).sort(),['device-a','device-b']);
+  assert.equal(stored.payload.reviewLog.length,2);
+  assert.equal(stored.payload.fsrs,null);
   assert.equal(stored.created_at,'2026-01-01T00:00:00.000Z');
   const before = structuredClone(stored);
-  await assert.rejects(writeProgressTransaction(fs,target,{payload:{huge:'x'.repeat(PROGRESS_MAX_JSON_BYTES)}},'owner',C.mergeProgressPayload),/vượt giới hạn/);
+  await assert.rejects(writeProgressTransaction(fs,target,{payload:{huge:'x'.repeat(PROGRESS_MAX_JSON_BYTES)}},'owner',mergeProgressPayload),/vượt giới hạn/);
   assert.deepEqual(stored,before,'size rejection must not overwrite stored history');
 }
 
 // Cursor pages must have bounded reads and stable order, even with equal times.
 {
-  const { readFirestorePage } = await import('../cloud-compat.mjs');
+  const { readFirestorePage } = await import('../src/auth/cloud-compat.mjs');
   const documents = Array.from({length:1201},(_,i)=>({id:String(i).padStart(4,'0'),data:()=>({id:String(i),created_at:'same-time'})}));
   let reads = 0;
   const fs = {
@@ -213,7 +209,7 @@ console.log('cloud-compat tests passed');
 }
 
 {
-  const {assertAccountOwner}=await import('../cloud-compat.mjs');
+  const {assertAccountOwner}=await import('../src/auth/cloud-compat.mjs');
   assert.doesNotThrow(()=>assertAccountOwner('alice','alice'));
   for(const [expected,current] of [['alice','bob'],['alice',null],[null,'bob']]) {
     assert.throws(()=>assertAccountOwner(expected,current),error=>error.code==='SESSION_CHANGED');

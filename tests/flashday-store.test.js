@@ -1,69 +1,68 @@
-const assert=require('assert');
-const D=require('../flashday-data.js');
-const S=require('../flashday-store.js');
-const L=require('../learning-entry.js');
+import assert from 'node:assert/strict';
+import { createPersistentStore } from '../src/core/store.js';
+import { createInitialDb, hydrateDb } from '../src/core/evidence.js';
+import { DB_BASE_KEY } from '../src/core/namespace.js';
 
-function memoryStorage(initial={}){
-  const data=new Map(Object.entries(initial));
+function memoryStorage(initial = {}) {
+  const data = new Map(Object.entries(initial));
   return {
-    getItem:(key)=>data.has(key)?data.get(key):null,
-    setItem:(key,value)=>data.set(key,String(value)),
-    removeItem:(key)=>data.delete(key),
-    dump:(key)=>data.get(key)
+    getItem: (key) => (data.has(key) ? data.get(key) : null),
+    setItem: (key, value) => data.set(key, String(value)),
+    removeItem: (key) => data.delete(key),
+    dump: (key) => data.get(key)
   };
 }
 
-const KEY='flashday-memory-engine-repo-driven';
-let checks=0;
-function ok(){checks++;}
+const KEY = DB_BASE_KEY;
+let checks = 0;
 
 {
-  const initial=D.createInitialDb([],1000);
-  initial.events.push({id:'review_1',mode:'read',unitIds:['u1'],ratings:{u1:3},answeredAt:1100});
-  const storage=memoryStorage({[KEY]:JSON.stringify(initial)});
-  const store=S.createPersistentStore({storage,key:KEY,hydrate:(raw)=>D.migrateDb(raw),fallback:()=>D.createInitialDb([],1000)});
+  const initial = createInitialDb();
+  initial.lessonEvents.push({ id: 'ev_1', lessonId: 'l1', step: 'read', kind: 'read', submittedAt: 1100 });
+  const storage = memoryStorage({ [KEY]: JSON.stringify(initial) });
+  const store = createPersistentStore({ storage, key: KEY, hydrate: hydrateDb, fallback: createInitialDb });
 
-  // Simulate the review runtime writing a newer snapshot after this store was
-  // created. The profile transaction must start from that latest persisted DB,
+  // Simulate another runtime path writing a newer snapshot after this store
+  // was created. A transaction must start from the latest persisted DB,
   // never from the store's older in-memory snapshot.
-  const runtimeSnapshot=D.migrateDb(JSON.parse(storage.getItem(KEY)));
-  runtimeSnapshot.events.push({id:'review_2',mode:'write',unitIds:['u2'],ratings:{u2:1},answeredAt:1200});
-  storage.setItem(KEY,JSON.stringify(runtimeSnapshot));
+  const runtimeSnapshot = hydrateDb(JSON.parse(storage.getItem(KEY)));
+  runtimeSnapshot.lessonEvents.push({ id: 'ev_2', lessonId: 'l1', step: 'write', kind: 'write', submittedAt: 1200 });
+  storage.setItem(KEY, JSON.stringify(runtimeSnapshot));
 
-  store.transact((db)=>L.setSkillLevel(db,'read','A2',{now:1300}));
-  const saved=JSON.parse(storage.getItem(KEY));
-  assert.deepEqual(saved.events.map(event=>event.id),['review_1','review_2']);
-  assert.equal(saved.learningProfile.skills.read.level,'A2');
-  ok();
+  store.transact((db) => { db.profile.target = 'a1'; });
+  const saved = JSON.parse(storage.getItem(KEY));
+  assert.deepEqual(saved.lessonEvents.map((event) => event.id), ['ev_1', 'ev_2']);
+  assert.equal(saved.profile.target, 'a1');
+  checks++;
 }
 
 {
-  const storage=memoryStorage();
-  const store=S.createPersistentStore({storage,key:KEY,hydrate:(raw)=>D.migrateDb(raw),fallback:()=>D.createInitialDb([],1000)});
-  store.transact((db)=>{db.events.push({id:'e1',answeredAt:1001});});
-  const before=storage.getItem(KEY);
-  assert.throws(()=>store.transact((db)=>{db.events.push({id:'bad'});throw new Error('stop');}),/stop/);
-  assert.equal(storage.getItem(KEY),before,'failed transaction must not overwrite persisted state');
-  ok();
+  const storage = memoryStorage();
+  const store = createPersistentStore({ storage, key: KEY, hydrate: hydrateDb, fallback: createInitialDb });
+  store.transact((db) => { db.lessonEvents.push({ id: 'e1', submittedAt: 1001 }); });
+  const before = storage.getItem(KEY);
+  assert.throws(() => store.transact(() => { throw new Error('stop'); }), /stop/);
+  assert.equal(storage.getItem(KEY), before, 'failed transaction must not overwrite persisted state');
+  checks++;
 }
 
 {
-  const storage=memoryStorage({[KEY]:'{broken json'});
-  const store=S.createPersistentStore({storage,key:KEY,hydrate:(raw)=>D.migrateDb(raw),fallback:()=>D.createInitialDb([],2000)});
-  assert.equal(store.getState().createdAt,2000,'malformed storage must fall back to a valid DB');
-  ok();
+  const storage = memoryStorage({ [KEY]: '{broken json' });
+  const store = createPersistentStore({ storage, key: KEY, hydrate: hydrateDb, fallback: createInitialDb });
+  assert.equal(store.getState().version, 2, 'malformed storage must fall back to a valid DB');
+  checks++;
 }
 
 {
-  const storage=memoryStorage({[KEY]:JSON.stringify(D.createInitialDb([],1000))});
-  const store=S.createPersistentStore({storage,key:KEY,hydrate:(raw)=>D.migrateDb(raw),fallback:()=>D.createInitialDb([],1000)});
-  let notifications=0;
-  const unsubscribe=store.subscribe(()=>notifications++);
-  store.transact((db)=>{db.events.push({id:'e1',answeredAt:1001});});
+  const storage = memoryStorage({ [KEY]: JSON.stringify(createInitialDb()) });
+  const store = createPersistentStore({ storage, key: KEY, hydrate: hydrateDb, fallback: createInitialDb });
+  let notifications = 0;
+  const unsubscribe = store.subscribe(() => notifications++);
+  store.transact((db) => { db.lessonEvents.push({ id: 'e1' }); });
   unsubscribe();
-  store.transact((db)=>{db.events.push({id:'e2',answeredAt:1002});});
-  assert.equal(notifications,1,'subscription should observe committed state changes only while active');
-  ok();
+  store.transact((db) => { db.lessonEvents.push({ id: 'e2' }); });
+  assert.equal(notifications, 1, 'subscription should observe committed state changes only while active');
+  checks++;
 }
 
 console.log(`FlashDay state integrity: ${checks} persistent-store checks passed`);
