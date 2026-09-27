@@ -1,146 +1,568 @@
 <!doctype html>
 <html lang="vi">
   <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-    <meta name="theme-color" content="#090B0D">
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#090B0D" />
     <script src="/canonical.js"></script>
     <title>FlashDay — Học từ nội dung thật</title>
-    <link rel="icon" href="data:,">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Be+Vietnam+Pro:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="../styles.css">
+    <link rel="icon" href="data:," />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Be+Vietnam+Pro:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="../styles.css" />
   </head>
   <body>
+    <a class="skip-link" href="#captureView">Đến nội dung học</a>
     <main class="app">
       <header class="topbar">
-        <a href="/" class="brand"><b>FlashDay</b><span>Ôn để dùng được</span></a>
+        <a href="/app/" class="brand"
+          ><b>FlashDay</b><span>Ôn để dùng được</span></a
+        >
         <div class="header-actions">
-          <span id="cloudStatus" class="cloud-status" data-tone="local">Lưu trên thiết bị</span>
-          <button id="authBtn" class="ghost-btn" type="button">Đăng nhập</button>
-          <span id="previewBadge" class="cloud-status hidden" data-tone="local">Demo — chưa đăng nhập</span>
-          <button id="themeBtn" class="icon-btn" type="button" title="Chuyển giao diện sáng/tối" aria-label="Chuyển giao diện sáng/tối">◐</button>
-          <button id="signOutBtn" class="icon-btn hidden" type="button" title="Đăng xuất" aria-label="Đăng xuất">↪</button>
-          <button id="resetBtn" class="icon-btn" type="button" title="Xóa dữ liệu học" aria-label="Xóa dữ liệu học">↻</button>
+          <span id="cloudStatus" class="cloud-status" data-tone="local"
+            >Lưu trên thiết bị</span
+          >
+          <button id="authBtn" class="ghost-btn" type="button">
+            Đăng nhập
+          </button>
+          <span id="previewBadge" class="cloud-status hidden" data-tone="local"
+            >Demo — chưa đăng nhập</span
+          >
+          <button
+            id="themeBtn"
+            class="icon-btn"
+            type="button"
+            title="Chuyển giao diện sáng/tối"
+            aria-label="Chuyển giao diện sáng/tối"
+          >
+            ◐
+          </button>
+          <button
+            id="signOutBtn"
+            class="icon-btn hidden"
+            type="button"
+            title="Đăng xuất"
+            aria-label="Đăng xuất"
+          >
+            ↪
+          </button>
         </div>
       </header>
 
       <nav class="tabs" aria-label="Khu vực FlashDay" role="tablist">
-        <button class="tab active" type="button" role="tab" aria-selected="true" aria-controls="captureView" data-view="capture">Học</button>
-        <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="reviewView" data-view="review">Ôn<span id="reviewDueBadge" class="tab-badge hidden">0</span></button>
-        <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="memoryView" data-view="memory">Bộ nhớ</button>
+        <button
+          class="tab active"
+          type="button"
+          role="tab"
+          aria-selected="true"
+          aria-controls="captureView"
+          id="tab-capture"
+          data-view="capture"
+        >
+          Bài học
+        </button>
+        <button
+          class="tab"
+          type="button"
+          role="tab"
+          aria-selected="false"
+          aria-controls="reviewView"
+          id="tab-review"
+          data-view="review"
+        >
+          Ôn tập<span id="reviewDueBadge" class="tab-badge hidden">0</span>
+        </button>
+        <button
+          class="tab"
+          type="button"
+          role="tab"
+          aria-selected="false"
+          aria-controls="libraryView"
+          id="tab-library"
+          data-view="library"
+        >
+          Thư viện
+        </button>
+        <button
+          class="tab"
+          type="button"
+          role="tab"
+          aria-selected="false"
+          aria-controls="memoryView"
+          id="tab-memory"
+          data-view="memory"
+        >
+          Từ đã lưu
+        </button>
       </nav>
 
-      <section id="reviewView" class="view hidden" role="tabpanel">
-        <div class="progress" id="progressTrack" role="progressbar" aria-label="Tiến độ lượt ôn" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="progressBar"></div></div>
+      <section
+        id="reviewView"
+        class="view hidden"
+        role="tabpanel"
+        aria-labelledby="tab-review"
+        tabindex="-1"
+      >
+        <div class="page-title">
+          <span class="eyebrow">ÔN LẠI ĐỂ NHỚ</span>
+          <h2>Một lượt, một câu.</h2>
+          <p>
+            Thử nhớ trước khi xem đáp án. Lịch ôn được điều chỉnh từ những lần
+            bạn thực hành.
+          </p>
+        </div>
+        <div
+          class="progress"
+          id="progressTrack"
+          role="progressbar"
+          aria-label="Tiến độ lượt ôn"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow="0"
+        >
+          <div id="progressBar"></div>
+        </div>
         <div class="review-status">
-          <span class="status-left"><strong id="sessionCount">0</strong> lượt ôn hôm nay</span>
+          <span class="status-left"
+            ><strong id="sessionCount">0</strong> lượt ôn hôm nay</span
+          >
           <span class="status-right" id="dueCount">Đang chuẩn bị lượt ôn…</span>
         </div>
-        
+
         <article id="studyCard" class="study-card">
-          <div class="card-head"><span id="trackBadge" class="badge">—</span><button id="sourceChip" class="source-chip hidden" type="button" aria-expanded="false" aria-controls="sourcePanel">Nguồn</button></div>
-          <div class="prompt-wrap"><p id="instruction" class="instruction"></p><div id="prompt" class="prompt"></div><button id="audioPrimary" class="audio-primary hidden" type="button" aria-label="Nghe âm thanh"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4z"></path><path d="M15.5 8.5a5 5 0 0 1 0 7"></path><path d="M19 5a10 10 0 0 1 0 14"></path></svg></button></div>
+          <div class="card-head">
+            <span id="trackBadge" class="badge">—</span
+            ><button
+              id="sourceChip"
+              class="source-chip hidden"
+              type="button"
+              aria-expanded="false"
+              aria-controls="sourcePanel"
+            >
+              Nguồn
+            </button>
+          </div>
+          <div class="prompt-wrap">
+            <p id="instruction" class="instruction"></p>
+            <div id="prompt" class="prompt"></div>
+            <button
+              id="audioPrimary"
+              class="audio-primary hidden"
+              type="button"
+              aria-label="Nghe âm thanh"
+            >
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M11 5 6 9H2v6h4l5 4z"></path>
+                <path d="M15.5 8.5a5 5 0 0 1 0 7"></path>
+                <path d="M19 5a10 10 0 0 1 0 14"></path>
+              </svg>
+            </button>
+          </div>
           <div id="answerArea" class="answer-area"></div>
-          <section id="sourcePanel" class="source-panel hidden" aria-live="polite"></section>
-          <section id="feedback" class="feedback hidden" aria-live="polite"></section>
+          <section
+            id="sourcePanel"
+            class="source-panel hidden"
+            aria-live="polite"
+          ></section>
+          <section
+            id="feedback"
+            class="feedback hidden"
+            aria-live="polite"
+          ></section>
         </article>
-        <section id="capabilities" class="capabilities" aria-live="polite"></section>
-        <details id="debugPanel" class="debug hidden"><summary>Engine state</summary><pre id="debugPre"></pre></details>
+        <section
+          id="capabilities"
+          class="capabilities"
+          aria-live="polite"
+        ></section>
+        <details id="debugPanel" class="debug hidden">
+          <summary>Engine state</summary>
+          <pre id="debugPre"></pre>
+        </details>
       </section>
 
-      <section id="memoryView" class="view hidden" role="tabpanel">
-        <div class="page-title"><h2>Bộ nhớ</h2><p>Tiến độ ghi nhận riêng cho nghe, nói, đọc và viết.</p></div>
-        <div class="memory-toolbar"><input id="memorySearch" type="search" placeholder="Lọc unit theo từ hoặc nghĩa…" aria-label="Lọc unit"></div>
+      <section
+        id="memoryView"
+        class="view hidden"
+        role="tabpanel"
+        aria-labelledby="tab-memory"
+        tabindex="-1"
+      >
+        <div class="page-title">
+          <h2>Từ và cụm đã lưu</h2>
+          <p>Tiến độ ghi nhận riêng cho nghe, nói, đọc và viết.</p>
+        </div>
+        <div class="memory-toolbar">
+          <input
+            id="memorySearch"
+            type="search"
+            placeholder="Tìm từ, cụm hoặc nghĩa…"
+            aria-label="Tìm từ và cụm đã lưu"
+          />
+        </div>
         <div id="memoryList" class="memory-list"></div>
-      </section>
-
-      <section id="captureView" class="view" role="tabpanel">
-        <div class="page-title"><h2>Học từ nội dung thật</h2><p>Nguồn vào trước: đọc và chạm từ để lưu Unit — thẻ ôn chỉ xuất hiện sau khi bạn đã gặp chúng trong ngữ cảnh.</p></div>
-
-        <section class="learning-panel" aria-labelledby="personalTitle">
-          <div class="learning-panel-head">
-            <div><span class="eyebrow">IMMERSION · MY CONTENT</span><h3 id="personalTitle">Nội dung của bạn</h3><p>Dán link YouTube để tự lấy transcript (khi video có phụ đề), dán text, hoặc thêm từ thư viện gợi ý. URL được giữ làm provenance.</p></div>
+        <details class="learning-settings">
+          <summary>Trình độ và dữ liệu học</summary>
+          <div class="profile-box">
+            <div class="profile-copy">
+              <strong>Trình độ hiện tại theo từng kỹ năng</strong
+              ><span
+                >Tự khai báo ở V1. FlashDay chưa tự gán level từ nút
+                “Nhớ”.</span
+              >
+            </div>
+            <div class="profile-grid">
+              <label
+                >Nghe<select id="profileListen">
+                  <option value="">Chưa biết</option>
+                  <option>A1</option>
+                  <option>A2</option>
+                  <option>B1</option>
+                  <option>B2</option>
+                  <option>C1</option>
+                  <option>C2</option>
+                </select></label
+              >
+              <label
+                >Nói<select id="profileSpeak">
+                  <option value="">Chưa biết</option>
+                  <option>A1</option>
+                  <option>A2</option>
+                  <option>B1</option>
+                  <option>B2</option>
+                  <option>C1</option>
+                  <option>C2</option>
+                </select></label
+              >
+              <label
+                >Đọc<select id="profileRead">
+                  <option value="">Chưa biết</option>
+                  <option>A1</option>
+                  <option>A2</option>
+                  <option>B1</option>
+                  <option>B2</option>
+                  <option>C1</option>
+                  <option>C2</option>
+                </select></label
+              >
+              <label
+                >Viết<select id="profileWrite">
+                  <option value="">Chưa biết</option>
+                  <option>A1</option>
+                  <option>A2</option>
+                  <option>B1</option>
+                  <option>B2</option>
+                  <option>C1</option>
+                  <option>C2</option>
+                </select></label
+              >
+            </div>
+            <p id="profileSummary" class="footer-note" aria-live="polite"></p>
           </div>
 
-          <div id="sourceRecommendations" class="source-recs" aria-live="polite"></div>
+          <p class="footer-note">
+            Chỉ tự khai mức hiện tại nếu bạn biết. Việc này không thay đổi kết
+            quả các bài đã làm.
+          </p>
+          <button id="resetBtn" class="ghost-btn danger-action" type="button">
+            Xóa dữ liệu học…
+          </button>
+        </details>
+      </section>
+
+      <section
+        id="captureView"
+        class="view"
+        role="tabpanel"
+        aria-labelledby="tab-capture"
+        tabindex="-1"
+      >
+        <div class="page-title learning-welcome">
+          <span class="eyebrow">LỘ TRÌNH TIẾNG ANH A1</span>
+          <h2>Học từng bước. Dùng từng câu.</h2>
+          <p>Chọn một bài, hiểu cách dùng rồi thử đọc, nghe, viết và nói.</p>
+        </div>
+
+        <section
+          class="learning-panel course-panel"
+          aria-label="Bài học của bạn"
+        >
+          <div
+            id="guidedModules"
+            class="guided-modules"
+            aria-live="polite"
+          ></div>
+          <section
+            id="transferMissions"
+            class="transfer-missions"
+            aria-live="polite"
+          ></section>
+        </section>
+      </section>
+      <section
+        id="libraryView"
+        class="view hidden"
+        role="tabpanel"
+        aria-labelledby="tab-library"
+        tabindex="-1"
+      >
+        <div class="page-title">
+          <span class="eyebrow">ĐỌC THÊM & KHÁM PHÁ</span>
+          <h2>Thư viện của bạn</h2>
+          <p>
+            Đọc bài có sẵn hoặc thêm nội dung bạn quan tâm. Chạm vào từ trong
+            bài đọc để lưu và ôn lại.
+          </p>
+        </div>
+        <section class="learning-panel" aria-labelledby="personalTitle">
+          <div class="learning-panel-head">
+            <div>
+              <span class="eyebrow">NỘI DUNG ĐÃ LƯU</span>
+              <h3 id="personalTitle">Đọc và lưu từ</h3>
+              <p>
+                Bắt đầu từ bài đọc gợi ý bên dưới, hoặc thêm văn bản và phụ đề
+                của bạn.
+              </p>
+            </div>
+          </div>
+
+          <div
+            id="sourceRecommendations"
+            class="source-recs"
+            aria-live="polite"
+          ></div>
           <div id="sourceReader" class="source-reader hidden"></div>
-          <div id="starterCatalog" class="starter-catalog" aria-live="polite"></div>
+          <div
+            id="starterCatalog"
+            class="starter-catalog"
+            aria-live="polite"
+          ></div>
 
           <details id="importShell" class="import-shell">
-            <summary><span class="import-shell-plus">＋</span> Thêm nội dung mới <span class="import-shell-hint">dán transcript · file · URL</span></summary>
+            <summary>
+              <span class="import-shell-plus">＋</span> Thêm nội dung mới
+              <span class="import-shell-hint">dán transcript · file · URL</span>
+            </summary>
             <div class="capture-form import-form">
-              <div class="field"><label for="importUrlInput">YouTube URL</label><div class="url-fetch-row"><input id="importUrlInput" type="url" placeholder="https://youtube.com/watch?v=..."><button id="ytFetchBtn" class="ghost-btn" type="button" disabled>Lấy transcript</button></div><small class="field-note">Có phụ đề → tự kéo transcript về ô dưới để bạn kiểm tra trước khi phân tích.</small></div>
-              <div class="field"><label for="importPasteInput">Dán transcript / text</label><textarea id="importPasteInput" rows="4" placeholder="Transcript tự đổ về đây khi lấy từ URL — hoặc dán tay. Hỗ trợ cả dạng có timestamp (0:05) lẫn text thường."></textarea><small class="field-note">Timestamp YouTube tự được nhận diện — dùng để mở audio thật khi đọc.</small></div>
-              <div class="field file-field"><label for="transcriptFileInput">…hoặc file transcript JSON / SRT</label><input id="transcriptFileInput" type="file" accept=".json,.srt,application/json,text/plain"></div>
-              <div class="field"><label for="importSourceTitle">Tên video / nguồn</label><input id="importSourceTitle" placeholder="Ví dụ: MKBHD — phone review"></div>
-              <div class="field"><label for="importSourceLevel">Level ước lượng của nguồn</label><select id="importSourceLevel"><option value="">Chưa biết</option><option>A1</option><option>A2</option><option>B1</option><option>B2</option><option>C1</option><option>C2</option></select><small class="field-note">Metadata đầu vào để Bridge lọc độ khó; chưa có auto CEFR classifier.</small></div>
+              <div class="field">
+                <label for="importUrlInput">YouTube URL</label>
+                <div class="url-fetch-row">
+                  <input
+                    id="importUrlInput"
+                    type="url"
+                    placeholder="https://youtube.com/watch?v=..."
+                  /><button
+                    id="ytFetchBtn"
+                    class="ghost-btn"
+                    type="button"
+                    disabled
+                  >
+                    Lấy transcript
+                  </button>
+                </div>
+                <small class="field-note"
+                  >Có phụ đề → tự kéo transcript về ô dưới để bạn kiểm tra trước
+                  khi phân tích.</small
+                >
+              </div>
+              <div class="field">
+                <label for="importPasteInput">Dán transcript / text</label
+                ><textarea
+                  id="importPasteInput"
+                  rows="4"
+                  placeholder="Transcript tự đổ về đây khi lấy từ URL — hoặc dán tay. Hỗ trợ cả dạng có timestamp (0:05) lẫn text thường."
+                ></textarea
+                ><small class="field-note"
+                  >Timestamp YouTube tự được nhận diện — dùng để mở audio thật
+                  khi đọc.</small
+                >
+              </div>
+              <div class="field file-field">
+                <label for="transcriptFileInput"
+                  >…hoặc file transcript JSON / SRT</label
+                ><input
+                  id="transcriptFileInput"
+                  type="file"
+                  accept=".json,.srt,application/json,text/plain"
+                />
+              </div>
+              <div class="field">
+                <label for="importSourceTitle">Tên video / nguồn</label
+                ><input
+                  id="importSourceTitle"
+                  placeholder="Ví dụ: MKBHD — phone review"
+                />
+              </div>
+              <div class="field">
+                <label for="importSourceLevel">Level ước lượng của nguồn</label
+                ><select id="importSourceLevel">
+                  <option value="">Chưa biết</option>
+                  <option>A1</option>
+                  <option>A2</option>
+                  <option>B1</option>
+                  <option>B2</option>
+                  <option>C1</option>
+                  <option>C2</option></select
+                ><small class="field-note"
+                  >Không chắc thì chọn “Chưa biết”. Đây chỉ là mức bạn ước
+                  lượng.</small
+                >
+              </div>
               <details class="capture-details">
                 <summary>Media nâng cao <span>(tùy chọn)</span></summary>
                 <div class="capture-details-body">
-                  <div class="field"><label for="importMediaNameInput">Tên media</label><input id="importMediaNameInput" placeholder="video.mp4"></div>
-                  <div class="field"><label for="importAudioBaseInput">Thư mục audio đã cắt</label><input id="importAudioBaseInput" placeholder="media"></div>
+                  <div class="field">
+                    <label for="importMediaNameInput">Tên media</label
+                    ><input id="importMediaNameInput" placeholder="video.mp4" />
+                  </div>
+                  <div class="field">
+                    <label for="importAudioBaseInput"
+                      >Thư mục audio đã cắt</label
+                    ><input id="importAudioBaseInput" placeholder="media" />
+                  </div>
                 </div>
               </details>
-              <button id="importTranscriptBtn" class="primary-btn" type="button">Phân tích & mở để đọc</button>
-              <div id="sourceSuitability" class="suitability hidden" aria-live="polite"></div>
+              <button
+                id="importTranscriptBtn"
+                class="primary-btn"
+                type="button"
+              >
+                Phân tích & mở để đọc
+              </button>
+              <div
+                id="sourceSuitability"
+                class="suitability hidden"
+                aria-live="polite"
+              ></div>
               <p id="importSummary" class="footer-note" aria-live="polite"></p>
             </div>
           </details>
         </section>
 
-        <section class="learning-panel" aria-labelledby="guidedTitle">
-          <div class="learning-panel-head">
-            <div><span class="eyebrow">GUIDED PATH</span><h3 id="guidedTitle">FlashDay dẫn đường</h3><p>Lộ trình A1: đọc, nghe giọng máy, viết và nói hai vai. Nội dung biên soạn nội bộ; hoàn thành bài không tự chứng nhận trình độ.</p></div>
-            <span class="pilot-pill">Mục tiêu A1</span>
-          </div>
-
-          <div class="profile-box">
-            <div class="profile-copy"><strong>Trình độ hiện tại theo từng kỹ năng</strong><span>Tự khai báo ở V1. FlashDay chưa tự gán level từ nút “Nhớ”.</span></div>
-            <div class="profile-grid">
-              <label>Nghe<select id="profileListen"><option value="">Chưa biết</option><option>A1</option><option>A2</option><option>B1</option><option>B2</option><option>C1</option><option>C2</option></select></label>
-              <label>Nói<select id="profileSpeak"><option value="">Chưa biết</option><option>A1</option><option>A2</option><option>B1</option><option>B2</option><option>C1</option><option>C2</option></select></label>
-              <label>Đọc<select id="profileRead"><option value="">Chưa biết</option><option>A1</option><option>A2</option><option>B1</option><option>B2</option><option>C1</option><option>C2</option></select></label>
-              <label>Viết<select id="profileWrite"><option value="">Chưa biết</option><option>A1</option><option>A2</option><option>B1</option><option>B2</option><option>C1</option><option>C2</option></select></label>
-            </div>
-            <p id="profileSummary" class="footer-note" aria-live="polite"></p>
-          </div>
-
-          <div id="guidedModules" class="guided-modules" aria-live="polite"></div>
-          <section id="transferMissions" class="transfer-missions" aria-live="polite"></section>
-        </section>
-
         <details class="manual-unit-shell">
-          <summary>Tạo Unit thủ công <span>dành cho nội dung chưa có trong lộ trình / source</span></summary>
+          <summary>
+            Thêm từ hoặc cụm riêng <span>khi bạn chưa có bài đọc nguồn</span>
+          </summary>
           <form id="captureForm" class="capture-form manual-unit-form">
             <div class="form-section">
-              <div class="field"><label for="targetInput">Expression</label><input id="targetInput" required placeholder="e.g. I ended up staying there"></div>
-              <div class="field"><label for="meaningInput">Meaning</label><input id="meaningInput" required placeholder="cuối cùng lại ở đó"></div>
-              <div class="field"><label for="contextInput">Context</label><textarea id="contextInput" placeholder="Nơi bạn gặp cụm này... (Tùy chọn)"></textarea></div>
+              <div class="field">
+                <label for="targetInput">Từ hoặc cụm tiếng Anh</label
+                ><input
+                  id="targetInput"
+                  required
+                  placeholder="e.g. I ended up staying there"
+                />
+              </div>
+              <div class="field">
+                <label for="meaningInput">Nghĩa tiếng Việt</label
+                ><input
+                  id="meaningInput"
+                  required
+                  placeholder="cuối cùng lại ở đó"
+                />
+              </div>
+              <div class="field">
+                <label for="contextInput">Ngữ cảnh sử dụng</label
+                ><textarea
+                  id="contextInput"
+                  placeholder="Nơi bạn gặp cụm này... (Tùy chọn)"
+                ></textarea>
+              </div>
             </div>
-            
+
             <details class="capture-details">
               <summary>+ Thêm chi tiết / Mở rộng</summary>
               <div class="capture-details-body">
-                <div class="field"><label for="typeInput">Phân loại</label><select id="typeInput"><option value="chunk">chunk</option><option value="collocation">collocation</option><option value="expression">expression</option><option value="phrasal_verb">phrasal verb</option><option value="grammar_pattern">grammar pattern</option><option value="word_sense">word sense</option></select></div>
-                <div class="field"><label for="intentInput">Ý định giao tiếp</label><input id="intentInput" placeholder="e.g. báo với ai đó tôi sẽ tới muộn"></div>
-                <div class="field"><label for="canDoInput">Tôi có thể…</label><textarea id="canDoInput" placeholder="e.g. Tôi có thể báo người đang chờ rằng tôi sẽ tới muộn."></textarea></div>
-                
-                <div class="field" style="margin-top: 16px;"><label for="sourceSentenceInput">Câu nguồn nguyên bản</label><textarea id="sourceSentenceInput" placeholder="I ended up staying home because it was raining."></textarea></div>
-                <div class="field"><label for="sourceTranslationInput">Bản dịch câu nguồn</label><textarea id="sourceTranslationInput" placeholder="Cuối cùng tôi ở nhà vì trời mưa."></textarea></div>
-                <div class="field"><label for="sourceUrlInput">Nguồn URL / YouTube</label><input id="sourceUrlInput" type="url" placeholder="https://youtube.com/..."></div>
-                <div class="field"><label for="sourceTimeInput">Timestamp (giây)</label><input id="sourceTimeInput" type="number" min="0" step="0.001" placeholder="83.4"></div>
-                <div class="field"><label for="sourceFileInput">Tên subtitle / file nguồn</label><input id="sourceFileInput" placeholder="video-en.srt / lesson.mp4"></div>
+                <div class="field">
+                  <label for="typeInput">Phân loại</label
+                  ><select id="typeInput">
+                    <option value="chunk">chunk</option>
+                    <option value="collocation">collocation</option>
+                    <option value="expression">expression</option>
+                    <option value="phrasal_verb">phrasal verb</option>
+                    <option value="grammar_pattern">grammar pattern</option>
+                    <option value="word_sense">word sense</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="intentInput">Ý định giao tiếp</label
+                  ><input
+                    id="intentInput"
+                    placeholder="e.g. báo với ai đó tôi sẽ tới muộn"
+                  />
+                </div>
+                <div class="field">
+                  <label for="canDoInput">Tôi có thể…</label
+                  ><textarea
+                    id="canDoInput"
+                    placeholder="e.g. Tôi có thể báo người đang chờ rằng tôi sẽ tới muộn."
+                  ></textarea>
+                </div>
+
+                <div class="field" style="margin-top: 16px">
+                  <label for="sourceSentenceInput">Câu nguồn nguyên bản</label
+                  ><textarea
+                    id="sourceSentenceInput"
+                    placeholder="I ended up staying home because it was raining."
+                  ></textarea>
+                </div>
+                <div class="field">
+                  <label for="sourceTranslationInput">Bản dịch câu nguồn</label
+                  ><textarea
+                    id="sourceTranslationInput"
+                    placeholder="Cuối cùng tôi ở nhà vì trời mưa."
+                  ></textarea>
+                </div>
+                <div class="field">
+                  <label for="sourceUrlInput">Nguồn URL / YouTube</label
+                  ><input
+                    id="sourceUrlInput"
+                    type="url"
+                    placeholder="https://youtube.com/..."
+                  />
+                </div>
+                <div class="field">
+                  <label for="sourceTimeInput">Timestamp (giây)</label
+                  ><input
+                    id="sourceTimeInput"
+                    type="number"
+                    min="0"
+                    step="0.001"
+                    placeholder="83.4"
+                  />
+                </div>
+                <div class="field">
+                  <label for="sourceFileInput">Tên subtitle / file nguồn</label
+                  ><input
+                    id="sourceFileInput"
+                    placeholder="video-en.srt / lesson.mp4"
+                  />
+                </div>
               </div>
             </details>
-            <button class="primary-btn" type="submit" style="margin-top: 16px;">Lưu unit</button>
+            <button class="primary-btn" type="submit" style="margin-top: 16px">
+              Lưu vào bộ ôn
+            </button>
           </form>
         </details>
       </section>
     </main>
 
-    
     <div id="toast" class="toast hidden" role="status"></div>
     <script type="module" src="../main.js"></script>
   </body>
