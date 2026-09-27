@@ -302,7 +302,7 @@ function renderCard(host) {
 }
 
 function renderEmpty(host) {
-  const next = nextDueAt(state.ctx.store.getState());
+  const next = nextDueAt(state.ctx.store.getState(), Date.now(), LESSONS);
   host.appendChild(el('p', 'Chưa có thẻ đến hạn'));
   if (next) {
     host.appendChild(el('p', `Sớm nhất: ${new Date(next).toLocaleString('vi-VN')}`, 'view-placeholder'));

@@ -12,9 +12,10 @@
  * cloud hydrate both rebuild from the same merged log, so they converge.
  *
  * Legacy compatibility: 2-segment `lesson:chunk` keys normalize to the
- * `meaning_recall` task (the old card asked VI→EN recall) at the entry's
- * own timestamp — a rate that predates a content rewrite lands on the OLD
- * phrase's revision, never on the new text.
+ * `meaning_recall` task (the old card asked VI→EN recall). A rev-less key
+ * resolves to a revision ONLY when the slot is unambiguous (single-revision
+ * ledger); on a multi-revision slot the key stays rev-less and is parked —
+ * commit timestamps never prove which phrase the learner saw.
  */
 import { createEmptyCard, fsrs } from 'ts-fsrs';
 import {
@@ -62,8 +63,8 @@ function logId() {
 
 // Task keys one enroll entry covers. New entries store full revision-aware
 // task ids. Entries written before staged enrollment stored bare task kinds
-// against a 2-segment chunkKey — each resolves through the ledger at the
-// entry's timestamp. Entries with NO `tasks` at all are the oldest legacy
+// against a 2-segment chunkKey — each resolves through the ledger only when
+// the slot is unambiguous (see normalizeTaskKey). Entries with NO `tasks` at all are the oldest legacy
 // form: one chunk card → exactly one `meaning_recall` task (canonical —
 // same projection as the cache migrator in evidence.js).
 function entryTaskKeys(entry) {
@@ -170,6 +171,11 @@ export function rebuildFsrsFromLog(reviewLog, enrolledKeys = []) {
 // at least once (Learning/Review/Relearning). Brand-new task introductions
 // (State.New) are NOT here; they surface through reviewQueue's bounded
 // fresh bucket so a fresh lesson can't flood the review wall.
+//
+// `lessons` is required to recognize parked cards: a superseded or
+// ambiguous task (rev-less key on a multi-revision slot) can be
+// chronologically due yet must never count — the review queue will never
+// present it, so reporting it as "due" strands the learner.
 export function dueTasks(db, now = Date.now(), lessons = null) {
   const nowMs = Number(now);
   return Object.entries(cardMap(db))
@@ -178,16 +184,19 @@ export function dueTasks(db, now = Date.now(), lessons = null) {
       return { key: normalized, parsed: parseTaskKey(normalized), card: deserializeCard(raw) };
     })
     .filter((entry) => entry.parsed && entry.card && !isNewCard(entry.card) && new Date(entry.card.due).getTime() <= nowMs)
+    // Ambiguous keys are knowable without lesson context — a rev-less
+    // normalized key is by construction unpresentable.
+    .filter((entry) => entry.parsed.rev != null)
     .filter((entry) => {
       if (!lessons) return true;
       const resolved = taskForKey(entry.key, lessons);
-      return resolved && !resolved.superseded;
+      return resolved && !resolved.superseded && !resolved.ambiguous;
     })
     .sort((a, b) => new Date(a.card.due) - new Date(b.card.due) || String(a.key).localeCompare(String(b.key)));
 }
 
-export function dueChunks(db, now = Date.now()) {
-  return dueTasks(db, now);
+export function dueChunks(db, now = Date.now(), lessons = null) {
+  return dueTasks(db, now, lessons);
 }
 
 // How many brand-new task introductions can sit in one review session, and
@@ -258,15 +267,23 @@ export function reviewQueue(db, lessons, now = Date.now()) {
   return { due, fresh, freshPending, orphaned };
 }
 
-// Earliest future due time across SCHEDULED tasks (null when none). New
-// tasks are introductions, not scheduled work, so they don't set it.
-export function nextDueAt(db, now = Date.now()) {
+// Earliest future due time across SCHEDULED, PRESENTABLE tasks (null when
+// none). New tasks are introductions, not scheduled work; superseded and
+// ambiguous cards are parked — none of them may surface a "next review"
+// timestamp the queue can never honor.
+export function nextDueAt(db, now = Date.now(), lessons = null) {
   const nowMs = Number(now);
-  const upcoming = Object.values(cardMap(db))
-    .map(deserializeCard)
-    .filter(Boolean)
-    .filter((card) => !isNewCard(card))
-    .map((card) => new Date(card.due).getTime())
+  const upcoming = Object.entries(cardMap(db))
+    .map(([key, raw]) => ({ key: normalizeTaskKey(key) || key, card: deserializeCard(raw) }))
+    .filter((entry) => entry.card)
+    .filter((entry) => !isNewCard(entry.card))
+    .filter((entry) => parseTaskKey(entry.key)?.rev != null)
+    .filter((entry) => {
+      if (!lessons) return true;
+      const resolved = taskForKey(entry.key, lessons);
+      return resolved && !resolved.superseded && !resolved.ambiguous;
+    })
+    .map((entry) => new Date(entry.card.due).getTime())
     .filter((due) => due > nowMs);
   return upcoming.length ? Math.min(...upcoming) : null;
 }

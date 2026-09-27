@@ -166,4 +166,47 @@ const tk = (chunkId, kind) => {
   assert(keys[0].includes('@'), 'resolved id carries the content revision');
 }
 
-console.log('FlashDay scheduler: 5 checks passed');
+// Regression (issue #30 round-3): a parked card can be chronologically due
+// yet must never surface as due work — the review queue cannot serve it.
+// dueTasks/nextDueAt must filter superseded AND ambiguous, not just New.
+{
+  const parkedLesson = {
+    id: 'test-parked', // no ledger entries — rev-less keys here stay parked
+    chunks: [{ id: 'c1', target: 'Hi', meaning: 'Chào' }]
+  };
+  const live = `test-parked:c1@${contentRev(parkedLesson.chunks[0])}:meaning_recall`;
+  const supersededKey = 'test-parked:c1@deadbeef:meaning_recall'; // rev ≠ live text
+  const ambiguousKey = 'test-parked:c1:meaning_recall';           // rev-less → parked
+  const log = [
+    { id: 'a', kind: 'rate', taskKey: ambiguousKey, grade: 1, at: 1000 },
+    { id: 's', kind: 'rate', taskKey: supersededKey, grade: 1, at: 1000 },
+    { id: 'l', kind: 'rate', taskKey: live, grade: 1, at: 1000 }
+  ];
+  const db = createInitialDb();
+  db.fsrs = rebuildFsrsFromLog(log);
+  const soon = 1000 + 5 * 60 * 1000;
+  assert.deepEqual(dueTasks(db, soon, [parkedLesson]).map((e) => e.key), [live],
+    'ambiguous + superseded dues stay parked; exposed due = 1');
+  // A rev-less key is provably ambiguous WITHOUT lesson context — excluded
+  // even when lessons are omitted; supersession needs the lesson.
+  assert.deepEqual(dueTasks(db, soon).map((e) => e.key).sort(), [live, supersededKey].sort(),
+    'rev-less key excluded without lessons; superseded needs lesson context');
+  const dbParkedOnly = createInitialDb();
+  dbParkedOnly.fsrs = rebuildFsrsFromLog([log[0], log[1]]);
+  assert.equal(nextDueAt(dbParkedOnly, soon, [parkedLesson]), null,
+    'parked-only cards surface no next-review timestamp');
+  // Parked card due SOONER than live work: nextDueAt must skip it and
+  // report the live card's timestamp, never the parked one.
+  const dbMixed = createInitialDb();
+  dbMixed.fsrs = rebuildFsrsFromLog([
+    { id: 'a', kind: 'rate', taskKey: ambiguousKey, grade: 1, at: 1000 }, // due ~1min
+    { id: 'l', kind: 'rate', taskKey: live, grade: 4, at: 1000 }          // due ~days
+  ]);
+  const liveDue = new Date(dbMixed.fsrs[live].due).getTime();
+  const parkedDue = new Date(dbMixed.fsrs[ambiguousKey].due).getTime();
+  assert(parkedDue < liveDue, 'fixture: parked card is the earlier due');
+  assert.equal(nextDueAt(dbMixed, 1000, [parkedLesson]), liveDue,
+    'nextDueAt skips the earlier parked card');
+}
+
+console.log('FlashDay scheduler: 6 checks passed');

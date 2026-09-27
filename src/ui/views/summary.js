@@ -1,7 +1,7 @@
 // Kết quả buổi học — per-step activity table from the lesson's own events.
 import { computeStreak, stepsForLesson } from '../../core/progress.js';
 import { dueTasks } from '../../core/scheduler.js';
-import { lessonById, nextLesson } from '../../content/a1/index.js';
+import { LESSONS, lessonById, nextLesson } from '../../content/a1/index.js';
 import { playFeedback } from '../sound.js';
 
 const STEP_LABELS = {
@@ -108,7 +108,7 @@ export function mount(root, ctx) {
   section.appendChild(enrolledLine);
 
   // Next action
-  const due = dueTasks(db, Date.now()).length;
+  const due = dueTasks(db, Date.now(), LESSONS).length;
   const nav = document.createElement('div');
   nav.className = 'runner-nav';
   const action = document.createElement('a');
