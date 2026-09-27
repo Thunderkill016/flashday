@@ -1,6 +1,14 @@
-// Lộ trình — 6 stages as <details>, per-lesson activity status.
+// Lộ trình — 6 stages as <details>, per-lesson icon + step progress.
+// Visual progress is the product surface Duolingo's path is built around:
+// the learner must see where they are in 30 lessons at a glance.
 import { STAGES, lessonsForStage } from '../../content/a1/index.js';
 import { lessonStatus, stepsForLesson as lessonSteps } from '../../core/progress.js';
+import { lessonIcon } from '../icons.js';
+
+function doneSteps(events, lesson) {
+  const status = lessonStatus(events, lesson);
+  return lessonSteps(lesson).filter((s) => status[s] === 'attempted').length;
+}
 
 function statusOf(events, lesson) {
   const status = lessonStatus(events, lesson);
@@ -37,8 +45,30 @@ export function mount(root, ctx) {
     details.className = 'path-stage';
     if (stage.id === currentStageId) details.open = true;
     const summary = document.createElement('summary');
-    summary.textContent = `Chặng ${stage.id} · ${stage.title}`;
+    const summaryText = document.createElement('span');
+    summaryText.textContent = `Chặng ${stage.id} · ${stage.title}`;
+    summary.appendChild(summaryText);
     details.appendChild(summary);
+
+    // Stage progress: lessons fully attempted / total — visible even while
+    // collapsed so the journey reads at a glance.
+    if (lessons.length) {
+      const done = lessons.filter(
+        (l) => statusOf(events, l) === 'Đã thử các phần'
+      ).length;
+      const stageProgress = document.createElement('div');
+      stageProgress.className = 'path-stage-progress';
+      const bar = document.createElement('div');
+      bar.className = 'path-bar';
+      const fill = document.createElement('i');
+      fill.style.width = `${Math.round((done / lessons.length) * 100)}%`;
+      bar.appendChild(fill);
+      stageProgress.append(bar, Object.assign(document.createElement('span'), {
+        textContent: `${done}/${lessons.length} bài`
+      }));
+      details.appendChild(stageProgress);
+    }
+
     details.appendChild(Object.assign(document.createElement('p'), {
       className: 'view-placeholder',
       textContent: stage.blurb
@@ -53,17 +83,36 @@ export function mount(root, ctx) {
       const list = document.createElement('ul');
       list.className = 'path-lessons';
       for (const lesson of lessons) {
+        const steps = lessonSteps(lesson);
+        const done = doneSteps(events, lesson);
         const li = document.createElement('li');
+
+        const row = document.createElement('div');
+        row.className = 'path-lesson-row';
+        const icon = document.createElement('span');
+        icon.className = 'path-lesson-icon';
+        icon.textContent = lessonIcon(lesson);
         const link = document.createElement('a');
         link.href = `#/lesson/${lesson.id}/${firstStep(events, lesson)}`;
         link.textContent = `${lesson.order}. ${lesson.title}`;
         const status = document.createElement('span');
         status.className = 'path-status';
-        status.textContent = statusOf(events, lesson);
+        status.textContent =
+          statusOf(events, lesson) === 'Chưa bắt đầu'
+            ? 'Chưa bắt đầu'
+            : `${done}/${steps.length} bước`;
+        row.append(icon, link, status);
+
+        const bar = document.createElement('div');
+        bar.className = 'path-bar';
+        const fill = document.createElement('i');
+        fill.style.width = `${Math.round((done / steps.length) * 100)}%`;
+        bar.appendChild(fill);
+
         const canDo = document.createElement('p');
         canDo.className = 'path-cando';
         canDo.textContent = lesson.canDo;
-        li.append(link, status, canDo);
+        li.append(row, bar, canDo);
         list.appendChild(li);
       }
       details.appendChild(list);

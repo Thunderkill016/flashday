@@ -2,6 +2,7 @@
 import { computeStreak, stepsForLesson } from '../../core/progress.js';
 import { dueChunks } from '../../core/scheduler.js';
 import { lessonById, nextLesson } from '../../content/a1/index.js';
+import { playFeedback } from '../sound.js';
 
 const STEP_LABELS = {
   prepare: 'Hiểu mẫu',
@@ -62,6 +63,9 @@ export function mount(root, ctx) {
       )
     );
     section.appendChild(banner);
+    // Arrival jingle — plays only if the browser allows audio by now (the
+    // last step's submit click is the gesture that unlocks it).
+    playFeedback('complete');
   }
 
   const table = document.createElement('ul');

@@ -311,10 +311,10 @@ try {
     assert.equal(enrolled, 8, 'drill submit enrolls all 8 chunks');
     await goto(page, `${origin}app/?preview#/today`);
     assert.match(await page.locator('#view').textContent(), /8 cụm đến hạn/, 'new FSRS cards are due immediately');
-    // path pill for s1-l1 now "Đang luyện"
+    // path pill for s1-l1 shows step progress after the drill submit
     await goto(page, `${origin}app/?preview#/path`);
     const pill = page.locator('.path-lessons li', { hasText: 'Chào hỏi và giới thiệu' }).locator('.path-status');
-    assert.equal(await pill.textContent(), 'Đang luyện');
+    assert.equal(await pill.textContent(), '1/5 bước');
     // summary: untouched steps show "Chưa làm" links
     await goto(page, `${origin}app/?preview#/summary/${L1}`);
     const todoLinks = page.locator('.summary-steps a', { hasText: 'Chưa làm' });
@@ -704,8 +704,26 @@ try {
     assert.equal(await page.locator('[data-role="celebration"]').count(), 1, 'celebration banner after all steps');
     await goto(page, `${origin}app/?preview`);
     assert.match(await page.locator('[data-role="streak"]').textContent(), /ngày liên tiếp/);
+
+    // Path visuals: stage + lesson progress bars reflect submitted steps
+    await goto(page, `${origin}app/?preview#/path`);
+    const firstBar = page.locator('.path-stage').first().locator('.path-lessons .path-bar i').first();
+    assert.equal(await firstBar.evaluate((el) => el.style.width), '100%', 'lesson 1 bar full');
+    const stageBarWidth = await page.locator('.path-stage-progress .path-bar i').first().evaluate((el) => el.style.width);
+    assert.equal(stageBarWidth, '20%', `stage bar ${stageBarWidth} after 1/5 lessons`);
+    assert.ok((await page.locator('.path-lesson-icon').count()) >= 5, 'lesson icons present');
+
+    // Review recap: grade all enrolled cards → per-grade session summary
+    await goto(page, `${origin}app/?preview#/review`);
+    for (let i = 0; i < 8; i++) {
+      const reveal = page.locator('[data-role="reveal"]');
+      if (!(await reveal.count())) break;
+      await reveal.click();
+      await page.locator('[data-grade="3"]').click();
+    }
+    assert.match(await page.locator('[data-role="review-recap"]').textContent(), /Nhớ \d+/);
     await context.close();
-    check('engagement layer: pager + match pairs + word bank + banner + progress + celebration + streak');
+    check('engagement layer: pager + match pairs + word bank + banner + progress + celebration + streak + path bars + review recap');
   }
 
   console.log(`FlashDay app browser tests: ${passed} groups passed`);

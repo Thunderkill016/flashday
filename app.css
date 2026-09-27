@@ -449,3 +449,29 @@ textarea.write-area, textarea.speak-area {
 }
 .celebration-title { font-size: 22px; font-weight: 800; margin: 0 0 var(--space-2); font-family: var(--font-display); }
 .celebration-detail { margin: 0; color: var(--text-secondary); }
+
+/* ── Round-4 polish: path progress, review recap, micro-animations ── */
+
+.path-lesson-row { display: flex; align-items: center; gap: var(--space-2); }
+.path-lesson-row a { flex: 1; }
+.path-lesson-icon { font-size: 20px; flex: none; }
+.path-bar {
+  height: 5px; border-radius: var(--radius-pill); overflow: hidden;
+  background: var(--border-subtle); margin: var(--space-1) 0 var(--space-2);
+}
+.path-bar i { display: block; height: 100%; width: 0; background: var(--action-primary-bg); transition: width .3s ease; }
+.path-stage-progress { display: flex; align-items: center; gap: var(--space-3); margin: var(--space-1) 0 var(--space-2); }
+.path-stage-progress .path-bar { flex: 1; margin: 0; }
+.path-stage-progress span { font-size: 13px; color: var(--text-secondary); }
+
+/* Micro-animations — reward pop on reveal (display:none → block restarts) */
+@keyframes pop-in {
+  0% { transform: scale(.85); opacity: 0; }
+  60% { transform: scale(1.03); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.quiz-feedback { animation: pop-in .25s ease; }
+.celebration-banner { animation: pop-in .4s ease; }
+.streak-chip { animation: pop-in .3s ease; }
+.match-chip.match-hit { animation: pop-in .2s ease; }
+.review-suggestion { animation: pop-in .25s ease; }

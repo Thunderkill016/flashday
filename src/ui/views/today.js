@@ -3,6 +3,7 @@
 // XP or proficiency claims.
 import { LESSONS, STAGES, lessonById } from '../../content/a1/index.js';
 import { STEPS, computeStreak, lessonStatus, stageStatus, stepsForLesson, suggestNext } from '../../core/progress.js';
+import { lessonIcon } from '../icons.js';
 import { dueChunks } from '../../core/scheduler.js';
 
 function draftHasContent(draft) {
@@ -47,7 +48,7 @@ export function mount(root, ctx) {
     } else {
       label = `Bắt đầu: ${lesson.title}`;
     }
-    card.appendChild(el('p', label, 'view-placeholder'));
+    card.appendChild(el('p', `${lessonIcon(lesson)} ${label}`, 'view-placeholder'));
     const draft = ctx.session.getDraft(lesson.id);
     if (suggestion.kind === 'resume' && draftHasContent(draft)) {
       card.appendChild(el('p', 'Bản nháp lưu trên thiết bị', 'draft-note'));
@@ -85,6 +86,12 @@ export function mount(root, ctx) {
   const stats = stageStatus(events, stage.id, LESSONS);
   stageCard.appendChild(el('h2', `Chặng ${stage.id} · ${stage.title}`));
   stageCard.appendChild(el('p', `${stats.started}/${stats.total} bài đã bắt đầu`));
+  const stageBar = document.createElement('div');
+  stageBar.className = 'path-bar';
+  const stageFill = document.createElement('i');
+  stageFill.style.width = `${Math.round((stats.started / Math.max(1, stats.total)) * 100)}%`;
+  stageBar.appendChild(stageFill);
+  stageCard.appendChild(stageBar);
   const pathLink = document.createElement('a');
   pathLink.href = '#/path';
   pathLink.textContent = 'Xem lộ trình';

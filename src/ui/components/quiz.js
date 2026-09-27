@@ -3,6 +3,8 @@
  * — "Làm lại" re-enables the same inputs and hides the same feedback nodes;
  * nothing is rebuilt (rule 1).
  */
+import { playFeedback } from '../sound.js';
+
 let mountCounter = 0;
 
 export function mountQuiz(el, questions, { onSubmit, initialAnswers = {}, onAnswerChange, onExplain } = {}) {
@@ -127,6 +129,7 @@ export function mountQuiz(el, questions, { onSubmit, initialAnswers = {}, onAnsw
     // Banner feedback (Duolingo pattern): full-width color block + icon —
     // the emotional "I did it" / "try again" signal, not just a number.
     const passed = correct === questions.length;
+    playFeedback(passed ? 'pass' : 'retry');
     feedback.classList.toggle('pass', passed);
     feedback.classList.toggle('retry', !passed);
     feedback.innerHTML = passed
