@@ -64,10 +64,17 @@ function route() {
   const match = routes.find((r) => r.pattern.test(hash)) || routes[routes.length - 1];
   const params = match.params ? match.params(hash.match(match.pattern)) : {};
 
-  if (currentView?.unmount) currentView.unmount();
-  root.textContent = '';
-  currentView = match.view;
-  match.view.mount(root, { ...ctx, params });
+  // Rule 1: a step switch inside the same lesson must never rebuild the DOM —
+  // the runner keeps all panes mounted and just toggles `hidden`.
+  if (currentView === match.view && typeof match.view.update === 'function'
+      && match.view.update({ ...ctx, params })) {
+    // handled in place
+  } else {
+    if (currentView?.unmount) currentView.unmount();
+    root.textContent = '';
+    currentView = match.view;
+    match.view.mount(root, { ...ctx, params });
+  }
 
   for (const tab of document.querySelectorAll('.app-tab')) {
     const active = tab.dataset.tab === match.tab;
@@ -83,14 +90,14 @@ function wireAuth() {
   // Hydrate explicitly, then ignore the listener's INITIAL_SESSION replay —
   // handling both would double every read per page load (AGENTS.md lesson 10).
   client.auth.getSession().then(({ data }) => {
-    applySession(data?.session || null);
-    render();
+    if (applySession(data?.session || null)) render();
   });
   client.auth.onAuthStateChange((event, sessionEvent) => {
     if (event === 'INITIAL_SESSION') return;
     if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-      applySession(sessionEvent);
-      render();
+      // Only a real identity change justifies re-rendering — TOKEN_REFRESHED
+      // fires periodically and must not wipe an in-progress lesson.
+      if (applySession(sessionEvent)) render();
     } else if (event === 'SIGNED_OUT') {
       releaseDbNamespace(storage);
       ctx.user = null;
@@ -100,16 +107,19 @@ function wireAuth() {
   });
 }
 
+// Returns whether the signed-in identity actually changed.
 function applySession(sess) {
   const uid = sess?.user?.id || sess?.user?.uid || null;
-  if (uid && uid !== ctx.user?.id) {
+  if (uid === (ctx.user?.id || null)) return false;
+  if (uid) {
     claimDbNamespace(storage, uid);
     ctx.user = { id: uid, email: sess.user.email || '' };
     store.refresh();
     session.load();
-  } else if (!uid) {
+  } else {
     ctx.user = null;
   }
+  return true;
 }
 
 let renderQueued = false;
