@@ -191,6 +191,14 @@ const mixed = (unitId) => (unitId === 'u1' ? 'known' : 'learning');
   const mostlyUnknown = SC.normalizeCapture({ id: 'u1', sentence: 'on my way through complicated bureaucratic terminology', sourceTitle: 'x', subtitle: { text: 'x', start: 0, end: 1, index: 0 } });
   const fakeSource = IM.assessSource(dbFixture(), 'x', [mostlyUnknown], { taskState: known });
   assert.notStrictEqual(fakeSource.verdict.key, 'easy', 'mostly-uncovered source must not claim easy');
+
+  // F4 wording regression: even at qualifying coverage the label must stay
+  // scoped to the deck — never imply the whole source is "gần hết" known.
+  const easySource = IM.assessSource(dbFixture(), 'src-a', [cap('a1', 'I usually wake up early'), cap('a2', 'She works near the park'), cap('a3', 'We drink coffee together')], { taskState: known });
+  if (easySource.verdict.key === 'easy') {
+    assert(!easySource.verdict.label.includes('gần hết'), 'easy label must not claim near-total coverage');
+    assert(easySource.verdict.label.includes('trong deck'), 'easy label scopes itself to the deck');
+  }
 }
 
 console.log('FlashDay immersion engine: 13 checks passed');

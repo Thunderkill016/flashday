@@ -82,6 +82,54 @@ const C=require('../flashday-cloud.js');
   const state=L.missionState(db,'a1-meeting-change-transfer');
   assert.equal(state.attempts,1);
   assert.equal(state.hasSelfReview,true);
+  assert.equal(attempt.grading,'self-check');
+}
+
+// Final-time gate: the can-do is "confirm the final time" — a written
+// attempt that never states a time cannot demonstrate it (F5 honesty fix).
+{
+  const db=D.createInitialDb([],1000);
+  assert.throws(
+    ()=>L.submitTransferAttempt(db,{missionId:'a1-meeting-change-transfer',responseText:'No problem, that is fine.'}),
+    /giờ cuối cùng/i
+  );
+  assert.throws(
+    ()=>L.submitTransferAttempt(db,{missionId:'a1-meeting-change-transfer',responseText:'Sorry, I cannot make it.'}),
+    /giờ cuối cùng/i
+  );
+  // Any time expression counts — the learner may counter-propose.
+  const ok=L.submitTransferAttempt(db,{missionId:'a1-meeting-change-transfer',responseText:'No problem. See you at 7 pm.'});
+  assert.equal(ok.responseText.includes('7 pm'),true);
+  const counter=L.submitTransferAttempt(db,{missionId:'a1-meeting-change-transfer',responseText:'Seven is hard for me — how about eight? See you at eight.'});
+  assert.equal(counter.grading,'self-check');
+  // Spoken-only attempts stay allowed but remain self-check evidence.
+  const spoken=L.submitTransferAttempt(db,{missionId:'a1-meeting-change-transfer',spoke:true});
+  assert.equal(spoken.grading,'self-check');
+}
+
+{
+  assert.equal(L.mentionsTime('See you at seven.'),true);
+  assert.equal(L.mentionsTime('How about 8:30?'),true);
+  assert.equal(L.mentionsTime('Sounds good, noon works.'),true);
+  assert.equal(L.mentionsTime('No problem at all.'),false);
+  assert.equal(L.mentionsTime(''),false);
+}
+
+// Lesson dialogue integrity: cold input exists for the meeting cluster,
+// every line has a translation, and its final time differs from the
+// worked example / mission (seven) so the mission stays unmemorized.
+{
+  const lesson=L.LESSON_DIALOGUES['a1-meeting-change'];
+  assert.ok(lesson,'lesson dialogue for a1-meeting-change');
+  assert.ok(lesson.sourceId&&lesson.title);
+  assert.ok(lesson.lines.length>=6);
+  for(const [text,translation] of lesson.lines){
+    assert.ok(text&&text.trim(),'lesson line needs English text');
+    assert.ok(translation&&translation.trim(),'lesson line needs a Vietnamese translation');
+  }
+  const joined=lesson.lines.map(([t])=>t.toLowerCase()).join(' ');
+  assert.equal(joined.includes('seven'),false,'lesson must not pre-teach the mission answer');
+  assert.ok(joined.includes('four'),'lesson should establish its own final time');
 }
 
 {

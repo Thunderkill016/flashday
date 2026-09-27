@@ -102,10 +102,37 @@
       setup:'Bạn và Alex đã hẹn gặp lúc 6 giờ ở quán cà phê. Bây giờ Alex nhắn:',
       incomingMessage:'Sorry, something came up. Can we move it to seven?',
       instructions:'Trả lời bằng tiếng Anh: đồng ý hoặc đề xuất giờ khác, rồi xác nhận lại giờ cuối cùng. Bạn có thể viết hoặc nói thành tiếng.',
+      // The can-do is "confirm the final time" — a text attempt that never
+      // states a time cannot demonstrate it. Spoken-only attempts stay
+      // allowed but carry grading:'self-check' either way.
+      requireFinalTimeConfirm:true,
       modelAnswer:['No problem. Seven works for me.', 'Great. See you at seven.'],
       selfCheck:['Bạn có phản hồi về việc đổi lịch không?', 'Bạn có nói rõ giờ cuối cùng không?', 'Câu trả lời có phù hợp với tình huống, không chỉ chép một từ đơn lẻ?']
     }
   ]);
+
+  // Cold input for the cluster's lesson loop — a NEW invitation exchange the
+  // learner hasn't memorized (the worked example ends at seven; the mission
+  // also uses seven, so this dialogue deliberately picks different details).
+  // Imported as a source so the reader, encounter tracking, comprehension
+  // check and word mining all apply unchanged.
+  const LESSON_DIALOGUES=Object.freeze({
+    'a1-meeting-change':{
+      sourceId:'lesson:a1-meeting-change',
+      title:'Hẹn cà phê cuối tuần — hội thoại dẫn nhập',
+      lines:[
+        ['Hey, are you free this Sunday?','Này, Chủ nhật này bạn rảnh không?'],
+        ['I think so. What did you have in mind?','Chắc là rảnh. Bạn định làm gì?'],
+        ['Want to get coffee at that new place near the market?','Đi uống cà phê ở quán mới gần chợ không?'],
+        ['Sounds good. How about two?','Nghe được. Hai giờ thì sao?'],
+        ['Two is a bit early for me. Can we do four?','Hai giờ hơi sớm với tôi. Bốn giờ được không?'],
+        ['Four works for me.','Bốn giờ hợp với tôi.'],
+        ['Oh wait — sorry, something came up. Can we move it to four thirty?','Ối khoan — xin lỗi, tôi có việc đột xuất. Mình dời sang bốn giờ rưỡi được không?'],
+        ['No problem. So — see you at four thirty, at the new cafe.','Không sao. Vậy hẹn gặp lúc bốn giờ rưỡi, ở quán mới nhé.'],
+        ['See you then. Let me know when you get there.','Hẹn gặp bạn. Nhắn tôi khi bạn tới nhé.']
+      ]
+    }
+  });
 
   function normalizeLevel(value){
     const level=String(value||'').toUpperCase().trim();
@@ -334,15 +361,36 @@
     const submittedAt=Number.isFinite(Number(raw.submittedAt))?Number(raw.submittedAt):Number(now);
     return {
       id:cleanMissionValue(raw.id,200)||`transfer_${submittedAt}_${Math.random().toString(36).slice(2,10)}`,
-      missionId,responseText,spoke,selfReviewed:Boolean(raw.selfReviewed),submittedAt
+      missionId,responseText,spoke,selfReviewed:Boolean(raw.selfReviewed),submittedAt,
+      // Explicit honesty flag: pass/fail here is the learner's own
+      // checklist, not an assessment of communicative success.
+      grading:'self-check'
     };
   }
 
   function cleanMissionValue(value,maxLength){return String(value??'').trim().slice(0,maxLength);}
 
+  const TIME_TOKENS=new Set([
+    'one','two','three','four','five','six','seven','eight','nine','ten',
+    'eleven','twelve','noon','midnight',"o'clock",'am','pm','morning',
+    'afternoon','evening','tonight','half','quarter','minutes','hour'
+  ]);
+
+  function mentionsTime(text){
+    const tokens=canonTokens(text||'');
+    return tokens.some(token=>/\d/.test(token)||TIME_TOKENS.has(token));
+  }
+
   function submitTransferAttempt(db,raw={},now=Date.now()){
     if(!db||typeof db!=='object')throw new Error('FlashDay DB is required');
     const attempt=normalizeTransferAttempt(raw,now);
+    const mission=missionById(attempt.missionId);
+    // Text attempts must demonstrate the "confirm the final time" can-do;
+    // a spoken-only attempt can't be text-checked and stays self-check
+    // evidence by flag alone.
+    if(mission?.requireFinalTimeConfirm&&attempt.responseText&&!mentionsTime(attempt.responseText)){
+      throw new Error('Câu trả lời cần xác nhận lại giờ cuối cùng — vd: "See you at seven."');
+    }
     db.transferAttempts=Array.isArray(db.transferAttempts)?db.transferAttempts:[];
     if(db.transferAttempts.some(item=>String(item?.id)===attempt.id))throw new Error('Lần thử này đã được lưu.');
     db.transferAttempts.push(attempt);
@@ -436,7 +484,11 @@
     const attempt={
       id:cleanMissionValue(raw.id,200)||`unit-transfer_${submittedAt}_${Math.random().toString(36).slice(2,10)}`,
       kind:'unit',unitId,sourceEventId:cleanMissionValue(raw.sourceEventId,160)||null,
-      responseText,selfReviewed:Boolean(raw.selfReviewed),submittedAt
+      responseText,selfReviewed:Boolean(raw.selfReviewed),submittedAt,
+      // Same honesty flag as mission attempts: this gate checks the unit
+      // appears in a NEW sentence, not that the sentence is semantically
+      // right — the learner self-checks against the checklist.
+      grading:'self-check'
     };
     db.transferAttempts.push(attempt);
     return attempt;
@@ -453,11 +505,11 @@
   }
 
   return {
-    PROFILE_VERSION,CEFR_LEVELS,SKILLS,GUIDED_CLUSTERS,GUIDED_MODULES,TRANSFER_MISSIONS,
+    PROFILE_VERSION,CEFR_LEVELS,SKILLS,GUIDED_CLUSTERS,GUIDED_MODULES,TRANSFER_MISSIONS,LESSON_DIALOGUES,
     normalizeLevel,normalizeProfile,ensureProfile,setSkillLevel,setOverallLevel,effectiveLevel,
     assessContent,normalizePhrase,identityForms,phraseAppears,matchUnitsInText,normalizeSourceKind,
     moduleById,clusterById,missionById,modulesForCluster,moduleState,clusterState,installGuidedModule,installGuidedCluster,
-    normalizeTransferAttempt,submitTransferAttempt,missionState,
+    normalizeTransferAttempt,submitTransferAttempt,missionState,mentionsTime,
     UNIT_TRANSFER_DELAY_MS,dueUnitTransfer,submitUnitTransferAttempt
   };
 });

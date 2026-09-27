@@ -104,7 +104,10 @@
     if(coverage<0.35)return {key:'thin',label:'Deck chưa phủ nguồn này'};
     if(learningCount>0)return {key:'good-fit',label:'Vừa sức — có unit đang học'};
     if(fresh>0)return {key:'stretch',label:'Có unit chưa ôn — đọc kèm dịch'};
-    if(coverage>=0.6&&knownShareOfCovered>=0.9)return {key:'easy',label:'Deck phủ gần hết — đọc lại củng cố'};
+    // Scope-accurate wording (audit F4): this says the deck's covered units
+    // are reviewed — never that the source itself is understood. Uncovered
+    // share stays visible as "deck phủ X% · phần ngoài deck chưa có dữ liệu".
+    if(coverage>=0.6&&knownShareOfCovered>=0.9)return {key:'easy',label:'Phần trong deck đã ôn — đọc lại củng cố'};
     return {key:'good-fit',label:'Vừa sức'};
   }
 

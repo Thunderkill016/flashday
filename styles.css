@@ -322,6 +322,13 @@ svg { display: block; }
 .guided-example li b { color: var(--fd-text-primary); }
 .guided-example li small, .guided-steps li span { display: block; margin-top: 2px; color: var(--fd-text-tertiary); }
 .guided-steps li strong { display: block; color: var(--fd-text-primary); }
+.lesson-flow { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 0; }
+.lesson-step { padding: 6px 10px; border: 1px solid var(--fd-border); border-radius: 999px; color: var(--fd-text-tertiary); font-size: 12px; font-weight: 700; }
+.lesson-step.active { border-color: var(--fd-accent); color: var(--fd-accent); }
+.lesson-step.done { border-color: var(--fd-success, #2e9e5b); color: var(--fd-success, #2e9e5b); }
+.lesson-step.done::after { content: ' ✓'; }
+.lesson-open { margin-top: 12px; }
+.model-caveat { margin: 6px 0 10px; color: var(--fd-text-tertiary); font-size: 12px; font-style: italic; }
 .cluster-note { margin: 16px 0; color: var(--fd-text-tertiary) !important; font-size: 13px; }
 .transfer-missions { display: grid; gap: 12px; margin-top: 16px; }
 .transfer-mission { background: var(--fd-canvas); }
