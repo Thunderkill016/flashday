@@ -345,6 +345,66 @@ try {
     check('mid-debounce unmount → no stale-state crash');
   }
 
+  // ── 12. TTS play buttons call speak() with the right target text ──
+  {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    await context.addInitScript(() => {
+      window.__ttsCalls = [];
+      window.SpeechSynthesisUtterance = class {
+        constructor(text) { this.text = text; }
+      };
+      Object.defineProperty(window, 'speechSynthesis', {
+        value: {
+          getVoices: () => [{ name: 'Mock en-US', lang: 'en-US' }],
+          cancel: () => {},
+          speak: (u) => { window.__ttsCalls.push(u.text); u.onend?.(); },
+          addEventListener: () => {}
+        }
+      });
+    });
+    const page = await context.newPage();
+    // prepare: chunk play buttons
+    await goto(page, `${origin}app/?preview#/lesson/${L1}/prepare`);
+    const plays = page.locator('.runner-pane[data-step="prepare"] .chunk-list [data-role="play-target"]');
+    assert.equal(await plays.count(), 8, 'every taught chunk gets a play button');
+    await plays.first().click();
+    // read: dialogue line play buttons
+    await goto(page, `${origin}app/?preview#/lesson/${L1}/read`);
+    const linePlays = page.locator('.runner-pane[data-step="read"] .dialogue-lines [data-role="play-target"]');
+    assert.equal(await linePlays.count(), 7, 'every dialogue line gets a play button');
+    await linePlays.first().click();
+    const calls = await page.evaluate(() => window.__ttsCalls);
+    assert.equal(calls.length, 2, `expected 2 TTS calls, got ${calls.length}`);
+    assert.ok(calls[0].length > 0 && calls[1].startsWith('Tom:'), `calls: ${JSON.stringify(calls)}`);
+    await context.close();
+    check('chunk + dialogue play buttons speak the target');
+  }
+
+  // ── 13. Write correction loop: compare shows, retry records attempt 2 ──
+  {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const page = await context.newPage();
+    await goto(page, `${origin}app/?preview#/lesson/${L1}/write`);
+    const pane = page.locator('.runner-pane[data-step="write"]');
+    await pane.locator('.write-area').fill('Hi I am Linh from Hue. Nice to meet you.');
+    await pane.locator('[data-role="model-toggle"]').click();
+    await pane.locator('[data-role="write-save"]').click();
+    assert.equal(await pane.locator('.attempt-compare:not([hidden])').count(), 1, 'compare shown after save');
+    assert.ok((await pane.locator('.attempt-compare mark').count()) > 0, 'matched words highlighted');
+    assert.equal(await pane.locator('.write-area').isDisabled(), true, 'textarea locked after save');
+    await pane.locator('[data-role="write-retry"]').click();
+    assert.equal(await pane.locator('.write-area').isDisabled(), false, 'retry unlocks textarea');
+    await pane.locator('.write-area').fill('I am Linh. I am from Hue.');
+    await pane.locator('[data-role="write-save"]').click();
+    const events = await page.evaluate((key) => {
+      const db = JSON.parse(localStorage.getItem(key) || '{}');
+      return (db.lessonEvents || []).filter((e) => e.kind === 'write').map((e) => e.payload?.attempt);
+    }, DB_KEY);
+    assert.deepEqual(events, [1, 2], 'two attempts recorded in order');
+    await context.close();
+    check('write compare + retry records attempt 2');
+  }
+
   console.log(`FlashDay app browser tests: ${passed} groups passed`);
 } finally {
   await browser?.close();
