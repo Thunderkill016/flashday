@@ -14,6 +14,8 @@ firebase deploy --only hosting --project flashday-22ae1
 firebase deploy --only firestore:rules --project flashday-22ae1
 ```
 
+If `firebase` is not on PATH, use `npx --yes firebase-tools deploy …`.
+
 Deploys to TWO hosting sites (firebase.json `hosting` is an array):
 
 - `flashday` → canonical `https://flashday.web.app`
