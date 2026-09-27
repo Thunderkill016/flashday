@@ -64,17 +64,6 @@ setCloudPill('local');
 
 window.addEventListener('flashday:cloud-hydrated', () => render());
 
-// The product bootstrap creates the shared client and owns the /app/ route
-// guard; when config is missing (or for local preview) we run unauthenticated.
-function bootstrapReady(detail) {
-  ctx.client = detail?.client || null;
-  wireAuth();
-}
-window.addEventListener('flashday:supabase-ready', (event) => bootstrapReady(event.detail));
-// The bootstrap module evaluates before this one, so its ready event may
-// already have fired — read the stashed detail in that case.
-if (window.FlashDayBootstrap) bootstrapReady(window.FlashDayBootstrap);
-
 const routes = [
   { pattern: /^#\/lesson\/([^/]+)\/([^/]+)$/, view: runnerView, tab: 'learn',
     params: (m) => ({ lessonId: m[1], step: m[2] }) },
@@ -163,6 +152,19 @@ function render() {
   renderQueued = true;
   queueMicrotask(() => { renderQueued = false; route(); });
 }
+
+// The product bootstrap creates the shared client and owns the /app/ route
+// guard; when config is missing (or for local preview) we run unauthenticated.
+// Wired AFTER all declarations: a missing config announces synchronously and
+// bootstrapReady→wireAuth→render would otherwise hit the TDZ on renderQueued.
+function bootstrapReady(detail) {
+  ctx.client = detail?.client || null;
+  wireAuth();
+}
+window.addEventListener('flashday:supabase-ready', (event) => bootstrapReady(event.detail));
+// The bootstrap module evaluates before this one, so its ready event may
+// already have fired — read the stashed detail in that case.
+if (window.FlashDayBootstrap) bootstrapReady(window.FlashDayBootstrap);
 
 window.addEventListener('hashchange', route);
 route();
