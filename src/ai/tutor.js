@@ -1,20 +1,27 @@
 /*
- * AI tutor for the lesson runner — Firebase AI Logic (Gemini Developer API)
- * on the same Firebase app the client already created. The SDK loads lazily
- * so learners without AI support never pay the bundle cost.
+ * AI tutor for the lesson runner — on-device inference only.
  *
- * Three capabilities, each with a deterministic fallback in the caller:
+ * Backend: Chrome's built-in LanguageModel (Gemini Nano). It runs locally on
+ * the learner's machine: free with no API key, no quota, no network calls,
+ * and nothing leaves the device. Where the API does not exist (non-Chrome,
+ * older Chrome, unsupported hardware) the tutor reports unavailable and
+ * every caller falls back to the static flow.
+ *
+ * Tests inject a mock via `window.__FLASHDAY_TUTOR__`.
+ *
+ * Capabilities (each degrades invisibly on error):
  * - explainWrong: why a chosen quiz answer is wrong (Vietnamese, A1 level)
  * - reviewWriting: structured correction of the learner's free text
+ * - generateDrills: fresh items on exactly the missed points
+ * - generateVariant: a new dialogue reusing the same target chunks
  * - startRoleplay: a scripted-persona chat partner for the speak step
- *
- * Tests inject a mock via `window.__FLASHDAY_TUTOR__`; when no client/config
- * exists the tutor reports itself unavailable and callers keep static flows.
+ * - assessPronunciation: tip text grounded in an ASR transcript diff
+ *   (Nano is text-only — raw audio scoring is out of scope on-device)
  */
 
-// gemini-3.8-flash: free-tier supported, fast enough for in-lesson latency.
-const MODEL_NAME = 'gemini-3.8-flash';
-const CALL_TIMEOUT_MS = 15_000;
+const CALL_TIMEOUT_MS = 60_000; // first call may include the model download
+const SYSTEM_PROMPT =
+  'Bạn là gia sư tiếng Anh cho học viên Việt mức A1 (mới bắt đầu). Trả lời ngắn gọn, đúng trình độ.';
 
 let singleton = null;
 
@@ -26,7 +33,7 @@ export function getTutor(ctx) {
   return singleton;
 }
 
-// Test hook: swap in a mock; reset between page contexts by reassigning.
+// Test hook: deterministic canned responses so suites run hermetically.
 export function createMockTutor(overrides = {}) {
   return {
     available: true,
@@ -39,22 +46,6 @@ export function createMockTutor(overrides = {}) {
       ],
       better: 'I’m Linh. I’m from Hue.',
       praise: 'Bạn đã nói đúng tên và quê mình.'
-    }),
-    startRoleplay: ({ partnerName = 'Sam' } = {}) => ({
-      partnerName,
-      history: [],
-      start: async () => `Hi! I’m ${partnerName}. What’s your name?`,
-      send: async (text) =>
-        `Hi! I’m ${partnerName}. Nice to meet you. Where are you from?`,
-      feedback: async () => ({
-        items: [
-          { check: 'Chào và giới thiệu tên', ok: true, note: 'Bạn đã chào và nói tên mình.' },
-          { check: 'Hỏi tên và quê người kia', ok: true, note: 'Đã hỏi lại Sam.' },
-          { check: 'Câu đáp lịch sự', ok: true, note: 'Có “Nice to meet you”.' }
-        ],
-        corrections: [],
-        summary: 'Hội thoại đủ ý — mức A1.'
-      })
     }),
     assessPronunciation: async () => ({
       score: 86,
@@ -95,34 +86,310 @@ export function createMockTutor(overrides = {}) {
         }
       ]
     }),
+    startRoleplay: ({ partnerName = 'Sam' } = {}) => ({
+      partnerName,
+      history: [],
+      start: async () => `Hi! I’m ${partnerName}. What’s your name?`,
+      send: async (text) =>
+        `Hi! I’m ${partnerName}. Nice to meet you. Where are you from?`,
+      feedback: async () => ({
+        items: [
+          { check: 'Chào và giới thiệu tên', ok: true, note: 'Bạn đã chào và nói tên mình.' },
+          { check: 'Hỏi tên và quê người kia', ok: true, note: 'Đã hỏi lại Sam.' },
+          { check: 'Câu đáp lịch sự', ok: true, note: 'Có “Nice to meet you”.' }
+        ],
+        corrections: [],
+        summary: 'Hội thoại đủ ý — mức A1.'
+      })
+    }),
     ...overrides
   };
 }
 
-function createTutor(ctx) {
-  let modelPromise = null;
-  let dead = false;
+/* ── On-device backend ─────────────────────────────────── */
 
-  async function model() {
-    if (!modelPromise) {
-      modelPromise = (async () => {
-        const [{ getApp }, ai] = await Promise.all([
-          import('firebase/app'),
-          import('firebase/ai')
-        ]);
-        const service = ai.getAI(getApp(), {
-          backend: new ai.GoogleAIBackend()
-        });
-        return ai.getGenerativeModel(service, {
-          model: MODEL_NAME,
-          generationConfig: { temperature: 0.4, maxOutputTokens: 1024 }
-        });
-      })();
+function languageModelApi() {
+  if (typeof window === 'undefined') return null;
+  return window.LanguageModel || globalThis.ai?.languageModel || null;
+}
+
+function createTutor() {
+  let dead = false;
+  let statusSink = null;
+
+  const tutor = {
+    // Sync gate for mounting AI controls: the API surface exists and no call
+    // has proven the device unsupported. availability() resolves async, so a
+    // 'downloadable' device still renders — the first call drives it.
+    get available() {
+      return Boolean(languageModelApi()) && !dead;
+    },
+
+    // Optional: callers pass a text sink for "downloading model…" progress.
+    setStatusSink(fn) {
+      statusSink = typeof fn === 'function' ? fn : null;
+    },
+
+    async explainWrong({ stepLabel, question, options, chosenIndex, correctIndex, hint, source }) {
+      return oneShot({
+        schema: null,
+        prompt: [
+          'Học viên làm trắc nghiệm và chọn sai. Giải thích NGẮN (tối đa 3 câu) bằng tiếng Việt: vì sao lựa chọn của học viên sai và vì sao đáp án đúng đúng.',
+          `Bước: ${stepLabel}`,
+          `Câu hỏi: ${question}`,
+          `Các lựa chọn: ${options.map((o, i) => `${i + 1}. ${o}`).join(' | ')}`,
+          `Học viên chọn: "${options[chosenIndex]}"`,
+          `Đáp án đúng: "${options[correctIndex]}"`,
+          hint ? `Gợi ý của bài: ${hint}` : '',
+          source ? `Văn bản bài học: ${source}` : ''
+        ]
+          .filter(Boolean)
+          .join('\n')
+      });
+    },
+
+    async reviewWriting({ setup, prompt, modelLines, learnerText }) {
+      const raw = await oneShot({
+        schema: {
+          type: 'object',
+          properties: {
+            correct: { type: 'boolean' },
+            errors: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  said: { type: 'string' },
+                  fix: { type: 'string' },
+                  why: { type: 'string' }
+                },
+                required: ['said', 'fix', 'why']
+              }
+            },
+            better: { type: 'string' },
+            praise: { type: 'string' }
+          },
+          required: ['correct', 'errors', 'better', 'praise']
+        },
+        prompt: [
+          'Chấm bài viết của học viên A1.',
+          'errors: tối đa 3 lỗi quan trọng; "said" trích đúng chỗ viết sai, "fix" bản sửa, "why" giải thích tiếng Việt 1 câu.',
+          'better: phiên bản tự nhiên hơn của chính bài học viên, tối đa 2 câu, trình độ A1.',
+          'praise: 1 câu tiếng Việt ghi nhận điều làm đúng.',
+          `Tình huống: ${setup}`,
+          `Yêu cầu: ${prompt}`,
+          `Bài mẫu: ${modelLines.join(' / ')}`,
+          `Bài học viên: ${learnerText}`
+        ].join('\n')
+      });
+      return JSON.parse(raw);
+    },
+
+    // Nano is text-only: the caller passes the ASR transcript + the diff it
+    // already computed; the model writes the targeted pronunciation tip.
+    async assessPronunciation({ target, transcript, missed }) {
+      const raw = await oneShot({
+        schema: {
+          type: 'object',
+          properties: { tip: { type: 'string' } },
+          required: ['tip']
+        },
+        prompt: [
+          'Học viên Việt A1 đọc một câu tiếng Anh; máy nhận giọng nghe được phần sau.',
+          'Viết 1 câu tiếng Việt chỉ ra điểm phát âm cần sửa nhất (người Việt hay nuốt âm cuối).',
+          `Câu mẫu: "${target}"`,
+          `Máy nghe được: "${transcript}"`,
+          missed?.length ? `Từ thiếu/lệch: ${missed.join(', ')}` : 'Đã nghe đủ các từ.'
+        ].join('\n')
+      });
+      return JSON.parse(raw);
+    },
+
+    async generateDrills({ lessonTitle, sourceText, wrong }) {
+      const count = Math.min(3, Math.max(2, wrong.length));
+      const raw = await oneShot({
+        schema: {
+          type: 'object',
+          properties: {
+            questions: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  q: { type: 'string' },
+                  options: { type: 'array', items: { type: 'string' } },
+                  answer: { type: 'integer' },
+                  hint: { type: 'string' }
+                },
+                required: ['q', 'options', 'answer', 'hint']
+              }
+            }
+          },
+          required: ['questions']
+        },
+        prompt: [
+          `Tạo đúng ${count} câu trắc nghiệm MỚI luyện các điểm học viên vừa sai (không chép lại câu cũ).`,
+          'Mỗi câu 3 options, chỉ 1 đáp án đúng; distractor gần đúng nhưng sai rõ. hint: tiếng Việt 1 câu.',
+          `Bài: ${lessonTitle}`,
+          `Ngôn ngữ đã dạy: ${sourceText}`,
+          'Các câu đã sai:',
+          ...wrong.map((w) => `- Hỏi: ${w.question} | Chọn: "${w.chosen}" | Đúng: "${w.correct}"`)
+        ].join('\n')
+      });
+      return JSON.parse(raw);
+    },
+
+    async generateVariant({ canDo, patternName, chunkTargets, currentTitle, countLines }) {
+      const raw = await oneShot({
+        schema: {
+          type: 'object',
+          properties: {
+            title: { type: 'string' },
+            lines: { type: 'array', items: { type: 'array', items: { type: 'string' } } },
+            questions: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  q: { type: 'string' },
+                  options: { type: 'array', items: { type: 'string' } },
+                  answer: { type: 'integer' },
+                  hint: { type: 'string' }
+                },
+                required: ['q', 'options', 'answer', 'hint']
+              }
+            }
+          },
+          required: ['title', 'lines', 'questions']
+        },
+        prompt: [
+          'Viết hội thoại tiếng Anh A1 MỚI (tình huống và tên nhân vật khác) dùng cùng mẫu câu mục tiêu.',
+          `lines: ${countLines} lượt, mỗi lượt [câu tiếng Anh, bản dịch Việt].`,
+          'questions: 2 câu hỏi đọc-hiểu tiếng Việt, đáp án nằm trong hội thoại, 3 options, 1 đáp án đúng.',
+          `Mục tiêu bài: ${canDo}`,
+          `Mẫu chính: ${patternName}`,
+          `Cụm phải tái dùng: ${chunkTargets.join(' | ')}`,
+          `KHÔNG lặp tình huống đã có: ${currentTitle}`
+        ].join('\n')
+      });
+      return JSON.parse(raw);
+    },
+
+    startRoleplay({ scenario, roleA, roleB, partnerName, checklist, targetPhrases }) {
+      let session = null;
+      const history = [];
+
+      async function ensureSession() {
+        if (!session) {
+          session = await createSession({
+            initialPrompts: [
+              { role: 'system', content: SYSTEM_PROMPT },
+              {
+                role: 'system',
+                content: [
+                  `Đóng vai "${partnerName}" trong hội thoại tiếng Anh cho học viên A1.`,
+                  `Tình huống: ${scenario}`,
+                  `Vai học viên: ${roleA}. Vai bạn: ${roleB}.`,
+                  'Chỉ dùng tiếng Anh rất đơn giản (A1, tối đa 2 câu mỗi lượt); nói tự nhiên; không giải thích ngữ pháp trừ khi được hỏi; nếu học viên sai nặng thì trả lời ý chính rồi kèm sửa ngắn trong ngoặc bằng tiếng Việt; ở lại trong tình huống.'
+                ].join('\n')
+              }
+            ]
+          });
+        }
+        return session;
+      }
+
+      return {
+        partnerName,
+        history,
+        async start() {
+          const s = await ensureSession();
+          const reply = await timed(s.prompt('(Hội thoại bắt đầu — bạn chào trước.)'));
+          history.push({ role: 'partner', text: reply.trim() });
+          return reply.trim();
+        },
+        async send(learnerText) {
+          const s = await ensureSession();
+          history.push({ role: 'learner', text: learnerText });
+          const reply = await timed(s.prompt(learnerText));
+          history.push({ role: 'partner', text: reply.trim() });
+          return reply.trim();
+        },
+        async feedback() {
+          const transcript = history
+            .map((t) => `${t.role === 'learner' ? 'Học viên' : partnerName}: ${t.text}`)
+            .join('\n');
+          const raw = await oneShot({
+            schema: {
+              type: 'object',
+              properties: {
+                items: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      check: { type: 'string' },
+                      ok: { type: 'boolean' },
+                      note: { type: 'string' }
+                    },
+                    required: ['check', 'ok', 'note']
+                  }
+                },
+                corrections: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      said: { type: 'string' },
+                      better: { type: 'string' }
+                    },
+                    required: ['said', 'better']
+                  }
+                },
+                summary: { type: 'string' }
+              },
+              required: ['items', 'corrections', 'summary']
+            },
+            prompt: [
+              'Chấm một hội thoại luyện nói tiếng Anh của học viên A1 (người Việt).',
+              'items: chấm từng mục checklist; "check" chép nguyên mục; "note" tiếng Việt tối đa 1 câu.',
+              'corrections: tối đa 3 lỗi đáng sửa nhất; bỏ qua nếu không có.',
+              'summary: 1-2 câu tiếng Việt nhận xét, khuyến khích.',
+              'Checklist:',
+              ...checklist.map((c) => `- ${c}`),
+              'Mẫu câu mục tiêu:',
+              ...targetPhrases.map((p) => `- ${p}`),
+              'Hội thoại:',
+              transcript
+            ].join('\n')
+          });
+          return JSON.parse(raw);
+        }
+      };
     }
-    return modelPromise;
+  };
+
+  async function createSession({ initialPrompts }) {
+    const LM = languageModelApi();
+    if (!LM) throw new Error('No on-device model');
+    const availability = await LM.availability();
+    if (availability === 'unavailable') {
+      dead = true;
+      throw new Error('On-device model unavailable');
+    }
+    // 'downloadable'/'downloading' resolve inside create(); monitor keeps the
+    // learner informed during the one-time multi-GB download.
+    return LM.create({
+      initialPrompts,
+      monitor(m) {
+        m.addEventListener('downloadprogress', (e) => {
+          statusSink?.(`Đang tải model on-device lần đầu… ${Math.round((e.loaded || 0) * 100)}%`);
+        });
+      }
+    });
   }
 
-  function timeout(promise) {
+  function timed(promise) {
     return Promise.race([
       promise,
       new Promise((_, reject) =>
@@ -131,238 +398,24 @@ function createTutor(ctx) {
     ]);
   }
 
-  async function generate(m, prompt) {
+  // One-shot helper: session per call so contexts never bleed between tasks;
+  // destroyed immediately after — Nano sessions hold memory.
+  async function oneShot({ prompt, schema }) {
     if (dead) throw new Error('AI unavailable');
+    const session = await createSession({
+      initialPrompts: [{ role: 'system', content: SYSTEM_PROMPT }]
+    });
     try {
-      const result = await timeout(m.generateContent(prompt));
-      return result.response.text();
+      return await timed(
+        session.prompt(prompt, schema ? { responseConstraint: schema } : undefined)
+      );
     } catch (error) {
-      dead = true;
+      if (String(error?.message || '').match(/unavailable|not supported/i)) dead = true;
       throw error;
+    } finally {
+      session.destroy?.();
     }
   }
 
-  const tutor = {
-    get available() {
-      return Boolean(ctx?.client) && !dead;
-    },
-
-    async explainWrong({ stepLabel, question, options, chosenIndex, correctIndex, hint, source }) {
-      const m = await model();
-      return generate(
-        m,
-        [
-          'Bạn là gia sư tiếng Anh cho người Việt mức A1 (mới bắt đầu).',
-          'Học viên làm bài trắc nghiệm và chọn sai. Hãy giải thích NGẮN (tối đa 3 câu) bằng tiếng Việt: vì sao lựa chọn của học viên sai, và vì sao đáp án đúng đúng. Không liệt kê lại toàn bộ lựa chọn.',
-          '',
-          `Bước: ${stepLabel}`,
-          `Câu hỏi: ${question}`,
-          `Các lựa chọn: ${options.map((o, i) => `${i + 1}. ${o}`).join(' | ')}`,
-          `Học viên chọn: "${options[chosenIndex]}"`,
-          `Đáp án đúng: "${options[correctIndex]}"`,
-          hint ? `Gợi ý của bài: ${hint}` : '',
-          source ? `Văn bản bài học liên quan: ${source}` : ''
-        ]
-          .filter(Boolean)
-          .join('\n')
-      );
-    },
-
-    async reviewWriting({ setup, prompt, modelLines, learnerText }) {
-      const m = await model();
-      const raw = await generate(
-        m,
-        [
-          'Bạn là gia sư tiếng Anh chấm bài viết cho người Việt mức A1.',
-          'Trả về CHỈ một JSON object (không markdown, không lời dẫn) với dạng:',
-          '{"correct": boolean, "errors": [{"said": string, "fix": string, "why": string}], "better": string, "praise": string}',
-          '- correct: true nếu bài đạt yêu cầu và không có lỗi ngữ pháp/chính tả đáng kể.',
-          '- errors: tối đa 3 lỗi quan trọng nhất; "said" trích đúng chỗ học viên viết, "fix" là bản sửa, "why" giải thích bằng tiếng Việt tối đa 1 câu.',
-          '- better: một phiên bản tự nhiên hơn của chính bài học viên (giữ ý của họ), tối đa 2 câu, trình độ A1.',
-          '- praise: một câu tiếng Việt ghi nhận điều học viên làm đúng.',
-          '',
-          `Tình huống: ${setup}`,
-          `Yêu cầu: ${prompt}`,
-          `Bài mẫu tham khảo: ${modelLines.join(' / ')}`,
-          `Bài học viên: ${learnerText}`
-        ].join('\n')
-      );
-      return JSON.parse(stripJsonFence(raw));
-    },
-
-    // ELSA-style scripted scoring: send the learner's actual recording to the
-    // model — it hears dropped final sounds and misheard words that a
-    // transcript match can never catch. Audio goes as inlineData (base64).
-    async assessPronunciation({ target, audioBlob }) {
-      const m = await model();
-      const data = await blobToBase64(audioBlob);
-      const raw = await generate(
-        m,
-        [
-          { text: [
-            'Bạn là máy chấm phát âm cho học viên Việt mức A1.',
-            'Nghe đoạn ghi âm học viên đọc câu mẫu, trả về CHỈ JSON (không markdown):',
-            '{"score": số 0-100, "unclear": [từ nghe không rõ/sai], "tip": string}',
-            '- score: mức độ nghe-hiểu-được (không chấm giọng bản ngữ).',
-            '- unclear: tối đa 3 từ trong câu mẫu nghe lệch/không rõ.',
-            '- tip: 1 câu tiếng Việt chỉ điểm phát âm cần sửa nhất (vd âm cuối).',
-            `Câu mẫu: "${target}"`
-          ].join('\n') },
-          { inlineData: { data, mimeType: audioBlob.type || 'audio/webm' } }
-        ]
-      );
-      return JSON.parse(stripJsonFence(raw));
-    },
-
-    // Mastery learning: after wrong answers, generate fresh items on exactly
-    // the missed points so the learner re-tests the gap, not the whole quiz.
-    async generateDrills({ lessonTitle, sourceText, wrong }) {
-      const m = await model();
-      const raw = await generate(
-        m,
-        [
-          'Bạn là người ra đề tiếng Anh mức A1 cho học viên Việt.',
-          `Học viên vừa sai các câu sau. Tạo đúng ${Math.min(3, Math.max(2, wrong.length))} câu trắc nghiệm MỚI luyện đúng các điểm đó (không chép lại câu cũ).`,
-          'Trả về CHỈ JSON: {"questions": [{"q": string, "options": [3 string], "answer": 0|1|2, "hint": string}]}',
-          '- Mỗi câu chỉ có MỘT đáp án đúng; distractor gần đúng nhưng sai rõ.',
-          '- hint: tiếng Việt, giải thích vì sao đáp án đúng (1 câu).',
-          '- Ngôn ngữ chỉ dùng từ/mẫu trong phạm vi bài.',
-          '',
-          `Bài: ${lessonTitle}`,
-          `Ngôn ngữ đã dạy: ${sourceText}`,
-          '',
-          'Các câu học viên đã sai:',
-          ...wrong.map(
-            (w) => `- Hỏi: ${w.question} | Chọn sai: "${w.chosen}" | Đúng: "${w.correct}"`
-          )
-        ].join('\n')
-      );
-      return JSON.parse(stripJsonFence(raw));
-    },
-
-    // The loop's VARY CONTEXT strand: same target language, new situation,
-    // new names — a second exposure that isn't a re-read.
-    async generateVariant({ canDo, patternName, chunkTargets, currentTitle, countLines }) {
-      const m = await model();
-      const raw = await generate(
-        m,
-        [
-          'Bạn là tác giả hội thoại tiếng Anh mức A1 cho học viên Việt.',
-          'Viết một hội thoại MỚI (khác tình huống, khác tên nhân vật) dùng CÙNG mẫu câu mục tiêu của bài.',
-          'Trả về CHỈ JSON:',
-          '{"title": string (tình huống, tiếng Việt), "lines": [[english, vietnamese] ...], "questions": [{"q": string (tiếng Việt), "options": [3 string], "answer": 0|1|2, "hint": string}]}',
-          `- lines: ${countLines} lượt, câu ngắn tự nhiên đúng mẫu; mỗi lượt kèm dịch Việt.`,
-          '- questions: 2 câu hỏi đọc-hiểu, đáp án nằm trong hội thoại, 1 đáp án đúng.',
-          `- Mục tiêu bài: ${canDo}`,
-          `- Mẫu chính: ${patternName}`,
-          `- Cụm phải tái dùng: ${chunkTargets.join(' | ')}`,
-          `- KHÔNG lặp lại tình huống hiện có: ${currentTitle}`
-        ].join('\n')
-      );
-      return JSON.parse(stripJsonFence(raw));
-    },
-
-    startRoleplay({ scenario, roleA, roleB, partnerName, partnerOrigin, checklist, targetPhrases }) {
-      let chat = null;
-      const history = [];
-
-      async function ensureChat() {
-        if (!chat) {
-          const m = await model();
-          chat = m.startChat({
-            history: [
-              {
-                role: 'user',
-                parts: [
-                  {
-                    text: [
-                      `Đóng vai "${partnerName}" trong một cuộc hội thoại tiếng Anh cho học viên A1 (mới học).`,
-                      `Tình huống: ${scenario}`,
-                      `Vai của học viên: ${roleA}. Vai của bạn: ${roleB}.`,
-                      'Luật: chỉ dùng tiếng Anh rất đơn giản (trình độ A1, tối đa 2 câu mỗi lượt); nói tự nhiên như người mới quen; KHÔNG giải thích ngữ pháp trừ khi học viên hỏi; nếu học viên viết sai nặng thì trả lời ý chính rồi kèm sửa ngắn trong ngoặc bằng tiếng Việt; ở lại trong tình huống.',
-                      `Bắt đầu bằng lời chào tự nhiên của ${partnerName}.`
-                    ].join('\n')
-                  }
-                ]
-              }
-            ]
-          });
-        }
-        return chat;
-      }
-
-      return {
-        partnerName,
-        history,
-        // Kickoff turn: the persona greets first so the learner answers a
-        // real opener instead of talking into a blank chat.
-        async start() {
-          const session = await ensureChat();
-          const result = await timeout(
-            session.sendMessage('(Hội thoại bắt đầu — bạn chào trước.)')
-          );
-          const reply = result.response.text().trim();
-          history.push({ role: 'partner', text: reply });
-          return reply;
-        },
-        async send(learnerText) {
-          const session = await ensureChat();
-          history.push({ role: 'learner', text: learnerText });
-          try {
-            const result = await timeout(session.sendMessage(learnerText));
-            const reply = result.response.text().trim();
-            history.push({ role: 'partner', text: reply });
-            return reply;
-          } catch (error) {
-            dead = true;
-            throw error;
-          }
-        },
-        async feedback() {
-          const m = await model();
-          const transcript = history
-            .map((t) => `${t.role === 'learner' ? 'Học viên' : partnerName}: ${t.text}`)
-            .join('\n');
-          const raw = await generate(
-            m,
-            [
-              'Chấm một hội thoại luyện nói tiếng Anh của học viên A1 (người Việt).',
-              'Trả về CHỈ một JSON object (không markdown):',
-              '{"items": [{"check": string, "ok": boolean, "note": string}], "corrections": [{"said": string, "better": string}], "summary": string}',
-              '- items: chấm từng mục checklist bên dưới; "check" chép nguyên mục; "note" tiếng Việt tối đa 1 câu.',
-              '- corrections: tối đa 3 lỗi tiếng Anh đáng sửa nhất mà học viên đã viết/nói; bỏ qua nếu không có.',
-              '- summary: 1-2 câu tiếng Việt nhận xét tổng, khuyến khích.',
-              '',
-              'Checklist:',
-              ...checklist.map((c) => `- ${c}`),
-              '',
-              'Mẫu câu mục tiêu của bài:',
-              ...targetPhrases.map((p) => `- ${p}`),
-              '',
-              'Hội thoại:',
-              transcript
-            ].join('\n')
-          );
-          return JSON.parse(stripJsonFence(raw));
-        }
-      };
-    }
-  };
-
   return tutor;
-}
-
-function blobToBase64(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => resolve(String(reader.result).split(',')[1]);
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
-}
-
-function stripJsonFence(text) {
-  const trimmed = String(text || '').trim();
-  const match = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
-  return (match ? match[1] : trimmed).trim();
 }

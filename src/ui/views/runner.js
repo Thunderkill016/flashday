@@ -10,7 +10,7 @@ import { enrollChunks } from '../../core/scheduler.js';
 import { stepsForLesson } from '../../core/progress.js';
 import { checkTimeGate } from '../../core/time-gate.js';
 import { mountQuiz } from '../components/quiz.js';
-import { pickEnglishVoice, LEARNER_SPEECH_RATE, playButton, speakCheck, speechRecognizer, matchSpeech, startClipRecorder } from '../speech.js';
+import { pickEnglishVoice, LEARNER_SPEECH_RATE, playButton, speakCheck, speechRecognizer, matchSpeech } from '../speech.js';
 import { getTutor } from '../../ai/tutor.js';
 
 // Re-exported: existing tests import the voice picker from this module.
@@ -78,6 +78,17 @@ export function mount(root, ctx) {
   draftStatus.dataset.role = 'draft-status';
   draftStatus.setAttribute('aria-live', 'polite');
   section.appendChild(draftStatus);
+
+  // On-device model download progress (one-time, multi-GB on supported
+  // devices) — a real status line, never a silent stall.
+  const aiStatus = document.createElement('p');
+  aiStatus.className = 'ai-status';
+  aiStatus.dataset.role = 'ai-status';
+  aiStatus.setAttribute('aria-live', 'polite');
+  section.appendChild(aiStatus);
+  state.tutor?.setStatusSink?.((msg) => {
+    aiStatus.textContent = msg;
+  });
 
   const strip = document.createElement('nav');
   strip.className = 'step-strip';
@@ -1336,53 +1347,76 @@ function buildRoleplay(pane, lesson) {
   });
 }
 
-// ELSA-style scripted scoring: record a clip → the model hears the actual
-// audio, catching dropped final consonants and slurred words that a
-// transcript comparison can never see. Degrades to a hidden message when
-// recording or AI is unavailable.
+// Pronunciation check on-device: SpeechRecognition transcript → word diff,
+// then the on-device model writes a targeted tip for what was missed (Nano
+// is text-only, so the tip reasons from the transcript, not raw audio).
 function pronunciationCheck(target) {
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'btn-secondary pron-check';
   button.dataset.role = 'pron-check';
-  button.textContent = '✨ Chấm phát âm';
+  button.textContent = '✨ Nói & chấm AI';
   const output = text('p', '', 'pron-check-out');
   output.hidden = true;
-  let recorder = null;
 
-  button.addEventListener('click', async () => {
-    if (!recorder) {
-      try {
-        recorder = await startClipRecorder();
-      } catch {
-        recorder = null;
-      }
-      if (!recorder) {
-        output.textContent = 'Cần quyền micro và trình duyệt hỗ trợ ghi âm — thử Chrome/Edge.';
-        output.hidden = false;
-        return;
-      }
-      button.textContent = '■ Dừng & chấm (đang ghi…)';
+  button.addEventListener('click', () => {
+    const rec = speechRecognizer();
+    if (!rec) {
+      output.textContent = 'Trình duyệt chưa hỗ trợ nhận giọng — thử Chrome/Edge.';
+      output.hidden = false;
       return;
     }
-    recorder.stop();
-    const clip = await recorder.done;
-    recorder = null;
+    rec.lang = 'en-US';
+    rec.interimResults = false;
+    rec.maxAlternatives = 1;
     button.disabled = true;
-    button.textContent = 'AI đang nghe…';
-    try {
-      const result = await state.tutor.assessPronunciation({ target, audioBlob: clip });
-      if (!output.isConnected) return;
-      const parts = [`Điểm nghe-hiểu: ${result.score}/100`];
-      if (result.unclear?.length) parts.push(`chưa rõ: ${result.unclear.join(', ')}`);
-      if (result.tip) parts.push(result.tip);
+    button.textContent = '… đang nghe';
+    output.hidden = true;
+    rec.addEventListener('result', async (event) => {
+      const transcript = event.results[0]?.[0]?.transcript || '';
+      const match = matchSpeech(target, transcript);
+      const parts = [
+        match.score >= 0.8 ? 'Nghe rõ' : match.score > 0 ? 'Nghe được một phần' : 'Chưa nghe rõ',
+        `"${transcript}"`
+      ];
+      if (match.missedWords.length && match.score < 1) {
+        parts.push(`thiếu/lệch: ${match.missedWords.join(', ')}`);
+      }
       output.textContent = parts.join(' — ');
       output.hidden = false;
+      if (state.tutor?.available) {
+        try {
+          const { tip } = await state.tutor.assessPronunciation({
+            target,
+            transcript,
+            missed: match.missedWords
+          });
+          if (tip && output.isConnected) output.textContent += ` ${tip}`;
+        } catch {
+          // diff output already shown — the tip is a bonus, not a gate
+        }
+      }
+    });
+    const reset = () => {
+      button.disabled = false;
+      button.textContent = '✨ Nói & chấm AI';
+    };
+    rec.addEventListener('end', reset);
+    rec.addEventListener('error', (event) => {
+      reset();
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+        output.textContent = 'Chưa cấp quyền micro — cho phép micro rồi thử lại.';
+        output.hidden = false;
+      } else if (event.error === 'no-speech') {
+        output.textContent = 'Không nghe thấy gì — nói to hơn rồi thử lại.';
+        output.hidden = false;
+      }
+    });
+    try {
+      rec.start();
     } catch {
-      // silent degrade — ASR say-check remains the free fallback path
+      reset();
     }
-    button.disabled = false;
-    button.textContent = '✨ Chấm lại';
   });
   return { button, output };
 }
