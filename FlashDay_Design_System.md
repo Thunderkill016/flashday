@@ -246,3 +246,122 @@ trước production, giữ đường quay lại renderer trước trong giai đo
 Không chạy hai luồng cùng ghi cho một lần nộp. Deployment production là bước
 riêng cần xác nhận theo `AGENTS.md` cấp workspace. Phiên nghiên cứu này chỉ cập
 nhật tài liệu; không đổi runtime hoặc deploy.
+
+---
+
+## 10. Đặc tả kỹ thuật đợt 0–1 (nghiên cứu 2026-09-27, trên HEAD `24dc4d3`)
+
+Đối chiếu code hiện tại cho thấy **model đã đủ** — phần cần xây là lớp trạng
+thái phiên và DOM strategy, không phải dữ liệu mới.
+
+### 10.1 Nguồn đã có sẵn (không build lại)
+
+| Nhu cầu màn mới                    | Nguồn hiện tại                                                                       |
+| ---------------------------------- | ------------------------------------------------------------------------------------ |
+| Trạng thái từng bài trên lộ trình  | `L.coursePracticeState(db)` → `{read,listen,write,speak}` per lesson (`learning-entry.js:816`), `basis:'activity-only'` |
+| Số ôn đến hạn                      | `A.deckStats(db, Date.now()).waiting` (`app-bespoke.js:784`)                            |
+| Nội dung bước Hiểu mẫu             | `cluster.preparation` {prerequisite, glossary, patterns, worked, `practiceQuiz`, coaching} |
+| Bước Đọc + quiz                    | `LESSON_DIALOGUES[clusterId].lines` + `.scenarioQuiz`                                   |
+| Bước Nghe + quiz                   | `LESSON_DIALOGUES[id].listening` {text, translation, questions} + `bindListeningPractice` |
+| Tách Viết/Nói                      | `TRANSFER_MISSIONS` đã chia sẵn: `skill:'write'` vs `skill:'speak'`                     |
+| Version nội dung cho nháp          | `LESSON_DIALOGUES[id].contentVersion` (đã có, vd `a1-meeting-change` = 2)               |
+| Quay lại từ trình đọc              | `sessionStorage['flashday-learning-hub-return']` + `restoreUi` (`learning-hub.js:1103`) |
+
+### 10.2 Module mới: `lesson-session.js` (pure, không DOM)
+
+Schema nháp (v1, device-local):
+
+```js
+{
+  version: 1,
+  last: { lessonId, step },                    // mục tiêu của nút "Tiếp tục"
+  drafts: {
+    [lessonId]: {
+      contentVersion,                          // từ LESSON_DIALOGUES; mismatch → báo nháp cũ
+      step,
+      answers: { prepare: {}, read: {}, listen: {} },   // option đã chọn, CHƯA nộp
+      write:   { [missionId]: { responseText, declaredFinalTime } },
+      speak:   { [missionId]: { responseText, spoke } },
+      support: { translationViewed, transcriptViewed, modelRevealed },
+      updatedAt
+    }
+  }
+}
+```
+
+Key: `${D.dbKey(localStorage)}:lesson-session` — dbKey đã namespace theo
+uid/preview, nên đổi tài khoản tự tách nháp; preview→login không trộn (cùng
+lớp bảo vệ `claimDbNamespace`).
+
+Hàm thuần (test bằng `learning-entry.test.js` style):
+
+- `loadSession`/`saveSession` → `{ok, error}` — lỗi storage phải trả về để UI
+  hiện "không lưu được", không im lặng.
+- `restoreDraft(draft, currentContentVersion)` → `applied|stale|none` — stale
+  báo người học, KHÔNG replay đáp án cũ vào câu mới.
+- `lessonStepStatus(db, clusterId)` → per-step `done|attempted|todo` — suy từ
+  `coursePracticeState` + `missionState`, không lưu trạng thái "done" riêng.
+- `suggestNext(db, session)` → `resume-draft | finish-part | next-lesson` —
+  thứ tự ưu tiên của §2.
+
+Ghi nháp khi: input (debounce), chuyển bước, chuyển bài, chuyển tab. Không dựa
+`beforeunload`. Ranh giới cứng: nháp chỉ là nội dung **chưa nộp** — restore
+không bao giờ tạo `comprehensionChecks`/`transferAttempts`.
+
+### 10.3 DOM strategy cho màn Đang học
+
+```
+captureView
+ ├─ #learnHome      // Hôm nay — mặc định khi không có phiên
+ ├─ #learnRunner    // một bài mounted; 5 pane bước TẤT CẢ nằm trong DOM
+ └─ #learnSummary   // Kết quả buổi
+```
+
+Quy tắc sống còn: **chuyển bước = toggle `hidden`, không `innerHTML` rebuild
+và không `details.open`.** Quiz/textarea/feedback nằm trong pane của bước đó,
+survive mọi chuyển bước và re-render cha (đúng bug class đã sửa ở `d697e4a`).
+
+Bản đồ bước → nội dung hiện có:
+
+| Bước      | Render lại từ                                                                    |
+| --------- | -------------------------------------------------------------------------------- |
+| Hiểu mẫu  | `cluster.preparation` + `renderScenarioQuiz(..., 'preparation')`                  |
+| Đọc       | `lesson.lines` + toggle dịch + `renderScenarioQuiz(..., 'scenario')`              |
+| Nghe      | `bindListeningPractice` (TTS + transcript + questions)                            |
+| Viết      | `TRANSFER_MISSIONS.filter(skill==='write')` — **bỏ gate `clusterState.complete`** |
+| Nói       | `TRANSFER_MISSIONS.filter(skill==='speak')`                                       |
+
+"Thêm cụm vào bộ ôn" chuyển thành hành động lưu cụm ở bước Đọc và màn Kết quả;
+không còn là điều kiện mở Viết/Nói.
+
+### 10.4 Mount và cờ quay lại
+
+- V2 mount khi `?learnv2` trong URL hoặc `localStorage flashday:learnv2=1`;
+  renderer hiện tại giữ nguyên khi cờ tắt — đường quay lại §9 cụ thể hóa thành
+  flag, test được song song trên prod.
+- Listener `flashday:cloud-hydrated` (đã có) → v2 re-render Home/runner; nháp
+  đang ở store nên hydrate không xóa input.
+- `rememberUi`/`restoreUi` hiện có mở rộng thêm `step` trong payload.
+
+### 10.5 Test gate (đợt 1–2)
+
+`tests/learning-browser.test.mjs` đã có Playwright + Vite + preview thật —
+đủ cho các ca bắt buộc:
+
+1. gõ write → reload → đúng bước + đúng text nháp;
+2. chọn quiz → chuyển bước → quay lại → selection + feedback còn;
+3. `contentVersion` khác → nháp báo stale, không replay đáp án;
+4. đổi account (đổi dbKey) → nháp tài khoản trước không hiện;
+5. submit 2 lần liên tiếp → đúng 1 attempt mỗi lần nộp;
+6. gate Viết/Nói mở khi chưa import cụm; nút lưu cụm vẫn hoạt động;
+7. Summary không hiện phần "đã thử" khi chưa có attempt (không số liệu mẫu).
+
+### 10.6 Quyết định mở còn lại
+
+- **Nói khi không có người nghe**: giữ checkbox tự khai (`spoke`) như hiện tại,
+  nhãn "tự luyện" rõ trong record — đợt đầu không thêm STT/audio scoring.
+- **Checkpoint lessons** (`a1-checkpoint-*`, `kind:'review'`): bước Hiểu mẫu
+  ẩn "mở xem khi cần" theo `cluster.kind` hiện có — runner tôn trọng field đó.
+- **Bài không có `listening`/`scenarioQuiz`**: pane Nghe hiện trạng thái
+  "bài này chưa có phần nghe" + nút qua bước — không khoá luồng.
+

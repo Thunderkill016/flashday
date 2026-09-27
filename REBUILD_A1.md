@@ -118,7 +118,8 @@ huống dài hơn; runner ẩn "Hiểu mẫu" theo `kind:'checkpoint'`.
 | Nói      | hai vai, thông tin cần trao đổi; tự khai đã nói / có người nghe            | speak attempt, `spoke`, `listener:'self'|'partner'`   |
 
 Chunk của bài vào bộ ôn FSRS **khi người học nộp bước Hiểu mẫu** (đã gặp và
-thử) — không cần nút "thêm cụm", không khóa Viết/Nói.
+thử) — không cần nút "thêm cụm", không khóa Viết/Nói. Checkpoint không có
+Hiểu mẫu nên cụm vào bộ ôn ở **lần nộp đầu tiên** của bài đó.
 
 ---
 

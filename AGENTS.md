@@ -25,6 +25,8 @@ use another Chromium binary. Tests start their own local Vite server and fresh
 preview contexts; they do not log in or write production learner data.
 Firestore tests use the pinned Firebase CLI through npx and only the
 `demo-flashday-test` emulator project. Java 21 is required; CI installs it.
+No system JDK? A user-local Temurin JRE works:
+`export JAVA_HOME="$HOME/.local/jdk/jdk-21.0.12.1+1-jre" PATH="$JAVA_HOME/bin:$PATH"`.
 
 Single hosting site: `flashday` → canonical `https://flashday.web.app`.
 The legacy `flashday-22ae1` site was removed; `public/canonical.js` still
