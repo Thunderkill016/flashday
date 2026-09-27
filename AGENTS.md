@@ -26,12 +26,10 @@ preview contexts; they do not log in or write production learner data.
 Firestore tests use the pinned Firebase CLI through npx and only the
 `demo-flashday-test` emulator project. Java 21 is required; CI installs it.
 
-Deploys to TWO hosting sites (firebase.json `hosting` is an array):
-
-- `flashday` → canonical `https://flashday.web.app`
-- `flashday-22ae1` → legacy domains; serves the same `dist` so
-  `public/canonical.js` can bounce visitors to the canonical host
-  (path + query preserved).
+Single hosting site: `flashday` → canonical `https://flashday.web.app`.
+The legacy `flashday-22ae1` site was removed; `public/canonical.js` still
+bounces any non-canonical host (e.g. `flashday.firebaseapp.com`) to the
+canonical origin, path + query preserved.
 
 ## Pages and auth flow
 
