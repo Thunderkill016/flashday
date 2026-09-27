@@ -71,7 +71,8 @@ export function mount(root, ctx) {
     active: null,
     panes: {},
     draft: restore.status === 'applied' ? draft : null,
-    draftSaveTimer: null
+    draftSaveTimer: null,
+    timers: new Set()
   };
 
   const section = document.createElement('section');
@@ -157,7 +158,13 @@ export function update(ctx) {
 }
 
 export function unmount() {
-  if (state?.draftSaveTimer) clearTimeout(state.draftSaveTimer);
+  if (!state) return;
+  if (state.draftSaveTimer) clearTimeout(state.draftSaveTimer);
+  // Cancel every pending debounce (textarea drafts, save status) — closures
+  // that touch `state` must never fire after it is torn down.
+  for (const timer of state.timers || []) clearTimeout(timer);
+  // Flush whatever was already drafted so mid-debounce typing is not lost.
+  state.ctx?.session.save();
   state = null;
 }
 
@@ -197,25 +204,45 @@ function stepNav(pane, step) {
   back.href = i > 0 ? `#/lesson/${state.lesson.id}/${state.steps[i - 1]}` : '#/today';
   const next = nextStep(step);
   const fwd = document.createElement('a');
-  fwd.className = 'btn-primary';
+  // `runner-continue` class lets continueLink() relocate this same anchor to
+  // the pane bottom after a submit — without it the step shows two identical
+  // "Học tiếp" buttons (nav row + appended link).
+  fwd.className = 'btn-primary runner-continue';
   fwd.textContent = next ? `Học tiếp: ${STEP_LABELS[next]}` : 'Xem kết quả';
   fwd.href = next ? `#/lesson/${state.lesson.id}/${next}` : `#/summary/${state.lesson.id}`;
   nav.append(back, fwd);
   pane.appendChild(nav);
 }
 
+// All debounced work registers here so unmount() can cancel it — a callback
+// that reads `state` after teardown (or mid-remount) is the crash family this
+// prevents.
+function defer(fn, ms) {
+  const timer = setTimeout(() => {
+    state?.timers?.delete(timer);
+    fn();
+  }, ms);
+  state?.timers?.add(timer);
+  return timer;
+}
+
 function scheduleDraftSave() {
-  const { ctx, lesson } = state;
-  const status = state.panes[state.active].closest('.runner').querySelector('[data-role="draft-status"]');
+  const { ctx } = state;
+  const status = state.panes[state.active]
+    ?.closest('.runner')
+    ?.querySelector('[data-role="draft-status"]');
   if (state.draftSaveTimer) clearTimeout(state.draftSaveTimer);
-  state.draftSaveTimer = setTimeout(() => {
+  state.draftSaveTimer = defer(() => {
     const result = ctx.session.save();
-    status.textContent = result.ok ? 'Đã lưu nháp trên thiết bị' : 'Không lưu được bản nháp trên thiết bị';
-    status.dataset.tone = result.ok ? 'ok' : 'error';
+    if (status) {
+      status.textContent = result.ok ? 'Đã lưu nháp trên thiết bị' : 'Không lưu được bản nháp trên thiết bị';
+      status.dataset.tone = result.ok ? 'ok' : 'error';
+    }
   }, 400);
 }
 
 function patchDraft(patch) {
+  if (!state?.lesson) return;
   const { ctx, lesson } = state;
   state.draft = ctx.session.setDraft(lesson.id, {
     contentVersion: lesson.contentVersion,
@@ -484,7 +511,7 @@ const buildStep = {
       modelBtn.disabled = wordCount(textarea.value) < 3;
       saveBtn.disabled = false; // a changed answer is a new attempt
       if (debounce) clearTimeout(debounce);
-      debounce = setTimeout(() => {
+      debounce = defer(() => {
         patchDraft({
           write: {
             [lesson.id]: {
@@ -647,7 +674,7 @@ const buildStep = {
     textarea.addEventListener('input', () => {
       saveBtn.disabled = false;
       if (debounce) clearTimeout(debounce);
-      debounce = setTimeout(() => {
+      debounce = defer(() => {
         patchDraft({
           speak: {
             [lesson.id]: {
