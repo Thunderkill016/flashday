@@ -101,7 +101,7 @@
       canDo:'Tôi có thể phản hồi một thay đổi và chốt lại giờ hẹn mới bằng 2–3 câu đơn giản.',
       setup:'Bạn và Alex đã hẹn gặp lúc 6 giờ ở quán cà phê. Bây giờ Alex nhắn:',
       incomingMessage:'Sorry, something came up. Can we move it to seven?',
-      instructions:'Trả lời bằng tiếng Anh: đồng ý hoặc đề xuất giờ khác, rồi xác nhận lại giờ cuối cùng. Bạn có thể viết hoặc nói thành tiếng.',
+      instructions:'Trả lời bằng tiếng Anh: phản hồi tin đổi lịch và xác nhận lại giờ cuối cùng là 7 giờ (bài này luyện xác nhận — đề xuất giờ khác là một nhiệm vụ riêng). Bạn có thể viết hoặc nói thành tiếng.',
       // The can-do is "confirm the FINAL time the scenario agreed on" —
       // declared time must equal expectedFinalTime AND appear in the
       // response. Loose 12-hour compare: the incoming message says "seven"
@@ -135,6 +135,9 @@
     // '7:30' / '19.45' / '8h30' — the ':' is real here (raw input, not tokens)
     let m=str.match(/\b([01]?\d|2[0-3])\s*[:.h]\s*([0-5]\d)\s*(am|pm)?\b/);
     if(m){let h=+m[1];if(m[3]==='pm'&&h<12)h+=12;if(m[3]==='am'&&h===12)h=0;return normTime(h,+m[2]);}
+    // A time separator with minutes that don't parse ('7:99', '25:30') is
+    // malformed input — not silently a bare hour.
+    if(/\d\s*[:.h]\s*\d/.test(str))return null;
     // '7pm' / '11 pm'
     m=str.match(/\b(1[0-2]|0?[1-9])\s*(am|pm)\b/);
     if(m){let h=+m[1];if(m[2]==='pm'&&h<12)h+=12;if(m[2]==='am'&&h===12)h=0;return normTime(h,0);}
@@ -156,6 +159,9 @@
         else pendingMin=MIN_WORDS[t]; // leading 'half/quarter' of 'half past four'
         continue;
       }
+      // trailing meridiem on word times: 'seven pm' → 19:00
+      if(t==='pm'&&hour!=null&&hour<12)hour+=12;
+      if(t==='am'&&hour===12)hour=0;
     }
     if(hour==null)return null;
     if(pendingMin!=null&&minute===0)minute=pendingMin;
@@ -167,11 +173,18 @@
     return normTime(hour,minute);
   }
 
+  // "Seven works for me" / "Seven is fine" — the hour word is the subject
+  // naming the agreed time, a real confirmation pattern in the can-do.
+  const TIME_VERBS=new Set(['works','work','is','suits','fine','good','ok','okay','better']);
+
   // Pull every clock-time mention out of free text. canonicalTokens strips
   // ':' so '8:30' arrives as '8','30' — a 2-digit token right after an hour
-  // is minutes. An hour word only counts in a time position: after
-  // at/to/for/until…, before o'clock/am/pm/sharp, or before a minute
-  // ("seven thirty"). Bare digits 1–24 always count; '12345' can't match.
+  // is minutes. Time position = after at/to/for/until…, before
+  // o'clock/am/pm/sharp, before a minute word, before a confirming verb
+  // ("seven works"), or an explicit am/pm/digit-minutes. Bare numbers do
+  // NOT count: "I have 7 cats" and "My phone is 12345" state no time.
+  // A 2+-digit token ≥60 right after an hour ('7:99' → '7','99') marks the
+  // whole mention malformed — nothing is extracted, not a truncated 7:00.
   function extractClockTimes(text){
     const tokens=canonTokens(text||'');
     const times=[];
@@ -181,14 +194,18 @@
       if(dm){
         let h=+dm[1];
         if(h>24||dm[2]&&h>12)continue;
-        let minute=0,j=i+1;
-        if(/^\d{2}$/.test(tokens[j]||'')&&+tokens[j]<60){minute=+tokens[j];j++;}
-        const mer=dm[2]||tokens[j];
+        const prev=tokens[i-1]||'',next=tokens[i+1]||'';
+        if(/^\d{2,}$/.test(next)&&(+next>=60||next.length>2))continue;
+        let minute=null,j=i+1;
+        if(/^\d{2}$/.test(next)&&+next<60){minute=+next;j++;}
+        let mer=dm[2]||null;
+        if(!mer&&(tokens[j]==='am'||tokens[j]==='pm')){mer=tokens[j];j++;}
+        const positioned=AT_TIME.has(prev)||minute!=null||mer!=null||TIME_MARK.has(tokens[j])||TIME_VERBS.has(next);
+        if(!positioned)continue;
         if(mer==='pm'&&h<12)h+=12;
         if(mer==='am'&&h===12)h=0;
-        if(!dm[2]&&(mer==='pm'||mer==='am'))j++; // '7 pm' = two tokens; '7pm' is one
         i=j-1;
-        times.push(normTime(h,minute));
+        times.push(normTime(h,minute||0));
         continue;
       }
       const hw=HOUR_WORDS[t];
@@ -196,15 +213,18 @@
       if(t==='noon'){times.push(normTime(12,0));continue;}
       if(t==='midnight'){times.push(normTime(0,0));continue;}
       const prev=tokens[i-1]||'',next=tokens[i+1]||'';
-      let minute=null;
-      if(MIN_WORDS[next]!=null)minute=MIN_WORDS[next];
-      else if(/^\d{2}$/.test(next)&&+next<60)minute=+next;
-      if(minute!=null&&[20,30,40,50].includes(minute)&&MIN_WORDS[tokens[i+2]]!=null&&MIN_WORDS[tokens[i+2]]<10)minute+=MIN_WORDS[tokens[i+2]];
-      const positioned=AT_TIME.has(prev)||TIME_MARK.has(next)||minute!=null;
+      let minute=null,consumed=0;
+      if(MIN_WORDS[next]!=null){minute=MIN_WORDS[next];consumed=1;}
+      else if(/^\d{2}$/.test(next)&&+next<60){minute=+next;consumed=1;}
+      if(minute!=null&&[20,30,40,50].includes(minute)&&MIN_WORDS[tokens[i+2]]!=null&&MIN_WORDS[tokens[i+2]]<10){minute+=MIN_WORDS[tokens[i+2]];consumed=2;}
+      // 'seven thirty pm' — the meridiem lands after the minute word
+      const afterMin=tokens[i+1+consumed];
+      const mer=(next==='am'||next==='pm')?next:(consumed&&(afterMin==='am'||afterMin==='pm')?afterMin:null);
+      const positioned=AT_TIME.has(prev)||TIME_MARK.has(next)||minute!=null||TIME_VERBS.has(next)||mer!=null;
       if(!positioned)continue;
       let hour=hw;
-      if(next==='pm'&&hour<12)hour+=12;
-      if(next==='am'&&hour===12)hour=0;
+      if(mer==='pm'&&hour<12)hour+=12;
+      if(mer==='am'&&hour===12)hour=0;
       if(prev==='to'&&MIN_WORDS[tokens[i-2]]!=null){times.push(normTime((hour-1+24)%24,60-MIN_WORDS[tokens[i-2]]));continue;}
       if(prev==='past'&&MIN_WORDS[tokens[i-2]]!=null)minute=MIN_WORDS[tokens[i-2]];
       times.push(normTime(hour,minute==null?0:minute));

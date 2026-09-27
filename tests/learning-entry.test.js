@@ -121,6 +121,15 @@ const C=require('../flashday-cloud.js');
   assert.equal(ok.finalTime,'7:00');
   assert.equal(ok.scenarioTimeMatch,true);
   assert.equal(ok.grading,'self-check');
+  // The model-answer pattern "Seven works for me." must pass — the hour
+  // word as subject confirms the time.
+  const verb=L.submitTransferAttempt(db,{missionId:'a1-meeting-change-transfer',responseText:'Seven works for me.',declaredFinalTime:'seven'});
+  assert.equal(verb.finalTime,'7:00');
+  // A bare digit in a non-time position does not confirm anything.
+  assert.throws(
+    ()=>L.submitTransferAttempt(db,{missionId:'a1-meeting-change-transfer',responseText:'I have 7 cats.',declaredFinalTime:'7'}),
+    /chưa xác nhận giờ/i
+  );
   // Loose 12h compare: the scenario says "seven" without am/pm, so both
   // meridiem spellings satisfy it.
   const pm=L.submitTransferAttempt(db,{missionId:'a1-meeting-change-transfer',responseText:'Great. See you at 7 pm.',declaredFinalTime:'19:00'});
@@ -156,18 +165,29 @@ const C=require('../flashday-cloud.js');
   assert.deepEqual(L.extractClockTimes('How about 8:30?'),['8:30']);
   assert.deepEqual(L.extractClockTimes('Can we move it to four thirty?'),['4:30']);
   assert.deepEqual(L.extractClockTimes('Sounds good, noon works.'),['12:00']);
+  // Hour word as the subject naming the agreed time — this pattern is in
+  // the model answer itself ("Seven works for me.").
+  assert.deepEqual(L.extractClockTimes('Seven works for me.'),['7:00']);
+  assert.deepEqual(L.extractClockTimes('Eight thirty is fine.'),['8:30']);
+  assert.deepEqual(L.extractClockTimes('See you at seven thirty pm.'),['19:30']);
   assert.deepEqual(L.extractClockTimes('I have two cats.'),[]);
+  // Bare digits are no longer enough — position matters for digits too.
+  assert.deepEqual(L.extractClockTimes('I have 7 cats.'),[]);
   assert.deepEqual(L.extractClockTimes('My phone is 12345.'),[]);
+  // Malformed times are not truncated into valid-looking ones.
+  assert.deepEqual(L.extractClockTimes('See you at 7:99.'),[]);
   assert.deepEqual(L.extractClockTimes('Sorry, I am not sure that works for me.'),[]);
   assert.deepEqual(L.extractClockTimes(''),[]);
   // Standalone time-input parsing for the declared-final-time field.
   assert.equal(L.parseTimeInput('seven'),'7:00');
+  assert.equal(L.parseTimeInput('seven pm'),'19:00');
   assert.equal(L.parseTimeInput('7:30'),'7:30');
   assert.equal(L.parseTimeInput('7 pm'),'19:00');
   assert.equal(L.parseTimeInput('four thirty'),'4:30');
   assert.equal(L.parseTimeInput('half past four'),'4:30');
   assert.equal(L.parseTimeInput('quarter to seven'),'6:45');
   assert.equal(L.parseTimeInput('noon'),'12:00');
+  assert.equal(L.parseTimeInput('7:99'),null);
   assert.equal(L.parseTimeInput('abc'),null);
   assert.equal(L.parseTimeInput(''),null);
 }

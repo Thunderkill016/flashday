@@ -84,6 +84,57 @@
     reloadHub({message});
   }
 
+  // Lesson-loop state for one cluster card — shared between the full
+  // render and the in-place patch below.
+  function lessonProgress(db,clusterId){
+    const lesson=L.LESSON_DIALOGUES?.[clusterId];
+    const state=L.clusterState(db,clusterId);
+    const lessonImported=lesson&&(db.captures||[]).some(c=>String(c.sourceId)===lesson.sourceId);
+    const checks=(db.comprehensionChecks||[]).filter(ch=>String(ch.sourceKey)===lesson?.sourceId);
+    const scenarioChecks=(db.comprehensionChecks||[]).filter(ch=>String(ch.sourceKey)===`${lesson?.sourceId}:scenario`);
+    const bestOf=(list)=>list.length?Math.max(...list.map(c=>Number(c.correct)||0)):null;
+    const lessonChecked=checks.length>0;
+    const mission=L.TRANSFER_MISSIONS.find(m=>m.clusterId===clusterId);
+    const missionTries=mission?L.missionState(db,mission.id).attempts:0;
+    const evidence=[];
+    if(checks.length)evidence.push(`kiểm hiểu tốt nhất ${bestOf(checks)}/${checks[0].total}`);
+    if(scenarioChecks.length)evidence.push(`tình huống tốt nhất ${bestOf(scenarioChecks)}/${scenarioChecks[0].total}`);
+    if(missionTries)evidence.push(`vận dụng ${missionTries} lần — tự đối chiếu`);
+    const unitTries=(db.transferAttempts||[]).filter(a=>a&&a.kind==='unit').length;
+    if(unitTries)evidence.push(`unit transfer ${unitTries} lần`);
+    return {lesson,lessonImported,lessonChecked,state,missionTries,evidence};
+  }
+
+  // Progress changes must NOT re-render the whole card — that would wipe
+  // live quiz feedback (hints, retry button) mid-interaction. Patch only
+  // the step pills and evidence line in place.
+  function updateLessonProgress(){
+    const db=store.refresh();
+    for(const cluster of L.GUIDED_CLUSTERS){
+      const card=document.querySelector(`[data-cluster-card="${cluster.id}"]`);
+      if(!card)continue;
+      const lp=lessonProgress(db,cluster.id);
+      const steps=card.querySelectorAll('.lesson-step');
+      if(steps[0]){
+        steps[0].className=`lesson-step${lp.lessonChecked?' done':lp.lessonImported?' active':''}`;
+        steps[0].textContent=lp.lessonChecked?'Đã làm kiểm hiểu':'1 · Đọc hội thoại & kiểm hiểu';
+      }
+      if(steps[1])steps[1].className=`lesson-step${lp.state.complete?' done':lp.state.installed?' active':''}`;
+      if(steps[2]){
+        steps[2].className=`lesson-step${lp.missionTries?' done':''}`;
+        steps[2].textContent=lp.missionTries?'Đã thử vận dụng':'3 · Vận dụng đổi giờ';
+      }
+      const ev=card.querySelector('.lesson-evidence');
+      const evText=lp.evidence.length?`Bằng chứng: ${lp.evidence.join(' · ')} — luyện tập tự đối chiếu, chưa phải đánh giá đạt.`:'';
+      if(ev){ev.textContent=evText;ev.classList.toggle('hidden',!lp.evidence.length);}
+      else if(lp.evidence.length){
+        const p=document.createElement('p');
+        p.className='lesson-evidence';p.textContent=evText;
+        card.querySelector('.lesson-flow')?.after(p);
+      }
+    }
+  }
+
   function renderGuidedModules(){
     const root=$('guidedModules');if(!root)return;
     const db=store.refresh();
@@ -93,23 +144,10 @@
       const remaining=Math.max(0,state.total-state.installed);
       const buttonLabel=state.complete?'Đã thêm vào bộ học':remaining===state.total?`Thêm ${state.total} Unit vào bộ học`:`Thêm ${remaining} Unit còn lại`;
       const example=(cluster.workedExample?.turns||[]).map(turn=>`<li><b>${esc(turn.speaker)}:</b> ${esc(turn.text)}<small>${esc(turn.translation)}</small></li>`).join('');
-      // Lesson loop state — step 1 is a NEW dialogue the learner reads and
-      // comprehension-checks before the units and the transfer mission.
-      const lesson=L.LESSON_DIALOGUES?.[cluster.id];
-      const lessonImported=lesson&&(db.captures||[]).some(c=>String(c.sourceId)===lesson.sourceId);
-      const checks=(db.comprehensionChecks||[]).filter(ch=>String(ch.sourceKey)===lesson?.sourceId);
-      const scenarioChecks=(db.comprehensionChecks||[]).filter(ch=>String(ch.sourceKey)===`${lesson?.sourceId}:scenario`);
-      const bestOf=(list)=>list.length?Math.max(...list.map(c=>Number(c.correct)||0)):null;
-      const lessonChecked=checks.length>0;
-      const mission=L.TRANSFER_MISSIONS.find(m=>m.clusterId===cluster.id);
-      const missionTries=mission?L.missionState(db,mission.id).attempts:0;
-      const evidence=[];
-      if(checks.length)evidence.push(`kiểm hiểu tốt nhất ${bestOf(checks)}/${checks[0].total}`);
-      if(scenarioChecks.length)evidence.push(`tình huống tốt nhất ${bestOf(scenarioChecks)}/${scenarioChecks[0].total}`);
-      if(missionTries)evidence.push(`vận dụng ${missionTries} lần — tự đối chiếu`);
-      const unitTries=(db.transferAttempts||[]).filter(a=>a&&a.kind==='unit').length;
-      if(unitTries)evidence.push(`unit transfer ${unitTries} lần`);
-      return `<article class="guided-cluster">
+      const lp=lessonProgress(db,cluster.id);
+      const {lesson,lessonImported,lessonChecked,missionTries,evidence}=lp;
+      const missionTried=missionTries>0;
+      return `<article class="guided-cluster" data-cluster-card="${esc(cluster.id)}">
         <div class="guided-cluster-head">
           <div><span class="eyebrow">${esc(cluster.level)} · SITUATION CLUSTER</span><h4>${esc(cluster.title)}</h4><p>${esc(cluster.canDo)}</p></div>
           <span class="cluster-progress">${state.practiced}/${state.total} đã từng ôn</span>
@@ -237,7 +275,7 @@
         }));
         window.dispatchEvent(new CustomEvent('flashday:learning-state-changed'));
         renderTransferMissions();
-        renderGuidedModules();
+        updateLessonProgress();
         showInlineMessage(attempt.selfReviewed?'Đã lưu — bạn đã tự đối chiếu câu mới với mẫu.':'Đã lưu lần thử. Bạn có thể quay lại đối chiếu sau.',false);
         // Close the loop: production returns to immersion. Offer a one-tap
         // path back to the source this unit was mined from so the learner
@@ -294,7 +332,7 @@
       const {result:attempt}=store.transact((db)=>L.submitTransferAttempt(db,{missionId,responseText,spoke,selfReviewed,declaredFinalTime}));
       window.dispatchEvent(new CustomEvent('flashday:learning-state-changed'));
       renderTransferMissions();
-      renderGuidedModules();
+      updateLessonProgress();
       showInlineMessage(attempt.selfReviewed?'Đã lưu lần thử và việc tự đối chiếu mẫu.':'Đã lưu lần thử. Bạn có thể quay lại tự đối chiếu mẫu sau.',false);
     }catch(error){
       cardMessage(card,error.message);
@@ -536,7 +574,7 @@
       $('quizResult').innerHTML=`<p class="quiz-score">Đúng ${correct}/${quiz.questions.length} dòng — ${correct===quiz.questions.length?'chọn đúng hết trong lần này (bản dịch đã hiện lại — đọc lại để củng cố).':correct>0?'có dòng chưa chắc nghĩa — đọc lại dòng đánh dấu đỏ.':'chưa nắm được nghĩa — đọc lại kèm dịch rồi thử lại.'}</p>`;
       reader?.classList.remove('quiz-active');
       window.dispatchEvent(new CustomEvent('flashday:learning-state-changed'));
-      renderGuidedModules();
+      updateLessonProgress();
     };
   }
 
@@ -586,7 +624,7 @@
       box.querySelector('.sq-result').innerHTML=`<p class="quiz-score">Đúng ${correct}/${questions.length} — ${done?'nắm được tình huống của hội thoại này trong lần này.':'đọc lại hội thoại rồi thử lại các câu đỏ.'}</p>${done?'':'<button type="button" class="ghost-btn sq-retry">Làm lại</button>'}`;
       box.querySelector('.sq-retry')?.addEventListener('click',()=>renderScenarioQuiz(box,clusterId));
       window.dispatchEvent(new CustomEvent('flashday:learning-state-changed'));
-      renderGuidedModules();
+      updateLessonProgress();
     };
   }
   const READER_THEMES=['dark','light','warm'];
