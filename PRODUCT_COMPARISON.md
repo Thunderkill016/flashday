@@ -328,3 +328,37 @@ REAL CONTENT → NOTICE/CAPTURE (click-word mining) → FSRS → CONTEXT ROTATIO
 ```
 
 Remaining distance to LingQ/Migaku = content ecosystem/distribution, not pedagogy.
+
+---
+
+## Round 3 — So sánh trên bản rebuild A1 (2026-09-28)
+
+Audit sau rebuild: learner sim đầy đủ (Playwright, bài `a1-s1-l1` đi hết 5 bước +
+ôn FSRS, 15/15 checks) + screenshot toàn trang 390px/1280px. Đối chiếu lại các
+sản phẩm top và chính audit round-2.
+
+### Phát hiện: rebuild mất 2 thứ round-2 từng có
+
+| Gap | Ai làm tốt | Trạng thái rebuild | Đã xử lý |
+| --- | --- | --- | --- |
+| Cụm từ/dòng hội thoại câm — không nút nghe | Duolingo/BBC/Babbel đều phát âm từng phrase | ❌ chỉ bước Nghe có TTS | ✅ `src/ui/speech.js` + ▶ Nghe trên chunk, dòng thoại, bài mẫu, đáp án ôn |
+| Không correction loop cho Viết | Speak/Duolingo: feedback → sửa → thử lại | ❌ chỉ checklist tự chấm | ✅ `attempt-compare` vs mẫu gần nhất, `<mark>` từ khớp, "Viết lại" ghi `payload.attempt` |
+
+### Bug thật sim phát hiện (đã fix, pinned bằng test)
+
+- Debounce textarea gọi `patchDraft` sau `unmount()` → crash `null.draft` /
+  `'closest'`. Giờ mọi debounce đăng ký `state.timers`, `unmount()` hủy hết +
+  flush session (browser group 11).
+- Hai nút "Học tiếp" giống hệt sau nộp — `stepNav` forward link giờ mang class
+  `runner-continue` để relocate thay vì nhân đôi.
+
+### Còn lại sau round 3 (chưa làm — ghi lại để không quên)
+
+- **Streak/ngày học liên tiếp** — Duolingo core mechanic; có `lessonEvents` +
+  `reviewLog` đủ dữ liệu tính. Motivation, không phải learning quality — chờ pilot.
+- **Dialogue TTS một nút nghe cả đoạn** — hiện từng dòng riêng; BBC/BC cho nghe
+  liền mạch cả hội thoại.
+- **Review mặt trước có audio prompt** — hiện chỉ text; nghe→nhớ là mode mạnh
+  hơn cho A1 (dictation).
+- **Context rotation / next-for-you / mining** của bản cũ — vẫn ngoài scope A1;
+  quay lại khi khóa B1+ hoặc khi thêm import nội dung thật.
