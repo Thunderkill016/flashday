@@ -83,7 +83,7 @@ export default {
     roleA: 'Khách — nói triệu chứng, trả lời câu hỏi, hỏi cách uống thuốc.',
     roleB: 'Dược sĩ — hỏi có sốt không, đưa thuốc, hướng dẫn 1 viên 3 lần/ngày sau ăn, khuyên uống nước.',
     prompt: 'Nói thành tiếng cả hai vai. Khách nhắc lại cách dùng thuốc trước khi cảm ơn.',
-    model: ['A: I don’t feel well. My stomach hurts and I have a small fever. — B: Do you have something else? — A: No.', 'B: Take one tablet three times a day after meals. You should drink water.', 'A: One tablet, three times a day, after meals. Thank you.'],
+    model: ['A: I don’t feel well. My stomach hurts and I have a small fever. — B: Anything else? — A: No.', 'B: Take one tablet three times a day after meals. You should drink water.', 'A: One tablet, three times a day, after meals. Thank you.'],
     checklist: [
       'Có My … hurts và I have a ….',
       'Có hỏi/nhắc lại cách uống thuốc.',
