@@ -492,7 +492,7 @@
       }
     }
     return {
-      clusterId:cluster.id,level:cluster.level,total:drafts.length,installed:linked.length,
+      clusterId:cluster.id,level:cluster.level,total:drafts.length,installed:linked.length,unitIds:[...linkedIds],
       practiced:practicedIds.size,complete:linked.length===drafts.length,
       modules:modules.map(module=>moduleState(db,module.id))
     };
@@ -577,10 +577,13 @@
 
   function firstUnassistedWriteEvent(db,unitId){
     const events=Array.isArray(db?.events)?db.events:[];
-    return events.find(event=>{
+    return events.filter(event=>{
+      if(!String(event?.id||'').trim())return false;
+      if(!Number.isFinite(event?.answeredAt)||event.answeredAt<0)return false;
       if(String(event?.mode)!=='write')return false;
       if(!Array.isArray(event?.unitIds)||!event.unitIds.includes(unitId))return false;
-      if(Number(event?.ratings?.[unitId])<2)return false; // FSRS success = Hard or better
+      const grade=Number(event?.ratings?.[unitId]);
+      if(!Number.isInteger(grade)||grade<2||grade>4)return false; // valid FSRS success = Hard through Easy
       // New events carry the M3 evidence split — unaidedUnits is the
       // authoritative "produced without aid" list. Older events fall back to
       // inferring assistance from the error record and peek telemetry.
@@ -594,22 +597,32 @@
       if(Array.isArray(event?.error?.missedUnits)&&event.error.missedUnits.includes(unitId))return false;
       if(event?.telemetry?.sourceViewedPreReveal)return false; // peeked at source = aided
       return true;
-    })||null;
+    }).sort((left,right)=>Number(left.answeredAt)-Number(right.answeredAt)||String(left.id).localeCompare(String(right.id)))[0]||null;
+  }
+
+  function isReviewedUnitTransfer(attempt,unitId,eventId,dueAt){
+    return attempt?.kind==='unit'&&String(attempt.unitId)===unitId
+      &&attempt.selfReviewed===true&&String(attempt.sourceEventId)===String(eventId)
+      &&Number.isFinite(Number(attempt.submittedAt))&&Number(attempt.submittedAt)>=dueAt;
   }
 
   function dueUnitTransfer(db,now=Date.now()){
     const items=Array.isArray(db?.items)?db.items:[];
     const attempts=Array.isArray(db?.transferAttempts)?db.transferAttempts:[];
-    const done=new Set(attempts.filter(a=>a&&a.kind==='unit').map(a=>String(a.unitId)));
     let best=null;
     for(const item of items){
       const unitId=String(item?.id||'');
-      if(!unitId||done.has(unitId))continue;
+      if(!unitId)continue;
       const event=firstUnassistedWriteEvent(db,unitId);
       if(!event)continue;
       const dueAt=Number(event.answeredAt)+UNIT_TRANSFER_DELAY_MS;
       if(!Number.isFinite(dueAt)||dueAt>now)continue;
-      if(!best||dueAt<best.dueAt)best={unitId,item,dueAt,sourceEventId:String(event.id||'')||null};
+      if(attempts.some(a=>isReviewedUnitTransfer(a,unitId,event.id,dueAt)))continue;
+      if(!best||dueAt<best.dueAt){
+        const previousAttempt=attempts.filter(a=>a?.kind==='unit'&&String(a.unitId)===unitId)
+          .sort((left,right)=>Number(right.submittedAt)-Number(left.submittedAt))[0]||null;
+        best={unitId,item,dueAt,sourceEventId:String(event.id),previousAttempt};
+      }
     }
     return best;
   }
@@ -622,7 +635,12 @@
     const responseText=cleanMissionValue(raw.responseText,1600);
     if(!responseText)throw new Error('Hãy viết câu mới trước khi lưu.');
     db.transferAttempts=Array.isArray(db.transferAttempts)?db.transferAttempts:[];
-    if(db.transferAttempts.some(a=>a&&a.kind==='unit'&&String(a.unitId)===unitId))throw new Error('Transfer cho Unit này đã được lưu.');
+    const sourceEvent=firstUnassistedWriteEvent(db,unitId);
+    if(!sourceEvent)throw new Error('Chưa có lượt viết đúng không hỗ trợ để mở vận dụng trễ.');
+    const dueAt=Number(sourceEvent.answeredAt)+UNIT_TRANSFER_DELAY_MS;
+    if(db.transferAttempts.some(a=>isReviewedUnitTransfer(a,unitId,sourceEvent.id,dueAt)))throw new Error('Transfer cho Unit này đã được lưu và tự đối chiếu.');
+    if(!Number.isFinite(Number(now))||Number(now)<dueAt)throw new Error('Chưa tới thời điểm vận dụng trễ — cần đủ 24 giờ sau lượt viết nguồn.');
+    if(raw.sourceEventId&&String(raw.sourceEventId)!==String(sourceEvent.id))throw new Error('Lượt viết nguồn không khớp nhiệm vụ vận dụng.');
     // A transfer only counts if the unit is actually in the new sentence —
     // otherwise "writing any English" would close the produce step without
     // producing the target. Forms/accepted variants count as the unit.
@@ -651,16 +669,19 @@
         throw new Error('Câu trùng nguyên câu mẫu — hãy đổi chi tiết (người, giờ, nơi, món) rồi lưu lại.');
       }
     }
-    const submittedAt=Number.isFinite(Number(raw.submittedAt))?Number(raw.submittedAt):Number(now);
+    // Use actual submission time; an imported/requested timestamp cannot bypass the delay.
+    const submittedAt=Number(now);
     const attempt={
       id:cleanMissionValue(raw.id,200)||`unit-transfer_${submittedAt}_${Math.random().toString(36).slice(2,10)}`,
-      kind:'unit',unitId,sourceEventId:cleanMissionValue(raw.sourceEventId,160)||null,
+      kind:'unit',unitId,sourceEventId:String(sourceEvent.id),dueAt,
+      evidenceBasis:sourceEvent.evidence?'explicit-unaided':'legacy-review',
       responseText,selfReviewed:Boolean(raw.selfReviewed),submittedAt,
       // Same honesty flag as mission attempts: this gate checks the unit
       // appears in a NEW sentence, not that the sentence is semantically
       // right — the learner self-checks against the checklist.
       grading:'self-check'
     };
+    if(db.transferAttempts.some(previous=>String(previous.id)===attempt.id))throw new Error('Lần thử này đã được lưu.');
     db.transferAttempts.push(attempt);
     return attempt;
   }

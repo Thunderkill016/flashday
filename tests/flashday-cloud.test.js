@@ -150,3 +150,22 @@ const C = require('../flashday-cloud.js');
 assert.strictEqual(C.remoteHasLearnerData({}), false);
 assert.strictEqual(C.remoteHasLearnerData({ units: [{ id: 'u' }] }), true);
 console.log('FlashDay cloud P0: 7 checks passed');
+
+// A->B->A is still a new session; an old completion must not become valid again.
+{
+  const client={};
+  let identity={client,ownerId:'alice',namespace:'u:alice',ownerNamespace:'u:alice'};
+  const fence=C.createSessionFence(()=>identity);
+  const original=fence.capture();
+  assert.equal(fence.isCurrent(original),true);
+  identity={...identity,namespace:'u:bob'};
+  assert.equal(fence.isCurrent(original),false);
+  assert.equal(fence.isCurrent(fence.capture()),false,'a freshly captured mismatched namespace must also fail');
+  identity={...identity,namespace:'u:alice'};
+  fence.invalidate();
+  assert.throws(()=>fence.assertCurrent(original),error=>error.code==='SESSION_CHANGED');
+  const fresh=fence.capture();
+  assert.equal(fence.isCurrent(fresh),true);
+  identity={...identity,client:{}};
+  assert.equal(fence.isConnectionCurrent(fresh),false);
+}

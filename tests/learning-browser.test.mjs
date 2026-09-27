@@ -143,6 +143,265 @@ try {
       `Learning browser: quiz lifecycle, records, mission gate, layout PASS (${width}px)`,
     );
   }
+  // Synthetic prior review: exercise next-day practice without pretending
+  // that an automated fixture is evidence of a real learner's retention.
+  {
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+    });
+    const page = await context.newPage();
+    await page.addInitScript(() => {
+      const DAY_MS = 24 * 60 * 60 * 1000;
+      localStorage.setItem(
+        "flashday-memory-engine-repo-driven",
+        JSON.stringify({
+          items: [
+            {
+              id: "delayed-fixture",
+              target: "on my way",
+              meaning: "đang trên đường",
+              type: "chunk",
+            },
+          ],
+          events: [
+            {
+              id: "review-fixture",
+              mode: "write",
+              unitIds: ["delayed-fixture"],
+              ratings: { "delayed-fixture": 3 },
+              answeredAt: Date.now() - DAY_MS - 1000,
+              evidence: { aided: false, unaidedUnits: ["delayed-fixture"] },
+            },
+          ],
+          transferAttempts: [],
+        }),
+      );
+    });
+    await page.goto(`${origin}app/?preview`);
+    const task = page.locator("[data-unit-transfer]");
+    await task
+      .locator("#unitTransferResponse")
+      .fill("I am on my way to Hanoi.");
+    await task.locator("[data-unit-reveal]").click();
+    await task.locator("[data-unit-save]").click();
+    assert.equal(
+      await task.count(),
+      1,
+      "unreviewed attempt must remain available",
+    );
+    assert.equal(
+      await task.locator("#unitTransferResponse").inputValue(),
+      "I am on my way to Hanoi.",
+    );
+    await task.locator("[data-unit-reveal]").click();
+    await task.locator("[data-unit-self-review]").check();
+    await task.locator("[data-unit-save]").click();
+    assert.equal(
+      await task.count(),
+      0,
+      "self-reviewed attempt closes this practice task",
+    );
+    const attempts = await page.evaluate(
+      () =>
+        JSON.parse(
+          localStorage.getItem(window.FlashDayData.dbKey(localStorage)),
+        ).transferAttempts,
+    );
+    assert.deepEqual(
+      attempts.map((a) => a.selfReviewed),
+      [false, true],
+    );
+    assert.ok(
+      attempts.every(
+        (a) =>
+          a.sourceEventId === "review-fixture" &&
+          a.evidenceBasis === "explicit-unaided" &&
+          a.submittedAt >= a.dueAt,
+      ),
+    );
+    assert.ok(
+      (await page.locator(".lesson-evidence").allTextContents()).every(
+        (text) => !text.includes("unit transfer"),
+      ),
+      "personal-unit practice must not inflate the guided-cluster evidence",
+    );
+    assert.equal(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+      true,
+    );
+    await context.close();
+    console.log("Learning browser: delayed transfer resume and evidence PASS");
+  }
+
+  // Delayed cloud responses must never cross an account boundary. The fake
+  // transport controls timing; the real app/hub session handlers still run.
+  {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await page.goto(`${origin}app/?preview`);
+    await page.locator("[data-guided-cluster]").waitFor();
+    await page.evaluate(() => {
+      const D = window.FlashDayData;
+      const fixture = (window.__sessionFixture = {
+        listeners: [],
+        writes: [],
+        reads: [],
+        deferred: [],
+      });
+      const originalTimeout = window.setTimeout.bind(window);
+      window.setTimeout = (callback, delay, ...args) => {
+        if (delay === 0) {
+          fixture.deferred.push(() => callback(...args));
+          return -1;
+        }
+        return originalTimeout(callback, delay, ...args);
+      };
+      for (const id of ["alice", "bob"]) {
+        localStorage.setItem(
+          `${D.DB_BASE_KEY}:u:${id}`,
+          JSON.stringify(
+            D.createInitialDb([
+              { id: `${id}-only`, target: id, meaning: id, type: "word_sense" },
+            ]),
+          ),
+        );
+      }
+      const client = {
+        auth: {
+          getSession: async () => ({
+            data: { session: { user: { id: "alice" } } },
+          }),
+          onAuthStateChange: (callback) => {
+            fixture.listeners.push(callback);
+            return { data: { subscription: { unsubscribe() {} } } };
+          },
+        },
+        from(table) {
+          let write = false;
+          const builder = {
+            select() {
+              return this;
+            },
+            order() {
+              return this;
+            },
+            limit() {
+              return this;
+            },
+            eq() {
+              return this;
+            },
+            maybeSingle() {
+              return this;
+            },
+            single() {
+              return this;
+            },
+            pageAfter() {
+              return this;
+            },
+            upsert() {
+              write = true;
+              return this;
+            },
+            insert() {
+              write = true;
+              return this;
+            },
+            then(resolve, reject) {
+              if (write) {
+                fixture.writes.push(table);
+                return Promise.resolve({ data: [], error: null }).then(
+                  resolve,
+                  reject,
+                );
+              }
+              fixture.reads.push(table);
+              if (table === "decks")
+                return new Promise((done) => {
+                  fixture.resolveDeck = () =>
+                    done({ data: [{ id: "alice-deck" }], error: null });
+                }).then(resolve, reject);
+              if (table === "learner_profiles")
+                return new Promise((done) => {
+                  fixture.resolveProfile = () =>
+                    done({
+                      data: {
+                        payload: {
+                          overallLevel: "C2",
+                          updatedAt: 9999999999999,
+                        },
+                      },
+                      error: null,
+                    });
+                }).then(resolve, reject);
+              return Promise.resolve({ data: [], error: null }).then(
+                resolve,
+                reject,
+              );
+            },
+          };
+          return builder;
+        },
+      };
+      window.dispatchEvent(
+        new CustomEvent("flashday:supabase-ready", { detail: { client } }),
+      );
+    });
+    await page.waitForFunction(() =>
+      Boolean(window.__sessionFixture.resolveDeck),
+    );
+    assert.equal(
+      await page.evaluate(() => window.__sessionFixture.listeners.length),
+      2,
+      "both cloud listeners must subscribe before awaiting hydration",
+    );
+    await page.waitForFunction(() =>
+      Boolean(window.__sessionFixture.resolveProfile),
+    );
+    await page.evaluate(() => {
+      const fixture = window.__sessionFixture;
+      for (const callback of fixture.listeners)
+        callback("SIGNED_IN", { user: { id: "bob" } });
+      window.FlashDayData.claimDbNamespace(localStorage, "bob");
+      fixture.resolveDeck();
+      fixture.resolveProfile();
+    });
+    // Drain asynchronous continuations via a browser task, not an arbitrary sleep.
+    await page.evaluate(
+      () =>
+        new Promise((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(resolve)),
+        ),
+    );
+    const result = await page.evaluate(() => {
+      const D = window.FlashDayData;
+      return {
+        writes: window.__sessionFixture.writes,
+        reads: window.__sessionFixture.reads,
+        bob: JSON.parse(localStorage.getItem(`${D.DB_BASE_KEY}:u:bob`)),
+      };
+    });
+    assert.deepEqual(
+      result.writes,
+      [],
+      "stale work must not upload under the new account",
+    );
+    assert.deepEqual(result.reads.sort(), ["decks", "learner_profiles"]);
+    assert.deepEqual(
+      result.bob.items.map((item) => item.id),
+      ["bob-only"],
+    );
+    assert.equal(
+      result.bob.learningProfile,
+      null,
+      "stale profile must not replace Bob profile",
+    );
+    await context.close();
+    console.log("Learning browser: in-flight account-switch isolation PASS");
+  }
 } finally {
   await browser?.close();
   await server.close();

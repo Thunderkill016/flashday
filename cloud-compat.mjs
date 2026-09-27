@@ -164,3 +164,13 @@ export async function readFirestorePage(fs, ref, constraints, cursor, pageSize) 
     error: null
   };
 }
+
+// Pin a queued operation to its initiating account; never silently rewrite
+// a stale owner's row under whichever account happens to be signed in later.
+export function assertAccountOwner(expectedOwner, currentOwner) {
+  if (!expectedOwner || expectedOwner !== currentOwner) {
+    const error = new Error('Phiên tài khoản đã thay đổi. Tác vụ cũ đã dừng.');
+    error.code = 'SESSION_CHANGED';
+    throw error;
+  }
+}

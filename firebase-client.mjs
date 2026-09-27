@@ -31,6 +31,7 @@ import {
   paginateRows,
   rowDocId,
   sortRows,
+  assertAccountOwner,
   readFirestorePage,
   writeProgressTransaction,
 } from './cloud-compat.mjs';
@@ -361,16 +362,19 @@ export function createClient(config, { mergeProgressPayload } = {}) {
     },
   };
 
-  async function userCollection(table) {
+  async function userCollection(table, expectedOwner) {
     const user = auth.currentUser;
     if (!user) return { error: new Error('Not authenticated') };
+    assertAccountOwner(expectedOwner, user.uid);
     const fs = await firestore();
+    assertAccountOwner(expectedOwner, auth.currentUser?.uid);
     return { user, fs, ref: fs.collection(fs.db, 'users', user.uid, table) };
   }
 
   class Builder {
     constructor(table) {
       this._table = table;
+      this._ownerId = auth.currentUser?.uid || null;
       this._op = 'select';
       this._rows = [];
       this._filters = [];
@@ -449,7 +453,7 @@ export function createClient(config, { mergeProgressPayload } = {}) {
     }
 
     async _select() {
-      const scoped = await userCollection(this._table);
+      const scoped = await userCollection(this._table, this._ownerId);
       if (scoped.error) return fail(scoped.error);
       if (this._page) {
         if (this._orders.length || this._range) throw new Error('Cursor paging uses document order');
@@ -480,11 +484,15 @@ export function createClient(config, { mergeProgressPayload } = {}) {
     }
 
     async _write(merge) {
-      const scoped = await userCollection(this._table);
+      const scoped = await userCollection(this._table, this._ownerId);
       if (scoped.error) return fail(scoped.error);
       const fs = scoped.fs;
+      for (const row of this._rows) {
+        if (row.owner_id != null) assertAccountOwner(row.owner_id, scoped.user.uid);
+      }
       const written = [];
       for (const row of this._rows) {
+        assertAccountOwner(this._ownerId, auth.currentUser?.uid);
         const id = rowDocId(row, scoped.user.uid) || crypto.randomUUID();
         const target = fs.doc(scoped.ref, id);
         if (this._table === 'learning_progress') {
@@ -503,6 +511,7 @@ export function createClient(config, { mergeProgressPayload } = {}) {
           id,
           owner_id: scoped.user.uid,
         };
+        assertAccountOwner(this._ownerId, auth.currentUser?.uid);
         await fs.setDoc(target, record, merge ? { merge: true } : undefined);
         written.push(record);
       }
@@ -511,7 +520,7 @@ export function createClient(config, { mergeProgressPayload } = {}) {
     }
 
     async _delete() {
-      const scoped = await userCollection(this._table);
+      const scoped = await userCollection(this._table, this._ownerId);
       if (scoped.error) return fail(scoped.error);
       if (!this._filters.length)
         return fail(new Error('Delete requires at least one filter'));
@@ -529,6 +538,7 @@ export function createClient(config, { mergeProgressPayload } = {}) {
       let pending = 0;
       const flush = async () => {
         if (!pending) return;
+        assertAccountOwner(this._ownerId, auth.currentUser?.uid);
         await batch.commit();
         batch = fs.writeBatch(fs.db);
         pending = 0;

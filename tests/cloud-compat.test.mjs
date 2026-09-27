@@ -211,3 +211,11 @@ console.log('cloud-compat tests passed');
   assert.equal(new Set(ids).size,1201);
   assert.equal(reads,1201,'subsequent pages must not reread previous documents');
 }
+
+{
+  const {assertAccountOwner}=await import('../cloud-compat.mjs');
+  assert.doesNotThrow(()=>assertAccountOwner('alice','alice'));
+  for(const [expected,current] of [['alice','bob'],['alice',null],[null,'bob']]) {
+    assert.throws(()=>assertAccountOwner(expected,current),error=>error.code==='SESSION_CHANGED');
+  }
+}

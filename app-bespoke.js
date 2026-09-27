@@ -12,6 +12,7 @@
   const debugEnabled = new URLSearchParams(window.location.search).has('debug');
   const CLOUD_PAGE_SIZE = 500;
 
+  let dbNamespaceKey = D.dbKey(localStorage);
   let db = loadDb();
   let current = null;
   let ratings = {};
@@ -29,6 +30,12 @@
   let recognizer = null;
   let supabaseClient = null;
   let learner = null;
+  let cloudSubscription = null;
+  const cloudFence = C.createSessionFence(() => ({
+    client: supabaseClient, ownerId: learner?.id || null,
+    namespace: D.dbKey(localStorage),
+    ownerNamespace: learner ? `${D.DB_BASE_KEY}:u:${learner.id}` : D.DB_BASE_KEY
+  }));
   let activeDeck = null;
   let cloudKnown = C.emptyKnownIds();
   let syncChain = Promise.resolve();
@@ -64,8 +71,9 @@
   }
 
   function loadDb() {
+    dbNamespaceKey = D.dbKey(localStorage);
     try {
-      const raw = localStorage.getItem(D.dbKey(localStorage));
+      const raw = localStorage.getItem(dbNamespaceKey);
       if (raw) return D.migrateDb(JSON.parse(raw));
     } catch (_error) {
       // A malformed local snapshot must not stop the learner from studying.
@@ -74,8 +82,9 @@
   }
 
   function save() {
+    if (D.dbKey(localStorage) !== dbNamespaceKey) return;
     try {
-      localStorage.setItem(D.dbKey(localStorage), JSON.stringify(db));
+      localStorage.setItem(dbNamespaceKey, JSON.stringify(db));
     } catch (_error) {
       toast('Không thể lưu trên thiết bị này. Hãy đăng nhập để đồng bộ.');
     }
@@ -892,44 +901,49 @@
     }, null, 2);
   }
 
-  async function ensureDeck() {
-    if (!supabaseClient || !learner) return null;
+  async function ensureDeck(scope = cloudFence.capture()) {
+    cloudFence.assertCurrent(scope);
+    if (!scope.client || !scope.ownerId) return null;
     if (activeDeck) return activeDeck;
-    const { data: existing, error: existingError } = await supabaseClient
+    const { data: existing, error: existingError } = await scope.client
       .from('decks')
       .select('id,title,description,goal,created_at')
       .order('created_at', { ascending: true })
       .limit(1);
+    cloudFence.assertCurrent(scope);
     if (existingError) throw new Error(existingError.message);
     if (existing?.[0]) {
       activeDeck = existing[0];
       return activeDeck;
     }
-    const { data: created, error: createError } = await supabaseClient
+    const { data: created, error: createError } = await scope.client
       .from('decks')
       .insert({
-        owner_id: learner.id,
+        owner_id: scope.ownerId,
         title: 'Everyday English',
         description: 'Flashcard practice for ordinary English communication.',
         goal: 'Listen, speak, read and write useful English in everyday situations.'
       })
       .select('id,title,description,goal,created_at')
       .single();
+    cloudFence.assertCurrent(scope);
     if (createError) throw new Error(createError.message);
     activeDeck = created;
     return activeDeck;
   }
 
-  function withOwner(rows) {
-    return rows.map((row) => ({ ...row, owner_id: learner.id }));
+  function withOwner(rows, ownerId) {
+    return rows.map((row) => ({ ...row, owner_id: ownerId }));
   }
 
-  async function fetchAllDeckRows(table, deckId, orderColumn) {
+  async function fetchAllDeckRows(table, deckId, orderColumn, scope) {
     const rows = [];
     let cursor = null;
     for (;;) {
-      const result = await supabaseClient.from(table).select('*')
+      cloudFence.assertCurrent(scope);
+      const result = await scope.client.from(table).select('*')
         .eq('deck_id', deckId).pageAfter(cursor, CLOUD_PAGE_SIZE);
+      cloudFence.assertCurrent(scope);
       if (result.error) throw new Error(result.error.message);
       const page = result.data || [];
       rows.push(...page);
@@ -940,41 +954,46 @@
     return rows;
   }
 
-  async function persistIncrementalDb() {
-    if (!supabaseClient || !learner) return;
-    const deck = await ensureDeck();
+  async function persistIncrementalDb(scope = cloudFence.capture()) {
+    cloudFence.assertCurrent(scope);
+    if (!scope.client || !scope.ownerId) return;
+    const snapshot = D.clone(db);
+    const deck = await ensureDeck(scope);
+    cloudFence.assertCurrent(scope);
     const pending = {
-      units: C.unknownById(db.items || [], cloudKnown.units),
-      cards: C.unknownById(db.bespokeCards || [], cloudKnown.cards),
-      captures: C.dirtyCaptures(db.captures || [], cloudKnown),
-      events: C.unknownById(db.events || [], cloudKnown.events)
+      units: C.unknownById(snapshot.items || [], cloudKnown.units),
+      cards: C.unknownById(snapshot.bespokeCards || [], cloudKnown.cards),
+      captures: C.dirtyCaptures(snapshot.captures || [], cloudKnown),
+      events: C.unknownById(snapshot.events || [], cloudKnown.events)
     };
 
     const writes = [];
-    if (pending.units.length) writes.push(supabaseClient.from('units').upsert(withOwner(pending.units.map((item) => C.unitRow(item, deck.id))), { onConflict: 'owner_id,id' }));
-    if (pending.cards.length) writes.push(supabaseClient.from('cards').upsert(withOwner(pending.cards.map((card) => C.cardRow(card, deck.id))), { onConflict: 'owner_id,id' }));
-    if (pending.captures.length) writes.push(supabaseClient.from('source_captures').upsert(withOwner(pending.captures.map((capture) => C.captureRow(capture, deck.id))), { onConflict: 'owner_id,id' }));
-    if (pending.events.length) writes.push(supabaseClient.from('review_events').upsert(withOwner(pending.events.map((event) => C.reviewRow(event, deck.id))), { onConflict: 'owner_id,id', ignoreDuplicates: true }));
+    if (pending.units.length) writes.push(scope.client.from('units').upsert(withOwner(pending.units.map((item) => C.unitRow(item, deck.id)), scope.ownerId), { onConflict: 'owner_id,id' }));
+    if (pending.cards.length) writes.push(scope.client.from('cards').upsert(withOwner(pending.cards.map((card) => C.cardRow(card, deck.id)), scope.ownerId), { onConflict: 'owner_id,id' }));
+    if (pending.captures.length) writes.push(scope.client.from('source_captures').upsert(withOwner(pending.captures.map((capture) => C.captureRow(capture, deck.id)), scope.ownerId), { onConflict: 'owner_id,id' }));
+    if (pending.events.length) writes.push(scope.client.from('review_events').upsert(withOwner(pending.events.map((event) => C.reviewRow(event, deck.id)), scope.ownerId), { onConflict: 'owner_id,id', ignoreDuplicates: true }));
 
     const results = await Promise.all(writes);
     const failed = results.find((result) => result.error);
     if (failed?.error) throw new Error(failed.error.message);
 
-    const { error: progressError } = await supabaseClient.from('learning_progress').upsert({
-      owner_id: learner.id,
+    cloudFence.assertCurrent(scope);
+    const { error: progressError } = await scope.client.from('learning_progress').upsert({
+      owner_id: scope.ownerId,
       deck_id: deck.id,
       payload: {
-        version: db.version,
-        bespokeProgress: db.bespokeProgress,
-        fsrsProgress: db.fsrsProgress,
-        transferAttempts: db.transferAttempts || [],
-        encounters: db.encounters || [],
-        comprehensionChecks: db.comprehensionChecks || [],
-        scheduler: db.scheduler,
-        schedulerSource: db.schedulerSource
+        version: snapshot.version,
+        bespokeProgress: snapshot.bespokeProgress,
+        fsrsProgress: snapshot.fsrsProgress,
+        transferAttempts: snapshot.transferAttempts || [],
+        encounters: snapshot.encounters || [],
+        comprehensionChecks: snapshot.comprehensionChecks || [],
+        scheduler: snapshot.scheduler,
+        schedulerSource: snapshot.schedulerSource
       },
       updated_at: new Date().toISOString()
     }, { onConflict: 'owner_id' });
+    cloudFence.assertCurrent(scope);
     if (progressError) throw new Error(progressError.message);
 
     C.rememberIds(cloudKnown, 'units', pending.units);
@@ -986,11 +1005,13 @@
 
   function requestCloudSync(_reason) {
     if (!supabaseClient || !learner || isHydrating) return Promise.resolve();
+    const scope = cloudFence.capture();
     setCloudStatus('Đang lưu…', 'saving');
     syncChain = syncChain
       .catch(() => undefined)
-      .then(persistIncrementalDb)
+      .then(() => persistIncrementalDb(scope))
       .catch((error) => {
+        if (!cloudFence.isCurrent(scope)) return;
         setCloudStatus('Chưa đồng bộ', 'error');
         toast(`Không đồng bộ được: ${error.message}`);
       });
@@ -999,17 +1020,20 @@
 
   async function hydrateCloud() {
     if (!supabaseClient || !learner || isHydrating) return;
+    const scope = cloudFence.capture();
     isHydrating = true;
     setCloudStatus('Đang tải bộ nhớ…', 'saving');
     try {
-      const deck = await ensureDeck();
+      const deck = await ensureDeck(scope);
+      cloudFence.assertCurrent(scope);
       const [unitRows, cardRows, captureRows, eventRows, progress] = await Promise.all([
-        fetchAllDeckRows('units', deck.id, 'created_at'),
-        fetchAllDeckRows('cards', deck.id, 'created_at'),
-        fetchAllDeckRows('source_captures', deck.id, 'created_at'),
-        fetchAllDeckRows('review_events', deck.id, 'answered_at'),
-        supabaseClient.from('learning_progress').select('*').eq('owner_id', learner.id).maybeSingle()
+        fetchAllDeckRows('units', deck.id, 'created_at', scope),
+        fetchAllDeckRows('cards', deck.id, 'created_at', scope),
+        fetchAllDeckRows('source_captures', deck.id, 'created_at', scope),
+        fetchAllDeckRows('review_events', deck.id, 'answered_at', scope),
+        scope.client.from('learning_progress').select('*').eq('owner_id', scope.ownerId).maybeSingle()
       ]);
+      cloudFence.assertCurrent(scope);
       if (progress.error) throw new Error(progress.error.message);
 
       const remote = { units: unitRows, cards: cardRows, captures: captureRows, events: eventRows };
@@ -1020,16 +1044,18 @@
       if ((db.events || []).length) A.rebuildProgressFromEvents(db);
       save();
 
-      await persistIncrementalDb();
+      await persistIncrementalDb(scope);
+      cloudFence.assertCurrent(scope);
       current = null;
       renderMemory();
       nextCard();
       setCloudStatus('Đã lưu vào tài khoản', 'ready');
     } catch (error) {
+      if (!cloudFence.isCurrent(scope)) return;
       setCloudStatus('Chưa đồng bộ', 'error');
       toast(`Không tải được dữ liệu tài khoản: ${error.message}`);
     } finally {
-      isHydrating = false;
+      if (cloudFence.isCurrent(scope)) isHydrating = false;
     }
   }
 
@@ -1058,47 +1084,52 @@
   }
 
   async function connectCloud(detail) {
+    cloudSubscription?.unsubscribe();
+    cloudFence.invalidate();
     supabaseClient = detail?.client || null;
+    learner = null;
+    activeDeck = null;
+    isHydrating = false;
+    cloudKnown = C.emptyKnownIds();
     renderAuth();
-    if (!supabaseClient) {
-      if (detail?.error) setCloudStatus('Chỉ lưu trên thiết bị', 'local');
-      return;
-    }
+    if (!supabaseClient) return;
+    // Subscribe before the first await: sign-out during hydration must cancel
+    // in-flight work immediately, not after the remote request has finished.
+    cloudSubscription = supabaseClient.auth.onAuthStateChange((event, session) => {
+      if (event === 'INITIAL_SESSION') return;
+      const nextUid = session?.user?.id || null;
+      if (nextUid !== (learner?.id || null)) {
+        cloudFence.invalidate();
+        learner = null;
+        activeDeck = null;
+        isHydrating = false;
+        cloudKnown = C.emptyKnownIds();
+        window.setTimeout(() => {
+          if (nextUid) D.claimDbNamespace(localStorage, nextUid);
+          else D.releaseDbNamespace(localStorage);
+          window.location.reload();
+        }, 0);
+        return;
+      }
+      learner = session?.user || null;
+      const scope = cloudFence.capture();
+      window.setTimeout(() => {
+        if (!cloudFence.isCurrent(scope)) return;
+        renderAuth();
+        if (learner) hydrateCloud();
+      }, 0);
+    }).data?.subscription;
+    const scope = cloudFence.capture();
     const { data, error } = await supabaseClient.auth.getSession();
+    if (!cloudFence.isConnectionCurrent(scope)) return;
     if (error) toast(`Không đọc được phiên đăng nhập: ${error.message}`);
     learner = data?.session?.user || null;
     renderAuth();
     if (learner) {
-      // Move local reads/writes into this account's namespace before merging —
-      // the shared guest pool must not stay the write target once a session
-      // exists, or its leftovers would upload under this owner.
-      const keyBefore = D.dbKey(localStorage);
       D.claimDbNamespace(localStorage, learner.id);
-      if (D.dbKey(localStorage) !== keyBefore) db = loadDb();
+      db = loadDb();
       await hydrateCloud();
     }
-    supabaseClient.auth.onAuthStateChange((event, session) => {
-      // INITIAL_SESSION replays the session getSession() just returned — hydrating
-      // again would double every Firestore read on each page load.
-      if (event === 'INITIAL_SESSION') return;
-      window.setTimeout(() => {
-        const nextUid = session?.user?.id || null;
-        if (nextUid !== (learner?.id || null)) {
-          // Identity changed (sign-out or a different account): re-point the
-          // namespace and reload so both modules re-init under the right key
-          // instead of writing the previous owner's in-memory db onward.
-          if (nextUid) D.claimDbNamespace(localStorage, nextUid);
-          else D.releaseDbNamespace(localStorage);
-          window.location.reload();
-          return;
-        }
-        learner = session?.user || null;
-        activeDeck = null;
-        cloudKnown = C.emptyKnownIds();
-        renderAuth();
-        if (learner) hydrateCloud();
-      }, 0);
-    });
   }
 
   async function resetLearning() {

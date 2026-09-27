@@ -404,3 +404,32 @@ console.log('FlashDay learning entry: guided/personal/transfer regressions passe
   assert.deepEqual(L.matchUnitsInText(items,'I went to the bank.'),[]);
   assert.deepEqual(L.matchUnitsInText([items[0]],'I went to the bank.').map(item=>item.unitId),['bank-money']);
 }
+
+// Delayed transfer requires valid, chronologically earliest review evidence.
+{
+  const start=1_700_000_000_000;
+  const due=start+L.UNIT_TRANSFER_DELAY_MS;
+  const item={id:'trace-unit',target:'hello',meaning:'xin chào'};
+  const event={id:'source',mode:'write',unitIds:[item.id],ratings:{[item.id]:3},answeredAt:start};
+  const db={items:[item],events:[],transferAttempts:[]};
+  assert.throws(()=>L.submitUnitTransferAttempt(db,{unitId:item.id,responseText:'Hello from Hanoi.'},due),/Chưa có lượt/);
+  for(const grade of [undefined,NaN,0,1,5,Infinity]){
+    db.events=[{...event,ratings:{[item.id]:grade}}];
+    assert.equal(L.dueUnitTransfer(db,due),null);
+  }
+  db.events=[{...event,answeredAt:null}];
+  assert.equal(L.dueUnitTransfer(db,due),null);
+  db.events=[{...event,id:'later',answeredAt:start+1000},event];
+  assert.equal(L.dueUnitTransfer(db,due).sourceEventId,'source');
+  assert.throws(()=>L.submitUnitTransferAttempt(db,{unitId:item.id,responseText:'Hello from Hanoi.',submittedAt:due},start),/24 giờ/);
+  assert.throws(()=>L.submitUnitTransferAttempt(db,{unitId:item.id,responseText:'Hello from Hanoi.',sourceEventId:'invented'},due),/không khớp/);
+  const first=L.submitUnitTransferAttempt(db,{id:'first',unitId:item.id,responseText:'Hello from Hanoi.',submittedAt:0},due);
+  assert.equal(first.submittedAt,due);
+  assert.equal(first.sourceEventId,'source');
+  assert.equal(first.evidenceBasis,'legacy-review');
+  assert.equal(L.dueUnitTransfer(db,due).previousAttempt.id,'first');
+  assert.throws(()=>L.submitUnitTransferAttempt(db,{id:'first',unitId:item.id,responseText:'Hello from Hue.'},due),/đã được lưu/);
+  L.submitUnitTransferAttempt(db,{id:'second',unitId:item.id,responseText:'Hello from Hue.',selfReviewed:true},due+1000);
+  assert.equal(db.transferAttempts.length,2);
+  assert.equal(L.dueUnitTransfer(db,due+1000),null);
+}

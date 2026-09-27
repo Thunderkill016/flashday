@@ -11,6 +11,28 @@
   const HYBRID_SCHEDULER = 'bespoke-language-policy+fsrs6';
   const HYBRID_SOURCE = 'open-spaced-repetition/ts-fsrs@v5.4.2 + google/bespoke@67b1eda5b28f7a69be20561014255cdc81110a3e';
 
+  // Async work belongs to the client, account and storage namespace that
+  // started it. Switching away and back still invalidates the old generation.
+  function createSessionFence(readIdentity) {
+    let generation=0;
+    function capture(){return {...readIdentity(),generation};}
+    function isConnectionCurrent(scope){
+      return scope.generation===generation&&scope.client===readIdentity().client;
+    }
+    function isCurrent(scope){
+      const current=readIdentity();
+      return isConnectionCurrent(scope)
+        &&scope.ownerId===current.ownerId&&scope.namespace===current.namespace
+        &&(!scope.ownerId||scope.namespace===scope.ownerNamespace);
+    }
+    function assertCurrent(scope){
+      if(isCurrent(scope))return;
+      const error=new Error('Phiên tài khoản đã thay đổi. Tác vụ cũ đã dừng.');
+      error.code='SESSION_CHANGED';throw error;
+    }
+    return {capture,isCurrent,isConnectionCurrent,assertCurrent,invalidate(){generation++;}};
+  }
+
   function clone(value) {
     return value == null ? value : JSON.parse(JSON.stringify(value));
   }
@@ -298,6 +320,7 @@
   }
 
   return {
+    createSessionFence,
     unitRow,
     itemFromRow,
     cardRow,

@@ -30,6 +30,29 @@ data. Splitting long histories into individual documents remains future capacity
 work. Existing owner update/delete policy for review events is unchanged; the app's
 append-only convention is not a server-enforced immutable ledger.
 
+### Audit follow-up — session isolation and delayed transfer
+
+Two reproduced failures were corrected after the checkpoint above:
+
+- Cloud listeners previously attached after hydration, leaving a window for an
+  old account response to affect the next account. Listeners now attach before
+  awaiting hydration; queued work pins its account, client and namespace, and
+  stale results are discarded. The Firebase adapter also rejects owner changes.
+  A browser regression delays both database/profile responses, switches accounts,
+  and verifies no stale upload or overwrite. Its transport is synthetic; actual
+  production OAuth switching remains unverified.
+- Delayed Unit transfer accepted missing review grades and caller-supplied source
+  IDs, and hid the task after an attempt that had not been self-reviewed. It now
+  requires a valid earliest unaided Write review, an elapsed 24-hour delay and the
+  actual source event. Submission time comes from the application clock. Saved
+  unreviewed responses remain resumable; reviewed retries preserve both records.
+  This is client-side practice evidence, not tamper-proof or proficiency evidence.
+
+Regression coverage includes invalid grades/timestamps, forged source IDs,
+chronologically unordered reviews, duplicate attempts, resume/review behavior,
+and exclusion of unrelated personal-unit attempts from guided-lesson evidence.
+The browser suite checks the resumed flow at 390px as well as account isolation.
+
 FlashDay helps Vietnamese-speaking learners retain and retrieve English that
 they can use. Its purpose is not to make a learner finish a card queue; it is
 to help them understand, say, read and write useful English in ordinary
@@ -40,7 +63,7 @@ valuable, but they are not a complete conversation partner, listening course,
 or writing course. A learner cannot prove conversational ability merely by
 recognising a translation or giving themself a green rating.
 
-The target must be written as an observable *can-do* for a chosen level and
+The target must be written as an observable _can-do_ for a chosen level and
 situation, for example:
 
 > In an everyday conversation, understand a simple plan, ask for clarification
@@ -98,13 +121,13 @@ position is a **communicative retrieval system**: structured memory practice,
 immediate usable feedback, and repeated small tasks that require the learner to
 produce language for a purpose.
 
-| Convergence across sources | FlashDay decision | Important limit |
-| --- | --- | --- |
-| Vocabulary apps disproportionately teach receptive breadth; productive retrieval and social/affective strategies are less common. | Keep separate listen, speak, read and write attempts and add short interaction missions. | A review of technology-assisted tools finds heterogeneous methods and warns against generalising effect claims. [Zhou et al. (2024)](https://doi.org/10.1007/s10639-023-12423-y); [Simonnet, Loiseau & Lavoué (2025)](https://onlinelibrary.wiley.com/doi/10.1111/jcal.13096) |
-| Oral corrective feedback has significant, durable effects in classroom studies; prompts that make learners construct or repair an answer outperformed recasts. | After an answer, give a concise model and one repair/retry opportunity; do not only reveal the back of a card. | This supports feedback on a target feature, not an automatic pronunciation or fluency verdict. [Lyster & Saito (2010)](https://www.cambridge.org/core/journals/studies-in-second-language-acquisition/article/oral-feedback-in-classroom-sla/4999EE1C8379B2BF026B148EAF373CA1) |
-| Repeating a meaningful oral task can improve oral performance, but accuracy and complexity vary by task and learner. | Repeat a short situation with one changed detail, then record transfer separately from same-task success. | A repeated task is practice evidence, not proof of general conversation ability. [Abdi Tabari, Zhuang & Farahanynia (2025)](https://doi.org/10.1016/j.system.2025.103868) |
+| Convergence across sources                                                                                                                                                                                                           | FlashDay decision                                                                                                                   | Important limit                                                                                                                                                                                                                                                                                                                     |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Vocabulary apps disproportionately teach receptive breadth; productive retrieval and social/affective strategies are less common.                                                                                                    | Keep separate listen, speak, read and write attempts and add short interaction missions.                                            | A review of technology-assisted tools finds heterogeneous methods and warns against generalising effect claims. [Zhou et al. (2024)](https://doi.org/10.1007/s10639-023-12423-y); [Simonnet, Loiseau & Lavoué (2025)](https://onlinelibrary.wiley.com/doi/10.1111/jcal.13096)                                                       |
+| Oral corrective feedback has significant, durable effects in classroom studies; prompts that make learners construct or repair an answer outperformed recasts.                                                                       | After an answer, give a concise model and one repair/retry opportunity; do not only reveal the back of a card.                      | This supports feedback on a target feature, not an automatic pronunciation or fluency verdict. [Lyster & Saito (2010)](https://www.cambridge.org/core/journals/studies-in-second-language-acquisition/article/oral-feedback-in-classroom-sla/4999EE1C8379B2BF026B148EAF373CA1)                                                      |
+| Repeating a meaningful oral task can improve oral performance, but accuracy and complexity vary by task and learner.                                                                                                                 | Repeat a short situation with one changed detail, then record transfer separately from same-task success.                           | A repeated task is practice evidence, not proof of general conversation ability. [Abdi Tabari, Zhuang & Farahanynia (2025)](https://doi.org/10.1016/j.system.2025.103868)                                                                                                                                                           |
 | Learning direction interacts with proficiency in a small EFL study: lower-proficiency learners benefited more from English-to-meaning retrieval, while higher-proficiency learners benefited more from meaning-to-English retrieval. | Make cue direction configurable by level and test it in the Vietnamese pilot; do not use one permanent card direction for everyone. | This is a small Japanese EFL study, so it is a product hypothesis, not a universal rule. [Terai, Yamashita & Pasich (2021)](https://www.cambridge.org/core/journals/studies-in-second-language-acquisition/article/effects-of-learning-direction-in-retrieval-practice-on-efl-vocabulary-learning/159EE50F4B8835207764FB1B11077F29) |
-| Audio, captions and audiovisual context can help, but outcomes depend on learner, caption type, frequency and task; the review reports mixed comparisons. | Treat verified audio/text context as an optional quality upgrade for a Unit, never as a prerequisite for all cards. | Media alone does not replace retrieval or interaction practice. [Wei & Fan (2022)](https://pmc.ncbi.nlm.nih.gov/articles/PMC9136233/) |
+| Audio, captions and audiovisual context can help, but outcomes depend on learner, caption type, frequency and task; the review reports mixed comparisons.                                                                            | Treat verified audio/text context as an optional quality upgrade for a Unit, never as a prerequisite for all cards.                 | Media alone does not replace retrieval or interaction practice. [Wei & Fan (2022)](https://pmc.ncbi.nlm.nih.gov/articles/PMC9136233/)                                                                                                                                                                                               |
 
 This conclusion changes the product in one practical way: a FlashDay review
 must ask the learner to **do** something appropriate to the mode, receive clear
@@ -119,14 +142,14 @@ a chunk, a request, a repair phrase, or a sentence pattern.
 
 Every reviewed Unit needs:
 
-| Field | Why it exists |
-| --- | --- |
-| Target and true forms | The specific English form to retrieve. A form is an actual surface-form variant, not a different expression with a similar meaning. |
-| Meaning and communicative intent | Vietnamese support for early learning plus an explicit intent such as *ask someone to repeat* or *say that you are late*. |
-| A believable context | Prevents a learner from memorising a translation without knowing when the phrase fits. |
-| Example exchange or sentence | Shows the Unit with neighbouring language, register and response expectation. |
-| Skill assets | Verified audio for listening/speaking cards; readable text for reading/writing cards. A missing asset disables that skill card rather than silently substituting a product claim. |
-| Origin and review state | Curated, learner-created or permitted-source origin; separate history for listen, speak, read and write. |
+| Field                            | Why it exists                                                                                                                                                                     |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Target and true forms            | The specific English form to retrieve. A form is an actual surface-form variant, not a different expression with a similar meaning.                                               |
+| Meaning and communicative intent | Vietnamese support for early learning plus an explicit intent such as _ask someone to repeat_ or _say that you are late_.                                                         |
+| A believable context             | Prevents a learner from memorising a translation without knowing when the phrase fits.                                                                                            |
+| Example exchange or sentence     | Shows the Unit with neighbouring language, register and response expectation.                                                                                                     |
+| Skill assets                     | Verified audio for listening/speaking cards; readable text for reading/writing cards. A missing asset disables that skill card rather than silently substituting a product claim. |
+| Origin and review state          | Curated, learner-created or permitted-source origin; separate history for listen, speak, read and write.                                                                          |
 
 Accepted answers remain a response/validation aid, never a shortcut for Unit
 identity. For an open production prompt, a learner may produce several natural
@@ -141,12 +164,12 @@ The existing Bespoke modes (listen, speak, read, write) are the right minimum
 state boundary. They schedule **separate attempts**, because recognising a
 sentence does not establish that a learner can say or write it.
 
-| Mode | Front: what the learner gets | Required response | Back / feedback | Count as evidence only when |
-| --- | --- | --- | --- | --- |
-| Listen | A verified English audio clip, without text first | Choose or state the intended meaning; replay after committing | Transcript, meaning, context, audio replay | There was real audio and an observable answer. Browser TTS is practice fallback, not original-listening evidence. |
-| Speak | Vietnamese intention, image or situation | Say the target aloud before revealing | Model audio, target, context and optional learner recording | The learner records or explicitly self-rates a spoken attempt. Recording is evidence of an attempt, not an automatic pronunciation/proficiency score. |
-| Read | English message/sentence | Identify the intent, missing information or best next response | Meaning, context, explanation of the relevant chunk | The learner answers before reveal. Mere reading is exposure, not recall. |
-| Write | Situation or Vietnamese intent | Type a short target response before revealing | Model answer, highlighted target, permitted variants where known | The response is preserved and checked at the appropriate level: exact for constrained form practice, otherwise transparent self/teacher review. |
+| Mode   | Front: what the learner gets                      | Required response                                              | Back / feedback                                                  | Count as evidence only when                                                                                                                           |
+| ------ | ------------------------------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Listen | A verified English audio clip, without text first | Choose or state the intended meaning; replay after committing  | Transcript, meaning, context, audio replay                       | There was real audio and an observable answer. Browser TTS is practice fallback, not original-listening evidence.                                     |
+| Speak  | Vietnamese intention, image or situation          | Say the target aloud before revealing                          | Model audio, target, context and optional learner recording      | The learner records or explicitly self-rates a spoken attempt. Recording is evidence of an attempt, not an automatic pronunciation/proficiency score. |
+| Read   | English message/sentence                          | Identify the intent, missing information or best next response | Meaning, context, explanation of the relevant chunk              | The learner answers before reveal. Mere reading is exposure, not recall.                                                                              |
+| Write  | Situation or Vietnamese intent                    | Type a short target response before revealing                  | Model answer, highlighted target, permitted variants where known | The response is preserved and checked at the appropriate level: exact for constrained form practice, otherwise transparent self/teacher review.       |
 
 One Unit should have the smallest set of cards needed to cover its desired
 can-do, not four cosmetic copies. A learner who needs to understand and answer
@@ -167,7 +190,7 @@ Learner: listen/read the new plan -> ask for clarification -> state availability
 
 FlashDay can present this as a one-turn recorded reply, a typed reply, a paired
 practice prompt, or a real-world task such as sending a message. A result can
-be saved as *attempted*, *self-reviewed* or *reviewed by a person*; it must not
+be saved as _attempted_, _self-reviewed_ or _reviewed by a person_; it must not
 be auto-labelled can communicate until the evidence method supports that
 claim. This is how cards feed communication rather than replace it.
 
@@ -220,12 +243,12 @@ the intended use, rather than rewarding isolated recognition.
 
 FlashDay needs four separate records. None can stand in for the next one.
 
-| Record | What it supports | What it does **not** support |
-| --- | --- | --- |
-| Review event | Learner saw/revealed/rated a card at a time | Retention, pronunciation, or communication ability |
-| Delayed mode check | Later recall for one Unit in listen/speak/read/write | Use in a new situation or conversation |
-| Transfer mission | Reuse of several Units after a changed prompt | Broad fluency or ability with a person |
-| Human/partner-reviewed interaction | Evidence from a sampled real exchange | A permanent global proficiency label |
+| Record                             | What it supports                                     | What it does **not** support                       |
+| ---------------------------------- | ---------------------------------------------------- | -------------------------------------------------- |
+| Review event                       | Learner saw/revealed/rated a card at a time          | Retention, pronunciation, or communication ability |
+| Delayed mode check                 | Later recall for one Unit in listen/speak/read/write | Use in a new situation or conversation             |
+| Transfer mission                   | Reuse of several Units after a changed prompt        | Broad fluency or ability with a person             |
+| Human/partner-reviewed interaction | Evidence from a sampled real exchange                | A permanent global proficiency label               |
 
 Pilot evaluation should compare a learner's baseline and later performance on
 predefined can-dos, use delayed checks rather than only same-session scores,

@@ -9,6 +9,7 @@
   const WLK=window.FlashDayLookup;
   const CAT=window.FlashDayCatalog;
   const SC=window.FlashDaySourceCapture;
+  const C=window.FlashDayCloud;
   const KEY='flashday-memory-engine-repo-driven';
   const PROFILE_TABLE='learner_profiles';
   const $=(id)=>document.getElementById(id);
@@ -25,6 +26,12 @@
 
   let supabaseClient=null;
   let learner=null;
+  let profileSubscription=null;
+  const profileFence=C.createSessionFence(()=>({
+    client:supabaseClient,ownerId:learner?.id||null,
+    namespace:D.dbKey(localStorage),
+    ownerNamespace:learner?`${D.DB_BASE_KEY}:u:${learner.id}`:D.DB_BASE_KEY
+  }));
   let profileSyncTimer=null;
 
   function esc(value){
@@ -100,7 +107,8 @@
     if(checks.length)evidence.push(`kiểm hiểu tốt nhất ${bestOf(checks)}/${checks[0].total}`);
     if(scenarioChecks.length)evidence.push(`tình huống tốt nhất ${bestOf(scenarioChecks)}/${scenarioChecks[0].total}`);
     if(missionTries)evidence.push(`vận dụng ${missionTries} lần — tự đối chiếu`);
-    const unitTries=(db.transferAttempts||[]).filter(a=>a&&a.kind==='unit').length;
+    const clusterUnitIds=new Set(state.unitIds);
+    const unitTries=(db.transferAttempts||[]).filter(a=>a&&a.kind==='unit'&&clusterUnitIds.has(String(a.unitId))).length;
     if(unitTries)evidence.push(`unit transfer ${unitTries} lần`);
     return {lesson,lessonImported,lessonChecked,state,missionTries,evidence};
   }
@@ -238,8 +246,9 @@
       <div class="transfer-heading"><div><span class="eyebrow">TRANSFER · NGÀY HÔM SAU</span><h4>${esc(due.item.target||due.unitId)}</h4><p>${esc(due.item.intent||due.item.canDo||due.item.meaning||'')}</p></div><span class="transfer-status">Đến hạn</span></div>
       <p class="mission-setup">Gợi ý tình huống: ${esc(due.item.contexts?.[0]||due.item.meaning||'dùng cụm này trong một câu của riêng bạn.')}</p>
       <p class="mission-instructions">Viết MỘT câu tiếng Anh mới dùng “${esc(due.item.target||'')}” — đổi ít nhất một chi tiết (người, giờ, nơi, món); câu giống nguyên mẫu sẽ bị từ chối.</p>
-      <label class="field transfer-field" for="unitTransferResponse">Câu của bạn<textarea id="unitTransferResponse" maxlength="1600" placeholder="Write one new sentence in English…"></textarea></label>
-      <button class="module-action transfer-reveal" type="button" data-unit-reveal disabled>Xem câu mẫu sau khi đã thử</button>
+      ${due.previousAttempt?'<p class="field-note">Lần trước đã lưu, chưa tự đối chiếu. Bạn có thể sửa câu và tiếp tục đối chiếu bên dưới.</p>':''}
+      <label class="field transfer-field" for="unitTransferResponse">Câu của bạn<textarea id="unitTransferResponse" maxlength="1600" placeholder="Write one new sentence in English…">${esc(due.previousAttempt?.responseText||'')}</textarea></label>
+      <button class="module-action transfer-reveal" type="button" data-unit-reveal ${due.previousAttempt?'':'disabled'}>Xem câu mẫu sau khi đã thử</button>
       <div class="transfer-model hidden" id="unitTransferModel"><strong>Mẫu từ câu đã học — chỉ để đối chiếu</strong><p class="model-caveat">Tự đối chiếu theo checklist — đây là bài luyện, chưa phải đánh giá đạt.</p>${due.item.exampleSentence?`<p>${esc(due.item.exampleSentence)}</p>`:''}${due.item.exampleTranslation?`<p><em>${esc(due.item.exampleTranslation)}</em></p>`:''}<ul><li>Câu mới có dùng đúng cụm không?</li><li>Ngữ cảnh có khác câu gốc không?</li></ul><label class="transfer-check"><input type="checkbox" data-unit-self-review> Tôi đã so sánh câu của mình với mẫu</label><button class="primary-btn transfer-save" type="button" data-unit-save>Lưu — đã tự đối chiếu</button></div>
     </article>`:'';
     root.innerHTML=unitHtml+L.TRANSFER_MISSIONS.map(mission=>{
@@ -990,7 +999,10 @@
 
   async function pullProfile(){
     if(!supabaseClient||!learner)return;
-    const {data,error}=await supabaseClient.from(PROFILE_TABLE).select('payload,updated_at').eq('owner_id',learner.id).maybeSingle();
+    const scope=profileFence.capture();
+    if(!profileFence.isCurrent(scope))return;
+    const {data,error}=await scope.client.from(PROFILE_TABLE).select('payload,updated_at').eq('owner_id',scope.ownerId).maybeSingle();
+    if(!profileFence.isCurrent(scope))return;
     if(error)throw error;
     const local=L.normalizeProfile(store.refresh().learningProfile||{});
     const remote=L.normalizeProfile(data?.payload||{});
@@ -1005,27 +1017,49 @@
 
   async function pushProfile(){
     if(!supabaseClient||!learner)return;
+    const scope=profileFence.capture();
+    if(!profileFence.isCurrent(scope))return;
     const profile=L.normalizeProfile(store.refresh().learningProfile||{});
     if(!profile.updatedAt)return;
-    const {error}=await supabaseClient.from(PROFILE_TABLE).upsert({owner_id:learner.id,payload:profile,updated_at:new Date(profile.updatedAt).toISOString()},{onConflict:'owner_id'});
+    const {error}=await scope.client.from(PROFILE_TABLE).upsert({owner_id:scope.ownerId,payload:profile,updated_at:new Date(profile.updatedAt).toISOString()},{onConflict:'owner_id'});
+    if(!profileFence.isCurrent(scope))return;
     if(error)throw error;
   }
 
   async function connectProfileCloud(detail){
-    supabaseClient=detail?.client||null;if(!supabaseClient)return;
-    const {data}=await supabaseClient.auth.getSession();
-    learner=data?.session?.user||null;
+    profileSubscription?.unsubscribe();
+    profileFence.invalidate();
     window.clearTimeout(profileSyncTimer);
-    profileSyncTimer=window.setTimeout(()=>pullProfile().catch(()=>undefined),700);
-    supabaseClient.auth.onAuthStateChange((event,session)=>{
-      // INITIAL_SESSION replays the session getSession() already pulled above.
+    learner=null;
+    supabaseClient=detail?.client||null;if(!supabaseClient)return;
+    const schedulePull=()=>{
+      window.clearTimeout(profileSyncTimer);
+      const scope=profileFence.capture();
+      // Let the main runtime finish claiming the account namespace first.
+      const PROFILE_LOAD_DELAY_MS=700;
+      profileSyncTimer=window.setTimeout(()=>{
+        if(!profileFence.isConnectionCurrent(scope)||learner?.id!==scope.ownerId)return;
+        pullProfile().catch(error=>{
+          if(profileFence.isCurrent(scope))showInlineMessage(`Không tải được trình độ: ${error.message}`,true);
+        });
+      },PROFILE_LOAD_DELAY_MS);
+    };
+    profileSubscription=supabaseClient.auth.onAuthStateChange((event,session)=>{
       if(event==='INITIAL_SESSION')return;
-      learner=session?.user||null;
-      if(learner){
-        window.clearTimeout(profileSyncTimer);
-        profileSyncTimer=window.setTimeout(()=>pullProfile().catch(()=>undefined),700);
+      window.clearTimeout(profileSyncTimer);
+      if((session?.user?.id||null)!==(learner?.id||null)){
+        profileFence.invalidate();
+        learner=null; // main runtime owns the namespace change and reload
+        return;
       }
-    });
+      learner=session?.user||null;
+      if(learner)schedulePull();
+    }).data?.subscription;
+    const scope=profileFence.capture();
+    const {data}=await supabaseClient.auth.getSession();
+    if(!profileFence.isConnectionCurrent(scope))return;
+    learner=data?.session?.user||null;
+    if(learner)schedulePull();
   }
 
   renderProfile();
