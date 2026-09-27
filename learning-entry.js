@@ -111,6 +111,112 @@
     }
   ]);
 
+  // ── Clock-time extraction ─────────────────────────────────────────────
+  // A response "confirms the final time" only if a plausible clock time is
+  // stated in a time position — not merely by containing any digit or any
+  // number word ("I have two cats", "My phone is 12345" must not pass).
+  const HOUR_WORDS={one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8,nine:9,ten:10,eleven:11,twelve:12,noon:12,midnight:0};
+  const MIN_WORDS={five:5,ten:10,fifteen:15,twenty:20,thirty:30,forty:40,fifty:50,half:30,quarter:15};
+  const AT_TIME=new Set(['at','to','for','until','till','by','around','about','before','after','past','from']);
+  const TIME_MARK=new Set(["o'clock",'oclock','am','pm','sharp']);
+
+  function normTime(hour,minute){
+    return `${hour}:${String(minute||0).padStart(2,'0')}`;
+  }
+
+  // Parse a standalone time expression the learner typed into the
+  // "giờ cuối cùng" field: bare '7', 'seven', '7:30', 'four thirty',
+  // 'half past four', 'quarter to seven' → canonical 'h:mm'.
+  function parseTimeInput(raw){
+    const str=String(raw||'').trim().toLowerCase();
+    if(!str)return null;
+    // '7:30' / '19.45' / '8h30' — the ':' is real here (raw input, not tokens)
+    let m=str.match(/\b([01]?\d|2[0-3])\s*[:.h]\s*([0-5]\d)\s*(am|pm)?\b/);
+    if(m){let h=+m[1];if(m[3]==='pm'&&h<12)h+=12;if(m[3]==='am'&&h===12)h=0;return normTime(h,+m[2]);}
+    // '7pm' / '11 pm'
+    m=str.match(/\b(1[0-2]|0?[1-9])\s*(am|pm)\b/);
+    if(m){let h=+m[1];if(m[2]==='pm'&&h<12)h+=12;if(m[2]==='am'&&h===12)h=0;return normTime(h,0);}
+    const tokens=canonTokens(str);
+    let hour=null,minute=0,pendingMin=null;
+    for(let i=0;i<tokens.length;i++){
+      const t=tokens[i];
+      if(t==='noon')return normTime(12,0);
+      if(t==='midnight')return normTime(0,0);
+      if(/^\d{1,2}$/.test(t)){
+        const h=+t;
+        if(hour==null&&h<=24){hour=h;continue;}
+        if(hour!=null&&minute===0&&h<60){minute=h;continue;}
+        continue;
+      }
+      if(HOUR_WORDS[t]!=null&&hour==null){hour=HOUR_WORDS[t];continue;}
+      if(MIN_WORDS[t]!=null){
+        if(hour!=null){const add=MIN_WORDS[t];minute=minute>=20&&add<10?minute+add:add;}
+        else pendingMin=MIN_WORDS[t]; // leading 'half/quarter' of 'half past four'
+        continue;
+      }
+    }
+    if(hour==null)return null;
+    if(pendingMin!=null&&minute===0)minute=pendingMin;
+    const toIdx=tokens.indexOf('to');
+    if(toIdx>0&&MIN_WORDS[tokens[toIdx-1]]!=null){
+      const mins=MIN_WORDS[tokens[toIdx-1]];
+      hour=(hour-1+24)%24;minute=60-mins;
+    }
+    return normTime(hour,minute);
+  }
+
+  // Pull every clock-time mention out of free text. canonicalTokens strips
+  // ':' so '8:30' arrives as '8','30' — a 2-digit token right after an hour
+  // is minutes. An hour word only counts in a time position: after
+  // at/to/for/until…, before o'clock/am/pm/sharp, or before a minute
+  // ("seven thirty"). Bare digits 1–24 always count; '12345' can't match.
+  function extractClockTimes(text){
+    const tokens=canonTokens(text||'');
+    const times=[];
+    for(let i=0;i<tokens.length;i++){
+      const t=tokens[i];
+      const dm=t.match(/^(\d{1,2})(am|pm)?$/);
+      if(dm){
+        let h=+dm[1];
+        if(h>24||dm[2]&&h>12)continue;
+        let minute=0,j=i+1;
+        if(/^\d{2}$/.test(tokens[j]||'')&&+tokens[j]<60){minute=+tokens[j];j++;}
+        const mer=dm[2]||tokens[j];
+        if(mer==='pm'&&h<12)h+=12;
+        if(mer==='am'&&h===12)h=0;
+        if(!dm[2]&&(mer==='pm'||mer==='am'))j++; // '7 pm' = two tokens; '7pm' is one
+        i=j-1;
+        times.push(normTime(h,minute));
+        continue;
+      }
+      const hw=HOUR_WORDS[t];
+      if(hw==null)continue;
+      if(t==='noon'){times.push(normTime(12,0));continue;}
+      if(t==='midnight'){times.push(normTime(0,0));continue;}
+      const prev=tokens[i-1]||'',next=tokens[i+1]||'';
+      let minute=null;
+      if(MIN_WORDS[next]!=null)minute=MIN_WORDS[next];
+      else if(/^\d{2}$/.test(next)&&+next<60)minute=+next;
+      if(minute!=null&&[20,30,40,50].includes(minute)&&MIN_WORDS[tokens[i+2]]!=null&&MIN_WORDS[tokens[i+2]]<10)minute+=MIN_WORDS[tokens[i+2]];
+      const positioned=AT_TIME.has(prev)||TIME_MARK.has(next)||minute!=null;
+      if(!positioned)continue;
+      let hour=hw;
+      if(next==='pm'&&hour<12)hour+=12;
+      if(next==='am'&&hour===12)hour=0;
+      if(prev==='to'&&MIN_WORDS[tokens[i-2]]!=null){times.push(normTime((hour-1+24)%24,60-MIN_WORDS[tokens[i-2]]));continue;}
+      if(prev==='past'&&MIN_WORDS[tokens[i-2]]!=null)minute=MIN_WORDS[tokens[i-2]];
+      times.push(normTime(hour,minute==null?0:minute));
+    }
+    return times;
+  }
+
+  // 12-hour-clock agreement between a declared time and the times a text
+  // actually states.
+  function confirmsTime(text,declared){
+    const as12=(t)=>{const[h,m]=String(t).split(':').map(Number);return normTime(h%12||12,m);};
+    return extractClockTimes(text).map(as12).includes(as12(declared));
+  }
+
   // Cold input for the cluster's lesson loop — a NEW invitation exchange the
   // learner hasn't memorized (the worked example ends at seven; the mission
   // also uses seven, so this dialogue deliberately picks different details).
@@ -130,6 +236,13 @@
         ['Oh wait — sorry, something came up. Can we move it to four thirty?','Ối khoan — xin lỗi, tôi có việc đột xuất. Mình dời sang bốn giờ rưỡi được không?'],
         ['No problem. So — see you at four thirty, at the new cafe.','Không sao. Vậy hẹn gặp lúc bốn giờ rưỡi, ở quán mới nhé.'],
         ['See you then. Let me know when you get there.','Hẹn gặp bạn. Nhắn tôi khi bạn tới nhé.']
+      ],
+      // Situation comprehension — separate from the line-by-line quiz: does
+      // the learner know what was agreed, not just what each line means?
+      scenarioQuiz:[
+        {q:'Ban đầu hai người định gặp mấy giờ?',options:['2:00','4:00','4:30','7:00'],answer:0,hint:'“How about two?” là đề xuất đầu tiên — 2:00.'},
+        {q:'Giờ cuối cùng hai người chốt là mấy giờ?',options:['2:00','4:00','4:30','7:00'],answer:2,hint:'“Can we move it to four thirty?” rồi “see you at four thirty” → 4:30.'},
+        {q:'Hai người hẹn gặp ở đâu?',options:['Quán cà phê mới gần chợ','Công viên','Trường học','Nhà Alex'],answer:0,hint:'“that new place near the market” — quán mới gần chợ.'}
       ]
     }
   });
@@ -370,29 +483,25 @@
 
   function cleanMissionValue(value,maxLength){return String(value??'').trim().slice(0,maxLength);}
 
-  // "am"/"pm" are deliberately absent — 'am' collides with the verb "am"
-  // and a bare "pm" carries no time. Digit-bearing tokens (7, 7pm, 18:30)
-  // and time-of-day words are the signal.
-  const TIME_TOKENS=new Set([
-    'one','two','three','four','five','six','seven','eight','nine','ten',
-    'eleven','twelve','noon','midnight',"o'clock",'morning',
-    'afternoon','evening','tonight'
-  ]);
-
-  function mentionsTime(text){
-    const tokens=canonTokens(text||'');
-    return tokens.some(token=>/\d/.test(token)||TIME_TOKENS.has(token));
-  }
-
   function submitTransferAttempt(db,raw={},now=Date.now()){
     if(!db||typeof db!=='object')throw new Error('FlashDay DB is required');
     const attempt=normalizeTransferAttempt(raw,now);
     const mission=missionById(attempt.missionId);
-    // Text attempts must demonstrate the "confirm the final time" can-do;
-    // a spoken-only attempt can't be text-checked and stays self-check
-    // evidence by flag alone.
-    if(mission?.requireFinalTimeConfirm&&attempt.responseText&&!mentionsTime(attempt.responseText)){
-      throw new Error('Câu trả lời cần xác nhận lại giờ cuối cùng — vd: "See you at seven."');
+    // Structured check for the "confirm the final time" can-do: the learner
+    // declares the agreed time in its own field, and a written attempt must
+    // state that same time in a time position — "I have two cats" or
+    // "My phone is 12345" can't pass. A spoken-only attempt can't be
+    // text-checked; the declared time is still required and the attempt
+    // stays self-check evidence by flag.
+    if(mission?.requireFinalTimeConfirm){
+      const declared=parseTimeInput(raw.declaredFinalTime);
+      if(!declared)throw new Error('Điền giờ cuối cùng bạn muốn chốt (vd: 7, 7:30, seven) trước khi lưu.');
+      // Compare on a 12-hour clock: declaring "8 pm" then writing "see you
+      // at eight" states the same agreed time.
+      if(attempt.responseText&&!confirmsTime(attempt.responseText,declared)){
+        throw new Error(`Câu trả lời chưa xác nhận giờ ${declared} đã khai — vd: "See you at seven."`);
+      }
+      attempt.finalTime=declared;
     }
     db.transferAttempts=Array.isArray(db.transferAttempts)?db.transferAttempts:[];
     if(db.transferAttempts.some(item=>String(item?.id)===attempt.id))throw new Error('Lần thử này đã được lưu.');
@@ -512,7 +621,7 @@
     normalizeLevel,normalizeProfile,ensureProfile,setSkillLevel,setOverallLevel,effectiveLevel,
     assessContent,normalizePhrase,identityForms,phraseAppears,matchUnitsInText,normalizeSourceKind,
     moduleById,clusterById,missionById,modulesForCluster,moduleState,clusterState,installGuidedModule,installGuidedCluster,
-    normalizeTransferAttempt,submitTransferAttempt,missionState,mentionsTime,
+    normalizeTransferAttempt,submitTransferAttempt,missionState,extractClockTimes,parseTimeInput,confirmsTime,
     UNIT_TRANSFER_DELAY_MS,dueUnitTransfer,submitUnitTransferAttempt
   };
 });

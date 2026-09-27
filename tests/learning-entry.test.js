@@ -75,7 +75,7 @@ const C=require('../flashday-cloud.js');
   const db=D.createInitialDb([],1000);
   assert.throws(()=>L.submitTransferAttempt(db,{missionId:'a1-meeting-change-transfer'}),/viết câu trả lời|nói thành tiếng/i);
   const attempt=L.submitTransferAttempt(db,{
-    id:'transfer-1',missionId:'a1-meeting-change-transfer',responseText:'No problem. See you at seven.',selfReviewed:true
+    id:'transfer-1',missionId:'a1-meeting-change-transfer',responseText:'No problem. See you at seven.',declaredFinalTime:'seven',selfReviewed:true
   },2000);
   assert.equal(attempt.submittedAt,2000);
   assert.equal(db.transferAttempts.length,1);
@@ -85,37 +85,59 @@ const C=require('../flashday-cloud.js');
   assert.equal(attempt.grading,'self-check');
 }
 
-// Final-time gate: the can-do is "confirm the final time" — a written
-// attempt that never states a time cannot demonstrate it (F5 honesty fix).
+// Final-time gate (structured): the learner declares the agreed time and a
+// written attempt must state THAT time in a time position — a bare digit
+// or number word ("two cats", "12345") can no longer pass. (F5 honesty fix)
 {
   const db=D.createInitialDb([],1000);
+  // Missing declaration
   assert.throws(
-    ()=>L.submitTransferAttempt(db,{missionId:'a1-meeting-change-transfer',responseText:'No problem, that is fine.'}),
+    ()=>L.submitTransferAttempt(db,{missionId:'a1-meeting-change-transfer',responseText:'No problem. See you at seven.'}),
     /giờ cuối cùng/i
   );
+  // Declared time absent from the written response
   assert.throws(
-    ()=>L.submitTransferAttempt(db,{missionId:'a1-meeting-change-transfer',responseText:'Sorry, I cannot make it.'}),
-    /giờ cuối cùng/i
+    ()=>L.submitTransferAttempt(db,{missionId:'a1-meeting-change-transfer',responseText:'No problem, that is fine.',declaredFinalTime:'seven'}),
+    /chưa xác nhận giờ/i
   );
-  // Any time expression counts — the learner may counter-propose.
-  const ok=L.submitTransferAttempt(db,{missionId:'a1-meeting-change-transfer',responseText:'No problem. See you at 7 pm.'});
-  assert.equal(ok.responseText.includes('7 pm'),true);
-  const counter=L.submitTransferAttempt(db,{missionId:'a1-meeting-change-transfer',responseText:'Seven is hard for me — how about eight? See you at eight.'});
-  assert.equal(counter.grading,'self-check');
-  // Spoken-only attempts stay allowed but remain self-check evidence.
-  const spoken=L.submitTransferAttempt(db,{missionId:'a1-meeting-change-transfer',spoke:true});
+  // Declared + stated, but a different time than declared
+  assert.throws(
+    ()=>L.submitTransferAttempt(db,{missionId:'a1-meeting-change-transfer',responseText:'See you at six.',declaredFinalTime:'7'}),
+    /chưa xác nhận giờ/i
+  );
+  const ok=L.submitTransferAttempt(db,{missionId:'a1-meeting-change-transfer',responseText:'No problem. See you at seven then.',declaredFinalTime:'7'});
+  assert.equal(ok.finalTime,'7:00');
+  assert.equal(ok.grading,'self-check');
+  const counter=L.submitTransferAttempt(db,{missionId:'a1-meeting-change-transfer',responseText:'Seven is hard for me — how about eight? See you at eight.',declaredFinalTime:'8 pm'});
+  assert.equal(counter.finalTime,'20:00');
+  // Spoken-only: declared time still required, stays self-check evidence.
+  assert.throws(()=>L.submitTransferAttempt(db,{missionId:'a1-meeting-change-transfer',spoke:true}),/giờ cuối cùng/i);
+  const spoken=L.submitTransferAttempt(db,{missionId:'a1-meeting-change-transfer',spoke:true,declaredFinalTime:'19:00'});
+  assert.equal(spoken.finalTime,'19:00');
   assert.equal(spoken.grading,'self-check');
 }
 
 {
-  assert.equal(L.mentionsTime('See you at seven.'),true);
-  assert.equal(L.mentionsTime('How about 8:30?'),true);
-  assert.equal(L.mentionsTime('See you at 7 pm.'),true);
-  assert.equal(L.mentionsTime('Sounds good, noon works.'),true);
-  assert.equal(L.mentionsTime('No problem at all.'),false);
-  // Regression: the verb "am" must not count as the "7 am" marker.
-  assert.equal(L.mentionsTime('Sorry, I am not sure that works for me.'),false);
-  assert.equal(L.mentionsTime(''),false);
+  // Clock-time extraction — time positions only.
+  assert.deepEqual(L.extractClockTimes('See you at seven.'),['7:00']);
+  assert.deepEqual(L.extractClockTimes('See you at 7 pm.'),['19:00']);
+  assert.deepEqual(L.extractClockTimes('How about 8:30?'),['8:30']);
+  assert.deepEqual(L.extractClockTimes('Can we move it to four thirty?'),['4:30']);
+  assert.deepEqual(L.extractClockTimes('Sounds good, noon works.'),['12:00']);
+  assert.deepEqual(L.extractClockTimes('I have two cats.'),[]);
+  assert.deepEqual(L.extractClockTimes('My phone is 12345.'),[]);
+  assert.deepEqual(L.extractClockTimes('Sorry, I am not sure that works for me.'),[]);
+  assert.deepEqual(L.extractClockTimes(''),[]);
+  // Standalone time-input parsing for the declared-final-time field.
+  assert.equal(L.parseTimeInput('seven'),'7:00');
+  assert.equal(L.parseTimeInput('7:30'),'7:30');
+  assert.equal(L.parseTimeInput('7 pm'),'19:00');
+  assert.equal(L.parseTimeInput('four thirty'),'4:30');
+  assert.equal(L.parseTimeInput('half past four'),'4:30');
+  assert.equal(L.parseTimeInput('quarter to seven'),'6:45');
+  assert.equal(L.parseTimeInput('noon'),'12:00');
+  assert.equal(L.parseTimeInput('abc'),null);
+  assert.equal(L.parseTimeInput(''),null);
 }
 
 // Lesson dialogue integrity: cold input exists for the meeting cluster,

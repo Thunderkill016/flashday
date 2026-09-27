@@ -97,20 +97,34 @@
       // comprehension-checks before the units and the transfer mission.
       const lesson=L.LESSON_DIALOGUES?.[cluster.id];
       const lessonImported=lesson&&(db.captures||[]).some(c=>String(c.sourceId)===lesson.sourceId);
-      const lessonChecked=lessonImported&&(db.comprehensionChecks||[]).some(ch=>String(ch.sourceKey)===lesson.sourceId);
+      const checks=(db.comprehensionChecks||[]).filter(ch=>String(ch.sourceKey)===lesson?.sourceId);
+      const scenarioChecks=(db.comprehensionChecks||[]).filter(ch=>String(ch.sourceKey)===`${lesson?.sourceId}:scenario`);
+      const bestOf=(list)=>list.length?Math.max(...list.map(c=>Number(c.correct)||0)):null;
+      const lessonChecked=checks.length>0;
       const mission=L.TRANSFER_MISSIONS.find(m=>m.clusterId===cluster.id);
-      const missionTried=mission&&L.missionState(db,mission.id).attempts>0;
+      const missionTries=mission?L.missionState(db,mission.id).attempts:0;
+      const evidence=[];
+      if(checks.length)evidence.push(`kiểm hiểu tốt nhất ${bestOf(checks)}/${checks[0].total}`);
+      if(scenarioChecks.length)evidence.push(`tình huống tốt nhất ${bestOf(scenarioChecks)}/${scenarioChecks[0].total}`);
+      if(missionTries)evidence.push(`vận dụng ${missionTries} lần — tự đối chiếu`);
+      const unitTries=(db.transferAttempts||[]).filter(a=>a&&a.kind==='unit').length;
+      if(unitTries)evidence.push(`unit transfer ${unitTries} lần`);
       return `<article class="guided-cluster">
         <div class="guided-cluster-head">
           <div><span class="eyebrow">${esc(cluster.level)} · SITUATION CLUSTER</span><h4>${esc(cluster.title)}</h4><p>${esc(cluster.canDo)}</p></div>
           <span class="cluster-progress">${state.practiced}/${state.total} đã từng ôn</span>
         </div>
         ${lesson?`<div class="lesson-flow">
-          <span class="lesson-step${lessonChecked?' done':lessonImported?' active':''}">1 · Hiểu hội thoại mới</span>
+          <span class="lesson-step${lessonChecked?' done':lessonImported?' active':''}">${lessonChecked?'Đã làm kiểm hiểu':'1 · Đọc hội thoại & kiểm hiểu'}</span>
           <span class="lesson-step${state.complete?' done':state.installed?' active':''}">2 · Unit vào bộ ôn</span>
-          <span class="lesson-step${missionTried?' done':''}">3 · Vận dụng đổi giờ</span>
+          <span class="lesson-step${missionTries?' done':''}">${missionTries?'Đã thử vận dụng':'3 · Vận dụng đổi giờ'}</span>
         </div>
-        <button class="module-action lesson-open" type="button" data-lesson-open="${esc(cluster.id)}">${lessonImported?'Đọc lại hội thoại dẫn nhập':'① Đọc hội thoại mới — rồi bấm Kiểm hiểu trong bài đọc'}</button>`:''}
+        ${evidence.length?`<p class="lesson-evidence">Bằng chứng: ${esc(evidence.join(' · '))} — luyện tập tự đối chiếu, chưa phải đánh giá đạt.</p>`:''}
+        <button class="module-action lesson-open" type="button" data-lesson-open="${esc(cluster.id)}">${lessonImported?'Đọc lại hội thoại dẫn nhập':'① Đọc hội thoại mới — rồi bấm Kiểm hiểu trong bài đọc'}</button>
+        ${lesson.scenarioQuiz?.length?`<details class="lesson-scenario">
+          <summary>Kiểm hiểu tình huống — ${lesson.scenarioQuiz.length} câu (giờ đầu, giờ chốt, địa điểm)</summary>
+          <div class="lesson-quiz" data-scenario-quiz="${esc(cluster.id)}"></div>
+        </details>`:''}`:''}
         <details class="guided-example">
           <summary>${esc(cluster.workedExample?.label||'Xem ví dụ')}</summary>
           <ol>${example}</ol>
@@ -128,6 +142,9 @@
     });
     root.querySelectorAll('[data-lesson-open]').forEach(button=>{
       button.onclick=()=>openLessonDialogue(button.dataset.lessonOpen);
+    });
+    root.querySelectorAll('[data-scenario-quiz]').forEach(box=>{
+      renderScenarioQuiz(box,box.dataset.scenarioQuiz);
     });
   }
 
@@ -194,7 +211,7 @@
       const isReady=clusterState.complete;
       return `<article class="transfer-mission" data-transfer-mission="${esc(mission.id)}">
         <div class="transfer-heading"><div><span class="eyebrow">TRANSFER · ${esc(mission.level)}</span><h4>${esc(mission.title)}</h4><p>${esc(mission.canDo)}</p></div><span class="transfer-status">${esc(formatAttempt(state.latest))}</span></div>
-        ${isReady?`<p class="mission-setup">${esc(mission.setup)}</p><blockquote>${esc(mission.incomingMessage)}</blockquote><p class="mission-instructions">${esc(mission.instructions)}</p><label class="field transfer-field" for="transferResponse-${esc(mission.id)}">Câu trả lời của bạn<textarea id="transferResponse-${esc(mission.id)}" maxlength="1600" placeholder="Write 2–3 short sentences in English…"></textarea></label><label class="transfer-check"><input type="checkbox" data-transfer-spoke="${esc(mission.id)}"> Tôi đã nói câu trả lời thành tiếng</label><button class="module-action transfer-reveal" type="button" data-transfer-reveal="${esc(mission.id)}" disabled>Xem mẫu sau khi đã thử</button><div class="transfer-model hidden" id="transferModel-${esc(mission.id)}"><strong>Mẫu để đối chiếu</strong><p class="model-caveat">Tự đối chiếu theo checklist — đây là bài luyện, chưa phải đánh giá đạt.</p>${mission.modelAnswer.map(line=>`<p>${esc(line)}</p>`).join('')}<ul>${mission.selfCheck.map(item=>`<li>${esc(item)}</li>`).join('')}</ul><label class="transfer-check"><input type="checkbox" data-transfer-self-review="${esc(mission.id)}"> Tôi đã so sánh lần thử với mẫu</label><button class="primary-btn transfer-save" type="button" data-transfer-save="${esc(mission.id)}">Lưu lần thử</button></div>`:`<p class="mission-locked">Thêm đủ ${clusterState.total} Unit của “${esc(cluster?.title||'lộ trình này')}” trước. Nhiệm vụ này không dùng để chấm điểm card.</p>`}
+        ${isReady?`<p class="mission-setup">${esc(mission.setup)}</p><blockquote>${esc(mission.incomingMessage)}</blockquote><p class="mission-instructions">${esc(mission.instructions)}</p>${mission.requireFinalTimeConfirm?`<label class="field transfer-finaltime" for="finalTime-${esc(mission.id)}">Giờ cuối cùng bạn chốt<input type="text" id="finalTime-${esc(mission.id)}" maxlength="40" placeholder="vd: 7, 7:30, seven" autocomplete="off"></label>`:''}<label class="field transfer-field" for="transferResponse-${esc(mission.id)}">Câu trả lời của bạn<textarea id="transferResponse-${esc(mission.id)}" maxlength="1600" placeholder="Write 2–3 short sentences in English…"></textarea></label><label class="transfer-check"><input type="checkbox" data-transfer-spoke="${esc(mission.id)}"> Tôi đã nói câu trả lời thành tiếng</label><button class="module-action transfer-reveal" type="button" data-transfer-reveal="${esc(mission.id)}" disabled>Xem mẫu sau khi đã thử</button><div class="transfer-model hidden" id="transferModel-${esc(mission.id)}"><strong>Mẫu để đối chiếu</strong><p class="model-caveat">Tự đối chiếu theo checklist — đây là bài luyện, chưa phải đánh giá đạt.</p>${mission.modelAnswer.map(line=>`<p>${esc(line)}</p>`).join('')}<ul>${mission.selfCheck.map(item=>`<li>${esc(item)}</li>`).join('')}</ul><label class="transfer-check"><input type="checkbox" data-transfer-self-review="${esc(mission.id)}"> Tôi đã so sánh lần thử với mẫu</label><button class="primary-btn transfer-save" type="button" data-transfer-save="${esc(mission.id)}">Lưu lần thử</button></div>`:`<p class="mission-locked">Thêm đủ ${clusterState.total} Unit của “${esc(cluster?.title||'lộ trình này')}” trước. Nhiệm vụ này không dùng để chấm điểm card.</p>`}
       </article>`;
     }).join('');
     root.querySelectorAll('[data-transfer-mission]').forEach(card=>bindTransferMission(card));
@@ -220,6 +237,7 @@
         }));
         window.dispatchEvent(new CustomEvent('flashday:learning-state-changed'));
         renderTransferMissions();
+        renderGuidedModules();
         showInlineMessage(attempt.selfReviewed?'Đã lưu — bạn đã tự đối chiếu câu mới với mẫu.':'Đã lưu lần thử. Bạn có thể quay lại đối chiếu sau.',false);
         // Close the loop: production returns to immersion. Offer a one-tap
         // path back to the source this unit was mined from so the learner
@@ -249,13 +267,17 @@
     response.oninput=updateReveal;
     spoke.onchange=updateReveal;
     reveal.onclick=()=>{
-      // The can-do is confirmed BEFORE the model appears: a written attempt
-      // that never states a time can't have confirmed one. Spoken-only
-      // attempts can't be text-checked — they stay self-check evidence.
+      // The can-do is confirmed BEFORE the model appears: the learner must
+      // declare the final time, and a written attempt must state that same
+      // time in a time position — a bare digit or number word won't do.
       const mission=L.missionById(missionId);
-      if(mission?.requireFinalTimeConfirm&&response.value.trim()&&!L.mentionsTime(response.value)){
-        cardMessage(card,'Chưa xác nhận giờ cuối cùng — viết rõ giờ hẹn (vd: "See you at seven.") rồi mới xem mẫu.');
-        return;
+      if(mission?.requireFinalTimeConfirm){
+        const declared=L.parseTimeInput(card.querySelector(`[id="finalTime-${missionId}"]`)?.value);
+        if(!declared){cardMessage(card,'Điền giờ cuối cùng bạn muốn chốt (vd: 7, 7:30, seven) trước khi xem mẫu.');return;}
+        if(response.value.trim()&&!L.confirmsTime(response.value,declared)){
+          cardMessage(card,`Câu trả lời chưa xác nhận giờ ${declared} đã khai — viết rõ giờ hẹn rồi mới xem mẫu.`);
+          return;
+        }
       }
       card.querySelector('[data-transfer-save]')?.focus();
       card.querySelector('.transfer-model')?.classList.remove('hidden');
@@ -269,9 +291,11 @@
       const responseText=card.querySelector(`[id="transferResponse-${missionId}"]`)?.value||'';
       const spoke=Boolean(card.querySelector('[data-transfer-spoke]')?.checked);
       const selfReviewed=Boolean(card.querySelector('[data-transfer-self-review]')?.checked);
-      const {result:attempt}=store.transact((db)=>L.submitTransferAttempt(db,{missionId,responseText,spoke,selfReviewed}));
+      const declaredFinalTime=card.querySelector(`[id="finalTime-${missionId}"]`)?.value||'';
+      const {result:attempt}=store.transact((db)=>L.submitTransferAttempt(db,{missionId,responseText,spoke,selfReviewed,declaredFinalTime}));
       window.dispatchEvent(new CustomEvent('flashday:learning-state-changed'));
       renderTransferMissions();
+      renderGuidedModules();
       showInlineMessage(attempt.selfReviewed?'Đã lưu lần thử và việc tự đối chiếu mẫu.':'Đã lưu lần thử. Bạn có thể quay lại tự đối chiếu mẫu sau.',false);
     }catch(error){
       cardMessage(card,error.message);
@@ -513,6 +537,57 @@
       $('quizResult').innerHTML=`<p class="quiz-score">Đúng ${correct}/${quiz.questions.length} dòng — ${correct===quiz.questions.length?'chọn đúng hết trong lần này (bản dịch đã hiện lại — đọc lại để củng cố).':correct>0?'có dòng chưa chắc nghĩa — đọc lại dòng đánh dấu đỏ.':'chưa nắm được nghĩa — đọc lại kèm dịch rồi thử lại.'}</p>`;
       reader?.classList.remove('quiz-active');
       window.dispatchEvent(new CustomEvent('flashday:learning-state-changed'));
+      renderGuidedModules();
+    };
+  }
+
+  // Situation comprehension for a lesson cluster: whole-scenario questions
+  // (initial time / final agreed time / place) with hints on wrong answers.
+  // Records share the append-only comprehensionChecks log under the
+  // '<lesson>:scenario' key — still practice evidence, not assessment.
+  function renderScenarioQuiz(box,clusterId){
+    const lesson=L.LESSON_DIALOGUES?.[clusterId];
+    const questions=lesson?.scenarioQuiz;
+    if(!box||!questions?.length)return;
+    const key=`${lesson.sourceId}:scenario`;
+    const picked=new Map();
+    box.innerHTML=questions.map((q,qi)=>`<div class="quiz-q sq-q" data-qi="${qi}">
+      <p class="quiz-sentence">${qi+1}. ${esc(q.q)}</p>
+      <div class="quiz-opts">${q.options.map((opt,oi)=>`<button type="button" class="quiz-opt" data-oi="${oi}">${esc(opt)}</button>`).join('')}</div>
+      <p class="sq-hint hidden"></p>
+    </div>`).join('')+
+    `<button type="button" class="primary-btn sq-submit" disabled>Nộp — chấm thử</button><div class="sq-result"></div>`;
+    const submit=box.querySelector('.sq-submit');
+    box.querySelectorAll('.quiz-opt').forEach(btn=>btn.onclick=()=>{
+      const q=btn.closest('.sq-q');
+      q.querySelectorAll('.quiz-opt').forEach(b=>b.classList.remove('picked'));
+      btn.classList.add('picked');
+      picked.set(Number(q.dataset.qi),Number(btn.dataset.oi));
+      submit.disabled=picked.size<questions.length;
+    });
+    submit.onclick=()=>{
+      let correct=0;
+      for(const q of box.querySelectorAll('.sq-q')){
+        const qi=Number(q.dataset.qi);
+        const ok=picked.get(qi)===questions[qi].answer;
+        if(ok)correct++;
+        q.classList.add(ok?'quiz-right':'quiz-wrong');
+        q.querySelectorAll('.quiz-opt').forEach((b,oi)=>{
+          b.disabled=true;
+          if(oi===questions[qi].answer)b.classList.add('quiz-answer');
+        });
+        // Wrong answers get the explanation + a retry instead of a dead mark.
+        const hint=q.querySelector('.sq-hint');
+        if(!ok&&hint){hint.textContent=questions[qi].hint;hint.classList.remove('hidden');}
+      }
+      const record={id:SC.stableId('comp',[key,Date.now()].join('|')),sourceKey:key,correct,total:questions.length,at:Date.now()};
+      store.transact((db)=>{db.comprehensionChecks=Array.isArray(db.comprehensionChecks)?db.comprehensionChecks:[];db.comprehensionChecks.push(record);return {result:true};});
+      submit.disabled=true;
+      const done=correct===questions.length;
+      box.querySelector('.sq-result').innerHTML=`<p class="quiz-score">Đúng ${correct}/${questions.length} — ${done?'nắm được tình huống của hội thoại này trong lần này.':'đọc lại hội thoại rồi thử lại các câu đỏ.'}</p>${done?'':'<button type="button" class="ghost-btn sq-retry">Làm lại</button>'}`;
+      box.querySelector('.sq-retry')?.addEventListener('click',()=>renderScenarioQuiz(box,clusterId));
+      window.dispatchEvent(new CustomEvent('flashday:learning-state-changed'));
+      renderGuidedModules();
     };
   }
   const READER_THEMES=['dark','light','warm'];
