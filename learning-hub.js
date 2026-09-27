@@ -1097,5 +1097,14 @@
     };
   }
   restoreUi();
+  // hydrateCloud in app-bespoke replaces the learner db after these surfaces
+  // already rendered — without this, cluster cards stay in their pre-hydrate
+  // (often locked/empty) state until the next navigation.
+  window.addEventListener('flashday:cloud-hydrated',()=>{
+    renderGuidedModules();
+    renderTransferMissions();
+    renderSources();
+    renderStarterCatalog();
+  });
   window.addEventListener('flashday:supabase-ready',(event)=>connectProfileCloud(event.detail));
 })();

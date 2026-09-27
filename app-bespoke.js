@@ -1043,6 +1043,9 @@
       db = D.migrateDb(C.mergeLearnerDb(localForMerge, remote, progress.data?.payload || {}));
       if ((db.events || []).length) A.rebuildProgressFromEvents(db);
       save();
+      // The hub rendered at init with pre-hydrate local state — the merged
+      // db was wholesale replaced, so its data surfaces must re-render.
+      window.dispatchEvent(new CustomEvent('flashday:cloud-hydrated'));
 
       await persistIncrementalDb(scope);
       cloudFence.assertCurrent(scope);

@@ -93,4 +93,10 @@ assert(learningEntry.split('checkFinalTimeConfirm(').length - 1 >= 2, 'submit ga
 assert(learningEntry.includes("expectedFinalTime:'7:00'"), 'confirm mission must pin the scenario final time');
 assert(learningEntry.includes('meridiemStrict'), 'strict AM/PM matching must be available per-mission');
 
+// Regression: hydrateCloud replaced the learner db but only re-rendered
+// memory + current card — authenticated page loads showed capture surfaces
+// (cluster cards, mission lock, sources) in their pre-hydrate state.
+assert(source.includes("'flashday:cloud-hydrated'"), 'hydrate must notify the hub that learner data was replaced');
+assert(learningHub.includes("addEventListener('flashday:cloud-hydrated'"), 'hub must re-render data surfaces after cloud hydration');
+
 console.log('FlashDay app P0 contracts passed');
