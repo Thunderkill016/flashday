@@ -10,7 +10,8 @@ import { enrollChunks } from '../../core/scheduler.js';
 import { stepsForLesson } from '../../core/progress.js';
 import { checkTimeGate } from '../../core/time-gate.js';
 import { mountQuiz } from '../components/quiz.js';
-import { pickEnglishVoice, LEARNER_SPEECH_RATE, playButton } from '../speech.js';
+import { pickEnglishVoice, LEARNER_SPEECH_RATE, playButton, speakCheck, speechRecognizer } from '../speech.js';
+import { getTutor } from '../../ai/tutor.js';
 
 // Re-exported: existing tests import the voice picker from this module.
 export { pickEnglishVoice };
@@ -57,7 +58,8 @@ export function mount(root, ctx) {
     panes: {},
     draft: restore.status === 'applied' ? draft : null,
     draftSaveTimer: null,
-    timers: new Set()
+    timers: new Set(),
+    tutor: getTutor(ctx)
   };
 
   const section = document.createElement('section');
@@ -283,6 +285,24 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
+// Explain-my-answer wiring (Duolingo Max pattern): wrong quiz answers get an
+// AI button only when the tutor can respond — otherwise the static hint is
+// the whole story and no dead control renders.
+function explainOption(stepLabel, source) {
+  return state.tutor?.available
+    ? (question, chosenIndex) =>
+        state.tutor.explainWrong({
+          stepLabel,
+          question: question.q,
+          options: question.options,
+          chosenIndex,
+          correctIndex: question.answer,
+          hint: question.hint,
+          source
+        })
+    : undefined;
+}
+
 function text(tag, content, className) {
   const el = document.createElement(tag);
   if (className) el.className = className;
@@ -352,6 +372,10 @@ const buildStep = {
         document.createTextNode(` · ${chunk.meaning} `),
         playButton(chunk.target)
       );
+      // Say-it-back (ELSA-lite): listen → speak → see what the recognizer
+      // heard. Only renders where SpeechRecognition exists.
+      const sayCheck = speakCheck(chunk.target);
+      li.append(sayCheck.button, sayCheck.output);
       const detail = document.createElement('details');
       detail.className = 'chunk-example';
       const summary = document.createElement('summary');
@@ -366,6 +390,10 @@ const buildStep = {
     pane.appendChild(quizHost);
     mountQuiz(quizHost, lesson.drills, {
       initialAnswers: draftAnswers('prepare'),
+      onExplain: explainOption(
+        'Hiểu mẫu',
+        `${lesson.pattern.rule} ${lesson.chunks.map((c) => c.target).join(' | ')}`
+      ),
       onAnswerChange: (answers) => patchDraft({ answers: { ...state.draft?.answers, prepare: answers } }),
       onSubmit: (result) => {
         recordEvent('prepare', result, draftSupport());
@@ -404,6 +432,7 @@ const buildStep = {
     pane.appendChild(quizHost);
     mountQuiz(quizHost, lesson.dialogue.questions, {
       initialAnswers: draftAnswers('read'),
+      onExplain: explainOption('Đọc', lesson.dialogue.lines.map(([en]) => en).join(' ')),
       onAnswerChange: (answers) => patchDraft({ answers: { ...state.draft?.answers, read: answers } }),
       onSubmit: (result) => {
         recordEvent('read', result, {
@@ -497,6 +526,7 @@ const buildStep = {
     pane.appendChild(quizHost);
     mountQuiz(quizHost, lesson.listening.questions, {
       initialAnswers: draftAnswers('listen'),
+      onExplain: explainOption('Nghe', lesson.listening.text),
       onAnswerChange: (answers) => patchDraft({ answers: { ...state.draft?.answers, listen: answers } }),
       onSubmit: (result) => {
         recordEvent(
@@ -582,6 +612,12 @@ const buildStep = {
     const compare = document.createElement('div');
     compare.className = 'attempt-compare';
     compare.hidden = true;
+    // AI review sits below the instant word-match: same feedback loop, but
+    // with real error-level correction instead of overlap heuristics.
+    const aiReview = document.createElement('div');
+    aiReview.className = 'ai-review';
+    aiReview.dataset.role = 'ai-review';
+    aiReview.hidden = true;
     const retryBtn = document.createElement('button');
     retryBtn.type = 'button';
     retryBtn.className = 'btn-secondary';
@@ -595,7 +631,7 @@ const buildStep = {
     saveBtn.dataset.role = 'write-save';
     saveBtn.textContent = 'Lưu lần thử';
     saveBtn.hidden = true;
-    pane.append(saveBtn, gateNote, compare, retryBtn);
+    pane.append(saveBtn, gateNote, compare, aiReview, retryBtn);
 
     modelBtn.addEventListener('click', () => {
       patchDraft({ support: { ...draftSupport(), modelRevealed: true } });
@@ -677,6 +713,30 @@ const buildStep = {
       compare.hidden = false;
       textarea.disabled = true;
       retryBtn.hidden = false;
+      if (state.tutor?.available) {
+        aiReview.hidden = false;
+        aiReview.textContent = 'AI đang chấm bài…';
+        state.tutor
+          .reviewWriting({
+            setup: lesson.write.setup,
+            prompt: lesson.write.prompt,
+            modelLines: lesson.write.model,
+            learnerText: textarea.value
+          })
+          .then((review) => {
+            if (!aiReview.isConnected) return;
+            aiReview.textContent = '';
+            aiReview.appendChild(text('h4', 'Nhận xét của AI', 'ai-review-title'));
+            if (review.praise) aiReview.appendChild(text('p', `✓ ${review.praise}`, 'ai-review-praise'));
+            for (const err of (review.errors || []).slice(0, 3)) {
+              aiReview.appendChild(text('p', `“${err.said}” → “${err.fix}” — ${err.why}`, 'ai-review-error'));
+            }
+            if (review.better) aiReview.appendChild(text('p', `Tự nhiên hơn: ${review.better}`, 'ai-review-better'));
+          })
+          .catch(() => {
+            aiReview.hidden = true; // word-match compare stays the fallback
+          });
+      }
       continueLink(pane, 'write');
     });
     retryBtn.addEventListener('click', () => {
@@ -697,6 +757,12 @@ const buildStep = {
       text('p', `Vai B: ${lesson.speak.roleB}`),
       text('p', lesson.speak.prompt, 'task-prompt')
     );
+
+    // ── AI roleplay (Speak/Duolingo Max pattern): the model plays role B,
+    // the learner produces real unscripted language — typed or spoken via
+    // the browser's recognizer — then AI grades the lesson checklist. This
+    // replaces "self-report that you spoke" whenever the tutor is available.
+    if (state.tutor?.available) buildRoleplay(pane, lesson);
 
     const spoke = document.createElement('label');
     spoke.className = 'checklist-item';
@@ -780,7 +846,16 @@ const buildStep = {
     const speakNote = text('p', '', 'runner-notice');
     speakNote.hidden = true;
 
-    pane.append(spoke, listener, textarea, modelBtn, modelArea, saveBtn, speakNote);
+    pane.append(
+      text('p', 'Tự luyện (không cần AI)', 'self-study-label'),
+      spoke,
+      listener,
+      textarea,
+      modelBtn,
+      modelArea,
+      saveBtn,
+      speakNote
+    );
 
     modelBtn.addEventListener('click', () => {
       patchDraft({ support: { ...draftSupport(), modelRevealed: true } });
@@ -835,6 +910,236 @@ const buildStep = {
     stepNav(pane, 'speak');
   }
 };
+
+// AI conversation practice: the tutor plays role B under the lesson's
+// scenario; learner turns are typed or dictated through SpeechRecognition.
+// AI grades the lesson's own checklist at the end → real production evidence
+// instead of a self-report checkbox. Any failure hides the block and the
+// static self-report flow below remains the fallback.
+function buildRoleplay(pane, lesson) {
+  const partnerName =
+    /tên\s+([^\s,.–—]+)/.exec(lesson.speak.roleB)?.[1] || 'bạn mới';
+  const block = document.createElement('div');
+  block.className = 'roleplay';
+  block.dataset.role = 'roleplay';
+  block.appendChild(
+    text(
+      'p',
+      `Luyện hội thoại — AI đóng vai ${partnerName}. Gõ hoặc đọc tiếng Anh, cuối phiên AI chấm checklist.`,
+      'roleplay-intro'
+    )
+  );
+
+  const log = document.createElement('div');
+  log.className = 'roleplay-log';
+  log.hidden = true;
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'roleplay-input';
+  input.placeholder = 'Nhập tiếng Anh… (hoặc bấm mic để nói)';
+  input.setAttribute('aria-label', 'Lượt nói của bạn');
+
+  const sendBtn = document.createElement('button');
+  sendBtn.type = 'button';
+  sendBtn.className = 'btn-primary roleplay-send';
+  sendBtn.textContent = 'Gửi';
+
+  const micBtn = document.createElement('button');
+  micBtn.type = 'button';
+  micBtn.className = 'btn-secondary roleplay-mic';
+  micBtn.textContent = '🎤 Nói';
+
+  const composer = document.createElement('div');
+  composer.className = 'roleplay-composer';
+  composer.hidden = true;
+  composer.append(input, sendBtn, micBtn);
+
+  const startBtn = document.createElement('button');
+  startBtn.type = 'button';
+  startBtn.className = 'btn-primary';
+  startBtn.dataset.role = 'roleplay-start';
+  startBtn.textContent = `Bắt đầu hội thoại với ${partnerName}`;
+
+  const endBtn = document.createElement('button');
+  endBtn.type = 'button';
+  endBtn.className = 'btn-secondary';
+  endBtn.dataset.role = 'roleplay-end';
+  endBtn.textContent = 'Kết thúc & chấm điểm';
+  endBtn.hidden = true;
+
+  const feedback = document.createElement('div');
+  feedback.className = 'roleplay-feedback';
+  feedback.dataset.role = 'roleplay-feedback';
+  feedback.hidden = true;
+
+  const note = text('p', '', 'runner-notice');
+  note.hidden = true;
+
+  block.append(startBtn, log, composer, endBtn, feedback, note);
+  pane.appendChild(block);
+
+  let session = null;
+  let busy = false;
+
+  const addTurn = (who, content) => {
+    const msg = document.createElement('p');
+    msg.className = `roleplay-msg roleplay-${who}`;
+    msg.append(
+      text('strong', who === 'partner' ? `${partnerName}: ` : 'Bạn: '),
+      document.createTextNode(content)
+    );
+    if (who === 'partner') msg.appendChild(playButton(content));
+    log.appendChild(msg);
+    msg.scrollIntoView({ block: 'nearest' });
+  };
+
+  const fail = (message) => {
+    note.textContent = message;
+    note.hidden = false;
+    busy = false;
+    startBtn.hidden = false;
+    composer.hidden = true;
+    endBtn.hidden = true;
+  };
+
+  startBtn.addEventListener('click', async () => {
+    startBtn.disabled = true;
+    startBtn.textContent = 'AI đang vào vai…';
+    session = state.tutor.startRoleplay({
+      scenario: `${lesson.speak.setup} ${lesson.speak.prompt}`,
+      roleA: lesson.speak.roleA,
+      roleB: lesson.speak.roleB,
+      partnerName,
+      checklist: lesson.speak.checklist,
+      targetPhrases: lesson.speak.model
+    });
+    try {
+      const opener = await session.start();
+      addTurn('partner', opener);
+    } catch {
+      fail('AI chưa kết nối được — luyện ở phần tự luyện bên dưới.');
+      return;
+    }
+    startBtn.hidden = true;
+    log.hidden = false;
+    composer.hidden = false;
+    endBtn.hidden = false;
+    input.focus();
+  });
+
+  const sendTurn = async () => {
+    const value = input.value.trim();
+    if (!value || busy || !session) return;
+    busy = true;
+    input.value = '';
+    input.disabled = true;
+    sendBtn.disabled = true;
+    addTurn('learner', value);
+    try {
+      addTurn('partner', await session.send(value));
+    } catch {
+      fail('AI mất kết nối giữa chừng — phần đã nói vẫn được giữ. Dùng phần tự luyện để hoàn thành.');
+      return;
+    } finally {
+      busy = false;
+      input.disabled = false;
+      sendBtn.disabled = false;
+      input.focus();
+    }
+  };
+  sendBtn.addEventListener('click', sendTurn);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') sendTurn();
+  });
+
+  // Dictation for the learner's turn — the recognizer fills the input so the
+  // learner can review/correct what was heard before sending it.
+  micBtn.addEventListener('click', () => {
+    const rec = speechRecognizer();
+    if (!rec) {
+      note.textContent = 'Trình duyệt chưa hỗ trợ nhận giọng — thử Chrome/Edge.';
+      note.hidden = false;
+      return;
+    }
+    rec.lang = 'en-US';
+    rec.interimResults = true;
+    rec.addEventListener('result', (event) => {
+      input.value = [...event.results]
+        .map((r) => r[0]?.transcript || '')
+        .join(' ');
+    });
+    micBtn.disabled = true;
+    micBtn.textContent = '… đang nghe';
+    rec.addEventListener('end', () => {
+      micBtn.disabled = false;
+      micBtn.textContent = '🎤 Nói';
+    });
+    rec.addEventListener('error', (event) => {
+      if (event.error === 'not-allowed') {
+        note.textContent = 'Chưa cấp quyền micro — cho phép micro rồi thử lại.';
+        note.hidden = false;
+      }
+    });
+    try {
+      rec.start();
+    } catch {
+      micBtn.disabled = false;
+      micBtn.textContent = '🎤 Nói';
+    }
+  });
+
+  endBtn.addEventListener('click', async () => {
+    if (!session) return;
+    endBtn.disabled = true;
+    endBtn.textContent = 'AI đang chấm…';
+    try {
+      const fb = await session.feedback();
+      if (!feedback.isConnected) return;
+      const items = fb.items || [];
+      const passed = items.filter((i) => i.ok).length;
+      feedback.appendChild(text('h3', `Kết quả hội thoại — ${passed}/${items.length} mục đạt`, 'roleplay-feedback-title'));
+      const list = document.createElement('ul');
+      list.className = 'roleplay-checklist';
+      for (const item of items) {
+        list.appendChild(text('li', `${item.ok ? '✓' : '✗'} ${item.check}${item.note ? ` — ${item.note}` : ''}`));
+      }
+      feedback.appendChild(list);
+      if (fb.corrections?.length) {
+        const fixes = document.createElement('ul');
+        fixes.className = 'roleplay-corrections';
+        for (const c of fb.corrections) {
+          fixes.appendChild(text('li', `Bạn nói “${c.said}” → tự nhiên hơn: “${c.better}”`));
+        }
+        feedback.append(text('h4', 'Cần sửa'), fixes);
+      }
+      if (fb.summary) feedback.appendChild(text('p', fb.summary, 'roleplay-summary'));
+      feedback.hidden = false;
+      recordEvent(
+        'speak',
+        {
+          roleplay: true,
+          partner: partnerName,
+          listener: 'ai',
+          spoke: true,
+          transcript: session.history,
+          correct: passed,
+          total: items.length,
+          aiChecklist: items.map((i) => ({ check: i.check, ok: Boolean(i.ok) }))
+        },
+        { modelRevealed: false }
+      );
+      continueLink(pane, 'speak');
+      composer.hidden = true;
+      endBtn.hidden = true;
+    } catch {
+      endBtn.disabled = false;
+      endBtn.textContent = 'Kết thúc & chấm điểm';
+      note.textContent = 'AI chấm lỗi — thử lại hoặc dùng phần tự luyện.';
+      note.hidden = false;
+    }
+  });
+}
 
 function setTranslationsVisible(list, visible) {
   for (const vi of list.querySelectorAll('.translation')) vi.hidden = !visible;
