@@ -167,6 +167,21 @@ const C=require('../flashday-cloud.js');
 }
 
 {
+  // Evidence-first eligibility: when an event carries the M3 split, the
+  // unaidedUnits list is the authority — self-report cannot launder aided
+  // recall into a transfer trigger.
+  const DAY=24*60*60*1000,T0=1_700_000_000_000;
+  const db=D.createInitialDb([],1000);
+  const item=D.addItem(db,{target:'on my way',meaning:'đang trên đường'});
+  // self-rated Good but evidence says the unit was produced only after aid
+  db.events=[{id:'e1',mode:'write',cardId:'c1',unitIds:[item.id],ratings:{[item.id]:3},answeredAt:T0,
+    evidence:{kind:'word-diff',aided:true,unaidedUnits:[],aidedUnits:[item.id]}}];
+  assert.equal(L.dueUnitTransfer(db,T0+2*DAY),null,'aided-evidence units must not trigger transfer even when rated Good');
+  db.events[0].evidence={kind:'word-diff',aided:false,unaidedUnits:[item.id],aidedUnits:[]};
+  assert(L.dueUnitTransfer(db,T0+2*DAY),'unaided-evidence unit earns the delayed transfer');
+}
+
+{
   // Assisted production must NOT trigger transfer: unit missed in the diff,
   // or learner peeked at the source before revealing.
   const DAY=24*60*60*1000;

@@ -362,6 +362,13 @@
       if(String(event?.mode)!=='write')return false;
       if(!Array.isArray(event?.unitIds)||!event.unitIds.includes(unitId))return false;
       if(Number(event?.ratings?.[unitId])<2)return false; // FSRS success = Hard or better
+      // New events carry the M3 evidence split — unaidedUnits is the
+      // authoritative "produced without aid" list. Older events fall back to
+      // inferring assistance from the error record and peek telemetry.
+      if(event?.evidence&&typeof event.evidence==='object'){
+        return Boolean(event.evidence.aided)===false
+          &&(Array.isArray(event.evidence.unaidedUnits)?event.evidence.unaidedUnits.includes(unitId):false);
+      }
       // Per-unit assistance: error.missedUnits is the union of first/final
       // diff misses and self-rated misses — if this unit is in it, its recall
       // was aided regardless of what happened to other units on the card.
