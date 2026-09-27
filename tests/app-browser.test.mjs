@@ -322,6 +322,29 @@ try {
     check('review reveal → grade → persisted scheduling');
   }
 
+  // ── 11. Debounced draft writes must not outlive the unmounted runner ──
+  {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const page = await context.newPage();
+    const errors = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    // Type then leave within the 400ms debounce window — before the fix the
+    // pending patchDraft read torn-down `state` and threw on the next page.
+    await goto(page, `${origin}app/?preview#/lesson/${L1}/write`);
+    await page.locator('.runner-pane[data-step="write"] .write-area').fill('mid-typing draft');
+    await goto(page, `${origin}app/?preview#/review`);
+    await sleep(800);
+    assert.deepEqual(errors, [], `pageerrors: ${errors.join(' | ')}`);
+    // Same race across a remount: type, jump to a SECOND lesson's runner.
+    await goto(page, `${origin}app/?preview#/lesson/${L1}/speak`);
+    await page.locator('.runner-pane[data-step="speak"] .speak-area').fill('stale debounce source');
+    await goto(page, `${origin}app/?preview#/lesson/a1-s1-l2/write`);
+    await sleep(800);
+    assert.deepEqual(errors, [], `pageerrors after remount: ${errors.join(' | ')}`);
+    await context.close();
+    check('mid-debounce unmount → no stale-state crash');
+  }
+
   console.log(`FlashDay app browser tests: ${passed} groups passed`);
 } finally {
   await browser?.close();
