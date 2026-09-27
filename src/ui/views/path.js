@@ -1,10 +1,6 @@
 // Lộ trình — 6 stages as <details>, per-lesson activity status.
 import { STAGES, lessonsForStage } from '../../content/a1/index.js';
-import { STEPS, lessonStatus } from '../../core/progress.js';
-
-function lessonSteps(lesson) {
-  return lesson.kind === 'checkpoint' ? STEPS.slice(1) : STEPS;
-}
+import { lessonStatus, stepsForLesson as lessonSteps } from '../../core/progress.js';
 
 function statusOf(events, lesson) {
   const status = lessonStatus(events, lesson);

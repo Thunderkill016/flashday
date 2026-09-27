@@ -185,7 +185,7 @@ try {
     check('double "Lưu lần thử" → 1 write event');
   }
 
-  // ── 7. Checkpoint lesson: 4 step pills, lands on read ──
+  // ── 7. Checkpoint lesson: 4 step pills, lands on read; first submit enrolls chunks ──
   {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
     const page = await context.newPage();
@@ -193,8 +193,20 @@ try {
     assert.equal(await page.locator('.step-pill').count(), 4, 'checkpoint hides the prepare step');
     assert.equal(await page.locator('.runner-pane[data-step="read"]').isVisible(), true);
     assert.equal(await page.locator('.runner-pane[data-step="prepare"]').count(), 0);
+    // Checkpoints have no prepare submit, so chunks enroll on the first
+    // submitted step (here, the read quiz).
+    const pane = page.locator('.runner-pane[data-step="read"]');
+    for (let q = 0; q < 4; q++) {
+      await pane.locator('.quiz-question').nth(q).locator('.quiz-option').nth(0).click();
+    }
+    await pane.locator('.quiz-submit').click();
+    const enrolled = await page.evaluate((key) => {
+      const db = JSON.parse(localStorage.getItem(key) || '{}');
+      return Object.keys(db.fsrs || {}).filter((k) => k.startsWith('a1-s1-l5:')).length;
+    }, DB_KEY);
+    assert.equal(enrolled, 6, 'checkpoint read submit enrolls its 6 chunks');
     await context.close();
-    check('checkpoint → 4 steps, lands on read');
+    check('checkpoint → 4 steps, lands on read, enrolls chunks');
   }
 
   // ── 8. [hidden] must actually hide: retry/save stay invisible until due ──

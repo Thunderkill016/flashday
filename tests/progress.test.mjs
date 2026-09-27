@@ -8,6 +8,8 @@ const lessons = [
   { id: 'l3', stage: 2, order: 1 }
 ];
 
+const CHECKPOINT_STEPS = ['read', 'listen', 'write', 'speak'];
+
 function memoryStorage() {
   const m = new Map();
   return {
@@ -73,4 +75,36 @@ assert.deepEqual([...STEPS], ['prepare', 'read', 'listen', 'write', 'speak']);
   assert.equal(suggestNext({ events: all, session: createSession({ storage: memoryStorage() }), lessons }).kind, 'done');
 }
 
-console.log('FlashDay progress: 4 checks passed');
+{
+  // Checkpoints offer no 'prepare' — status must only cover offered steps,
+  // or a finished checkpoint looks permanently unfinished.
+  const cp = { id: 'cp1', stage: 1, order: 5, kind: 'checkpoint' };
+  const withCp = [...lessons, cp];
+  const empty = lessonStatus([], cp);
+  assert.equal('prepare' in empty, false, 'checkpoint has no prepare step');
+  assert.equal(empty.read, 'todo');
+
+  const readOnly = [{ lessonId: 'cp1', step: 'read', kind: 'read' }];
+  const partial = lessonStatus(readOnly, cp);
+  assert.equal(partial.read, 'attempted');
+  assert.equal(partial.speak, 'todo');
+  const finish = suggestNext({ events: readOnly, session: createSession({ storage: memoryStorage() }), lessons: withCp });
+  assert.equal(finish.kind, 'finish');
+  assert.ok(CHECKPOINT_STEPS.includes(finish.step), 'finish step must be an offered step');
+  assert.equal(finish.step, 'listen');
+
+  // All four offered steps attempted → not "finish"; next unstarted lesson wins.
+  const done = CHECKPOINT_STEPS.map((step) => ({ lessonId: 'cp1', step, kind: step }));
+  const afterCp = suggestNext({ events: done, session: createSession({ storage: memoryStorage() }), lessons: withCp });
+  assert.equal(afterCp.kind, 'next');
+  assert.equal(afterCp.lessonId, 'l1');
+  const stage = stageStatus(done, 1, withCp);
+  assert.deepEqual(stage, { total: 3, started: 1, attemptedAll: 1 });
+
+  // An unstarted checkpoint suggests its real first step, not 'prepare'.
+  const next = suggestNext({ events: [], session: createSession({ storage: memoryStorage() }), lessons: [cp] });
+  assert.equal(next.kind, 'next');
+  assert.equal(next.step, 'read');
+}
+
+console.log('FlashDay progress: 5 checks passed');

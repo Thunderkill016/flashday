@@ -1,7 +1,7 @@
 // Hôm nay — the next thing to do, review due count, current stage.
 // Activity-only labels: no streaks, XP, or level claims.
 import { LESSONS, STAGES, lessonById } from '../../content/a1/index.js';
-import { STEPS, lessonStatus, stageStatus, suggestNext } from '../../core/progress.js';
+import { STEPS, lessonStatus, stageStatus, stepsForLesson, suggestNext } from '../../core/progress.js';
 import { dueChunks } from '../../core/scheduler.js';
 
 function draftHasContent(draft) {
@@ -33,7 +33,7 @@ export function mount(root, ctx) {
       label = `Tiếp tục: ${lesson.title} — bạn đang ở bước ${stepLabel(suggestion.step)}`;
     } else if (suggestion.kind === 'finish') {
       const status = lessonStatus(events, lesson);
-      const todo = STEPS.filter((s) => status[s] === 'todo').length;
+      const todo = stepsForLesson(lesson).filter((s) => status[s] === 'todo').length;
       label = `Hoàn thành: ${lesson.title} — còn ${todo} bước`;
     } else {
       label = `Bắt đầu: ${lesson.title}`;
@@ -46,7 +46,7 @@ export function mount(root, ctx) {
     card.appendChild(el('p', lesson.canDo));
     const go = document.createElement('a');
     go.className = 'btn-primary';
-    go.href = `#/lesson/${lesson.id}/${suggestion.step || 'prepare'}`;
+    go.href = `#/lesson/${lesson.id}/${suggestion.step || stepsForLesson(lesson)[0]}`;
     go.textContent = suggestion.kind === 'next' ? 'Bắt đầu' : 'Tiếp tục';
     card.appendChild(go);
   }
@@ -69,7 +69,7 @@ export function mount(root, ctx) {
 
   // Card 3: current stage strip
   const current = LESSONS.find((l) => !lessonStatus(events, l)[STEPS[STEPS.length - 1]] ||
-    STEPS.some((s) => lessonStatus(events, l)[s] === 'todo'));
+    stepsForLesson(l).some((s) => lessonStatus(events, l)[s] === 'todo'));
   const stageCard = document.createElement('div');
   stageCard.className = 'card';
   const stage = current ? STAGES.find((s) => s.id === current.stage) : STAGES[STAGES.length - 1];

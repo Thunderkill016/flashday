@@ -3,11 +3,11 @@
  * `hidden` and moves focus (rule 1). Submitted work appends lessonEvents via
  * the store; unsubmitted work stays in the device-local session draft.
  */
-import { STEPS } from '../../content/schema.js';
 import { lessonById } from '../../content/a1/index.js';
 import { restoreDraft } from '../../core/session.js';
 import { appendLessonEvent } from '../../core/evidence.js';
 import { enrollChunks } from '../../core/scheduler.js';
+import { stepsForLesson } from '../../core/progress.js';
 import { checkTimeGate } from '../../core/time-gate.js';
 import { mountQuiz } from '../components/quiz.js';
 
@@ -36,7 +36,7 @@ export function mount(root, ctx) {
     return;
   }
 
-  const steps = lesson.kind === 'checkpoint' ? STEPS.slice(1) : [...STEPS];
+  const steps = [...stepsForLesson(lesson)];
   const draft = session_getDraft(ctx, lesson.id);
   const restore = restoreDraft(draft, lesson.contentVersion);
 
@@ -209,8 +209,9 @@ function recordEvent(step, payload, support) {
       support
     });
     // Chunks join the review pool when the drills are submitted (§3 rule:
-    // no "add to review" button).
-    if (step === 'prepare') enrollChunks(db, lesson);
+    // no "add to review" button). Checkpoints have no prepare step, so
+    // their chunks enroll on the first submitted step instead (idempotent).
+    if (step === 'prepare' || lesson.kind === 'checkpoint') enrollChunks(db, lesson);
   });
   // Clear that step's draft answers; write/speak text stays until summary.
   if (step === 'prepare' || step === 'read' || step === 'listen') {

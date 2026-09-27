@@ -1,5 +1,5 @@
 // Kết quả buổi học — per-step activity table from the lesson's own events.
-import { STEPS } from '../../core/progress.js';
+import { stepsForLesson } from '../../core/progress.js';
 import { dueChunks } from '../../core/scheduler.js';
 import { lessonById, nextLesson } from '../../content/a1/index.js';
 
@@ -34,7 +34,7 @@ export function mount(root, ctx) {
   section.appendChild(el('h2', lesson.title));
 
   const events = db.lessonEvents.filter((event) => event.lessonId === lesson.id);
-  const steps = lesson.kind === 'checkpoint' ? STEPS.slice(1) : STEPS;
+  const steps = stepsForLesson(lesson);
 
   const table = document.createElement('ul');
   table.className = 'summary-steps';
@@ -72,7 +72,7 @@ export function mount(root, ctx) {
   enrolledLine.className = 'view-placeholder';
   enrolledLine.textContent = enrolled
     ? `Cụm đã vào bộ ôn: ${enrolled}`
-    : 'Cụm đã vào bộ ôn: chưa có — nộp phần Hiểu mẫu để thêm';
+    : `Cụm đã vào bộ ôn: chưa có — nộp phần ${STEP_LABELS[steps[0]]} để thêm`;
   section.appendChild(enrolledLine);
 
   // Next action
@@ -89,7 +89,7 @@ export function mount(root, ctx) {
     action.textContent = `Ôn ${due} cụm đến hạn`;
   } else {
     const next = nextLesson(lesson.id);
-    action.href = next ? `#/lesson/${next.id}/prepare` : '#/path';
+    action.href = next ? `#/lesson/${next.id}/${stepsForLesson(next)[0]}` : '#/path';
     action.textContent = next ? `Bài tiếp theo: ${next.title}` : 'Về lộ trình';
   }
   const home = document.createElement('a');

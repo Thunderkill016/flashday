@@ -8,12 +8,19 @@ export { STEPS };
 
 const STEP_KIND = { prepare: 'drill', read: 'read', listen: 'listen', write: 'write', speak: 'speak' };
 
+// Checkpoints skip the prepare step — their offered steps start at read.
+export function stepsForLesson(lesson) {
+  return lesson?.kind === 'checkpoint' ? STEPS.slice(1) : STEPS;
+}
+
 export function lessonStatus(events, lesson) {
   const relevant = (Array.isArray(events) ? events : []).filter(
     (event) => String(event?.lessonId) === String(lesson?.id)
   );
   const status = { anyAttempt: relevant.length > 0 };
-  for (const step of STEPS) {
+  // Only steps the lesson offers get a status — a checkpoint's 'prepare'
+  // would otherwise sit at 'todo' forever and look permanently unfinished.
+  for (const step of stepsForLesson(lesson)) {
     status[step] = relevant.some(
       (event) => event.step === step || event.kind === STEP_KIND[step]
     ) ? 'attempted' : 'todo';
@@ -30,7 +37,7 @@ export function stageStatus(events, stage, lessons) {
   for (const lesson of stageLessons) {
     const status = lessonStatus(events, lesson);
     if (status.anyAttempt) started += 1;
-    if (STEPS.every((step) => status[step] === 'attempted')) attemptedAll += 1;
+    if (stepsForLesson(lesson).every((step) => status[step] === 'attempted')) attemptedAll += 1;
   }
   return { total: stageLessons.length, started, attemptedAll };
 }
@@ -66,7 +73,7 @@ export function suggestNext({ events, session, lessons }) {
   for (const lesson of ordered) {
     const status = lessonStatus(events, lesson);
     if (status.anyAttempt) {
-      const openStep = STEPS.find((step) => status[step] === 'todo');
+      const openStep = stepsForLesson(lesson).find((step) => status[step] === 'todo');
       if (openStep) {
         return { kind: 'finish', lessonId: String(lesson.id), step: openStep, reason: 'in-progress' };
       }
@@ -76,7 +83,7 @@ export function suggestNext({ events, session, lessons }) {
   // 3. Next: the first lesson with no attempts, in course order.
   for (const lesson of ordered) {
     if (!lessonStatus(events, lesson).anyAttempt) {
-      return { kind: 'next', lessonId: String(lesson.id), step: STEPS[0], reason: 'unstarted' };
+      return { kind: 'next', lessonId: String(lesson.id), step: stepsForLesson(lesson)[0], reason: 'unstarted' };
     }
   }
 

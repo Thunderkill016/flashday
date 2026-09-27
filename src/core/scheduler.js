@@ -1,7 +1,8 @@
 /*
  * Thin wrapper over fsrs.mjs for lesson chunk cards. A lesson's chunks enter
- * the review pool when the learner submits the prepare step — card identity
- * is `${lessonId}:${chunk.id}` so replays and re-enrolment are idempotent.
+ * the review pool when the learner submits the prepare step (checkpoints have
+ * none, so they enrol on the first submitted step) — card identity is
+ * `${lessonId}:${chunk.id}` so replays and re-enrolment are idempotent.
  *
  * Card state lives in db.fsrs as { [chunkKey]: serializedCard }; the
  * append-only lessonEvents remain the durable truth (fsrs is a cache).
