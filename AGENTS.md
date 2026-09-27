@@ -47,6 +47,18 @@ The legacy `flashday-22ae1` site was removed; `public/canonical.js` still
 bounces any non-canonical host (e.g. `flashday.firebaseapp.com`) to the
 canonical origin, path + query preserved.
 
+## AI tutor (`src/ai/tutor.js`)
+
+On-device inference only — Chrome's built-in `LanguageModel` (Gemini Nano):
+no API key, no quota, no network calls, nothing leaves the learner's device.
+Where the API is absent (non-Chrome, unsupported hardware) `tutor.available`
+is false and every AI control falls back to the static flow — never render a
+dead button. First use may trigger a one-time model download; progress is
+surfaced via `tutor.setStatusSink` in the runner. Structured output goes
+through `responseConstraint` (JSON Schema); mocks for tests go through
+`window.__FLASHDAY_TUTOR__`. Do NOT add a cloud/Gemini-API-key path — the
+user explicitly rejected key-bound AI.
+
 ## Pages and auth flow
 
 | Route        | File             | Role                                   |
