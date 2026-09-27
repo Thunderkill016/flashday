@@ -9,11 +9,11 @@
  *   compatibility and must not silently merge synonym expressions.
  */
 (function(root,factory){
-  if(typeof window==='undefined'&&typeof module==='object'&&module.exports) module.exports=factory(require('./flashday-product.js'));
+  if(typeof window==='undefined'&&typeof module==='object'&&module.exports) module.exports=factory(require('./flashday-product.js'),require('./a1-curriculum.js'));
   // Resolved lazily: the bundler may evaluate this module before the product
   // module assigns its global.
-  else root.FlashDayLearningEntry=factory(function(){return root.FlashDayProduct;});
-})(typeof globalThis!=='undefined'?globalThis:this,function(P){
+  else root.FlashDayLearningEntry=factory(function(){return root.FlashDayProduct;},root.FlashDayA1Curriculum);
+})(typeof globalThis!=='undefined'?globalThis:this,function(P,curriculum){
   'use strict';
   const product=()=>typeof P==='function'?P():P;
 
@@ -24,6 +24,7 @@
   const SOURCE_KINDS=new Set(['youtube','article','audio','transcript','manual']);
 
   const GUIDED_CLUSTERS=Object.freeze([
+    ...curriculum.clusters.filter(lesson=>lesson.id!=='a1-review'),
     {
       id:'a1-meeting-change',level:'A1',title:'Đọc tin hẹn gặp và xác nhận giờ',
       canDo:'Với câu ngắn và được đọc lại, tôi có thể tìm giờ, nơi hẹn và viết một lời xác nhận đơn giản.',
@@ -51,9 +52,11 @@
       },
       audioNote:'Bản pilot này dùng text và TTS để luyện; chưa có audio nguồn được kiểm duyệt cho từng Unit.'
     }
+    ,...curriculum.clusters.filter(lesson=>lesson.id==='a1-review')
   ]);
 
   const GUIDED_MODULES=Object.freeze([
+    ...curriculum.modules,
     {
       "id": "a1-meeting-basics",
       "clusterId": "a1-meeting-change",
@@ -205,6 +208,9 @@
   ]);
 
   const TRANSFER_MISSIONS=Object.freeze([
+    ...curriculum.missions,
+    {id:'a1-meeting-speaking',clusterId:'a1-meeting-change',level:'A1',title:'Nói hai vai: hẹn gặp',canDo:'Hỏi giờ, xin nhắc lại và xác nhận giờ/nơi.',setup:'A muốn gặp thứ Ba ở công viên lúc sáu giờ. B chỉ rảnh lúc tám giờ. Trao đổi ngắn rồi chốt giờ và nơi; đổi vai.',incomingMessage:'Người nghe có thể xin nói chậm hoặc nhắc lại.',instructions:'Nói rồi ghi lại câu xác nhận của bạn và thông tin người nghe hiểu được. Nếu không có bạn luyện, ghi rõ tự luyện.',modelAnswer:['Can we meet at eight?','OK. See you at eight at the park.'],selfCheck:['Đã hỏi và trả lời.','Chốt đúng tám giờ và công viên.','Ghi rõ có người nghe hay tự luyện.'],skill:'speak',requireWritten:true,requireSpoken:true},
+
     {
       id:'a1-meeting-change-transfer',clusterId:'a1-meeting-change',level:'A1',title:'Viết lời xác nhận giờ hẹn',
       canDo:'Tôi có thể phản hồi một thay đổi và chốt lại giờ hẹn mới bằng 1–2 câu ngắn.',
@@ -391,6 +397,7 @@
   // Imported as a source so the reader, encounter tracking, comprehension
   // check and word mining all apply unchanged.
   const LESSON_DIALOGUES=Object.freeze({
+    ...curriculum.dialogues,
     'a1-meeting-change':{
       sourceId:'lesson:a1-meeting-change:v2',
       contentVersion:2,
@@ -403,6 +410,14 @@
         ['Linh: OK. See you at four thirty.', 'Linh: Đồng ý. Hẹn gặp lúc bốn giờ rưỡi.'],
         ['Alex: See you at the cafe.', 'Alex: Hẹn gặp ở quán cà phê.']
       ],
+      listening:{
+        text:'Hi, this is Alex. Can we meet on Monday at five thirty? The cafe is next to the station.',
+        translation:'Chào, Alex đây. Mình gặp vào thứ Hai lúc năm giờ rưỡi được không? Quán cà phê ở cạnh ga.',
+        questions:[
+          {q:'Giờ được đề xuất?',options:['5:00','5:30','3:50'],answer:1,hint:'five thirty = 5:30.'},
+          {q:'Quán cà phê ở cạnh đâu?',options:['Ga','Chợ','Trường'],answer:0,hint:'next to the station.'}
+        ]
+      },
       // Situation comprehension — separate from the line-by-line quiz: does
       // the learner know what was agreed, not just what each line means?
       scenarioQuiz:[
@@ -656,6 +671,9 @@
     if(!db||typeof db!=='object')throw new Error('FlashDay DB is required');
     const attempt=normalizeTransferAttempt(raw,now);
     const mission=missionById(attempt.missionId);
+    if(mission.requireWritten&&!attempt.responseText)throw new Error('Cần viết câu trả lời hoặc ghi lại câu đã nói theo yêu cầu bài.');
+    if(mission.requireSpoken&&!attempt.spoke)throw new Error('Hãy thực hành nói thành tiếng trước khi lưu bài nói.');
+    attempt.skill=mission.skill||'integrated';
     // Structured check for the "confirm the final time" can-do: the
     // declared time must equal the scenario's agreed time AND appear in
     // the written response. Matching declaration alone ("See you at six" +
@@ -793,6 +811,24 @@
     return attempt;
   }
 
+  // Activity coverage only. Never derive a CEFR level from these counters.
+  function coursePracticeState(db){
+    const checks=Array.isArray(db?.comprehensionChecks)?db.comprehensionChecks:[];
+    const attempts=Array.isArray(db?.transferAttempts)?db.transferAttempts:[];
+    const lessons=GUIDED_CLUSTERS.map(cluster=>{
+      const source=LESSON_DIALOGUES[cluster.id]?.sourceId;
+      const lessonChecks=checks.filter(record=>record.sourceKey===`${source}:scenario`);
+      const listening=checks.filter(record=>record.sourceKey===`${source}:listening`&&Number(record.completedPlays)>0);
+      const missions=TRANSFER_MISSIONS.filter(mission=>mission.clusterId===cluster.id);
+      const writeIds=new Set(missions.filter(mission=>mission.skill!=='speak').map(mission=>mission.id));
+      const speakIds=new Set(missions.filter(mission=>mission.skill==='speak').map(mission=>mission.id));
+      return {id:cluster.id,read:lessonChecks.length>0,listen:listening.length>0,
+        write:attempts.some(attempt=>writeIds.has(attempt.missionId)&&String(attempt.responseText||'').trim()),
+        speak:attempts.some(attempt=>speakIds.has(attempt.missionId)&&attempt.spoke===true&&String(attempt.responseText||'').trim())};
+    });
+    return {total:lessons.length,lessons,counts:Object.fromEntries(SKILLS.map(skill=>[skill,lessons.filter(lesson=>lesson[skill]).length])),basis:'activity-only'};
+  }
+
   function missionState(db,missionId){
     const mission=missionById(missionId);
     if(!mission)throw new Error(`Unknown transfer mission: ${missionId}`);
@@ -804,11 +840,11 @@
   }
 
   return {
-    PROFILE_VERSION,CEFR_LEVELS,SKILLS,GUIDED_CLUSTERS,GUIDED_MODULES,TRANSFER_MISSIONS,LESSON_DIALOGUES,
+    A1_FOUNDATIONS:curriculum.foundations,PROFILE_VERSION,CEFR_LEVELS,SKILLS,GUIDED_CLUSTERS,GUIDED_MODULES,TRANSFER_MISSIONS,LESSON_DIALOGUES,
     normalizeLevel,normalizeProfile,ensureProfile,setSkillLevel,setOverallLevel,effectiveLevel,
     assessContent,normalizePhrase,identityForms,phraseAppears,matchUnitsInText,normalizeSourceKind,
     moduleById,clusterById,missionById,modulesForCluster,moduleState,clusterState,installGuidedModule,installGuidedCluster,
-    normalizeTransferAttempt,submitTransferAttempt,missionState,extractClockTimes,parseTimeInput,confirmsTime,checkFinalTimeConfirm,
+    coursePracticeState,normalizeTransferAttempt,submitTransferAttempt,missionState,extractClockTimes,parseTimeInput,confirmsTime,checkFinalTimeConfirm,
     UNIT_TRANSFER_DELAY_MS,dueUnitTransfer,submitUnitTransferAttempt
   };
 });

@@ -33,6 +33,9 @@
     ownerNamespace:learner?`${D.DB_BASE_KEY}:u:${learner.id}`:D.DB_BASE_KEY
   }));
   let profileSyncTimer=null;
+  const lessonSelectionKey=()=>`${D.dbKey(localStorage)}:a1-lesson`;
+  const storedLesson=localStorage.getItem(lessonSelectionKey());
+  let selectedClusterId=L.clusterById(storedLesson)?storedLesson:L.GUIDED_CLUSTERS[0].id;
 
   function esc(value){
     return String(value??'').replace(/[&<>'"]/g,(char)=>({
@@ -100,12 +103,17 @@
     const checks=(db.comprehensionChecks||[]).filter(ch=>String(ch.sourceKey)===lesson?.sourceId);
     const scenarioChecks=(db.comprehensionChecks||[]).filter(ch=>String(ch.sourceKey)===`${lesson?.sourceId}:scenario`);
     const bestOf=(list)=>list.length?Math.max(...list.map(c=>Number(c.correct)||0)):null;
-    const lessonChecked=checks.length>0;
-    const mission=L.TRANSFER_MISSIONS.find(m=>m.clusterId===clusterId);
-    const missionTries=mission?L.missionState(db,mission.id).attempts:0;
+    const lessonChecked=checks.length>0||scenarioChecks.length>0;
+    const missionTries=L.TRANSFER_MISSIONS.filter(m=>m.clusterId===clusterId).reduce((sum,m)=>sum+L.missionState(db,m.id).attempts,0);
     const evidence=[];
     if(checks.length)evidence.push(`kiểm hiểu tốt nhất ${bestOf(checks)}/${checks[0].total}`);
     if(scenarioChecks.length)evidence.push(`tình huống tốt nhất ${bestOf(scenarioChecks)}/${scenarioChecks[0].total}`);
+    const listeningChecks=(db.comprehensionChecks||[]).filter(ch=>ch.sourceKey===`${lesson?.sourceId}:listening`);
+    if(listeningChecks.length){
+      const audioAttempts=listeningChecks.filter(ch=>Number(ch.completedPlays)>0).length;
+      const supported=listeningChecks.filter(ch=>ch.transcriptViewed).length;
+      evidence.push(`bài nghe ${audioAttempts} lần có phát hết · ${supported} lần xem lời`);
+    }
     if(missionTries)evidence.push(`vận dụng ${missionTries} lần — tự đối chiếu`);
     const clusterUnitIds=new Set(state.unitIds);
     const unitTries=(db.transferAttempts||[]).filter(a=>a&&a.kind==='unit'&&clusterUnitIds.has(String(a.unitId))).length;
@@ -116,8 +124,14 @@
   // Progress changes must NOT re-render the whole card — that would wipe
   // live quiz feedback (hints, retry button) mid-interaction. Patch only
   // the step pills and evidence line in place.
+  function coursePracticeLabel(db){
+    const state=L.coursePracticeState(db);
+    return `Bài có lần thử: đọc ${state.counts.read}/${state.total} · nghe giọng máy ${state.counts.listen}/${state.total} · viết ${state.counts.write}/${state.total} · nói tự khai ${state.counts.speak}/${state.total}. Đây là hoạt động, không phải số bài đạt A1.`;
+  }
+
   function updateLessonProgress(){
     const db=store.refresh();
+    if($('coursePracticeSummary'))$('coursePracticeSummary').textContent=coursePracticeLabel(db);
     for(const cluster of L.GUIDED_CLUSTERS){
       const card=document.querySelector(`[data-cluster-card="${cluster.id}"]`);
       if(!card)continue;
@@ -130,7 +144,7 @@
       if(steps[1])steps[1].className=`lesson-step${lp.state.complete?' done':lp.state.installed?' active':''}`;
       if(steps[2]){
         steps[2].className=`lesson-step${lp.missionTries?' done':''}`;
-        steps[2].textContent=lp.missionTries?'Đã thử vận dụng':'3 · Vận dụng đổi giờ';
+        steps[2].textContent=lp.missionTries?'Đã thử vận dụng':'3 · Viết / nói vận dụng';
       }
       const ev=card.querySelector('.lesson-evidence');
       const evText=lp.evidence.length?`Bằng chứng: ${lp.evidence.join(' · ')} — luyện tập tự đối chiếu, chưa phải đánh giá đạt.`:'';
@@ -146,7 +160,7 @@
   function renderGuidedModules(){
     const root=$('guidedModules');if(!root)return;
     const db=store.refresh();
-    root.innerHTML=L.GUIDED_CLUSTERS.map(cluster=>{
+    root.innerHTML=`<details class="lesson-foundations"><summary>Tra cứu nền tảng: chữ cái, số, ngày, mẫu câu</summary>${L.A1_FOUNDATIONS.map((entry,index)=>`<details><summary>${esc(entry.title)}</summary><p>${esc(entry.text)}</p><p>${esc(entry.note)}</p><button type="button" class="ghost-btn" data-foundation-audio="${index}">Nghe mẫu giọng máy</button></details>`).join('')}</details><p id="coursePracticeSummary" class="cluster-note" aria-live="polite">${esc(coursePracticeLabel(db))}</p><label class="field" for="a1LessonSelect">Lộ trình A1 — chọn bài<select id="a1LessonSelect">${L.GUIDED_CLUSTERS.map((cluster,index)=>`<option value="${esc(cluster.id)}" ${cluster.id===selectedClusterId?'selected':''}>${index+1}. ${esc(cluster.title.replace(/^\d+\. /,''))}</option>`).join('')}</select></label><p class="cluster-note">Học từng bài: chuẩn bị → đọc/nghe → luyện câu → viết/nói → ôn lại. Các bài đã làm là lịch sử hoạt động, không phải chứng nhận A1.</p>`+L.GUIDED_CLUSTERS.filter(cluster=>cluster.id===selectedClusterId).map(cluster=>{
       const state=L.clusterState(db,cluster.id);
       const modules=L.modulesForCluster(cluster.id);
       const remaining=Math.max(0,state.total-state.installed);
@@ -164,7 +178,7 @@
         ${prep?`<details class="lesson-preparation" open>
           <summary>① Chuẩn bị và tập câu ngắn</summary>
           <p>${esc(prep.prerequisite)}</p>
-          <h5>Từ và giờ cần biết</h5><ul>${prep.glossary.map(text=>`<li>${esc(text)}</li>`).join('')}</ul>
+          <h5>Từ cần biết</h5><ul>${prep.glossary.map(text=>`<li>${esc(text)}</li>`).join('')}</ul>
           <h5>Cách dùng</h5><ul>${prep.patterns.map(text=>`<li>${esc(text)}</li>`).join('')}</ul>
           <h5>Ví dụ từng bước</h5><ol>${prep.worked.map(text=>`<li>${esc(text)}</li>`).join('')}</ol>
           <p>Luyện có gợi ý: được xem phần hướng dẫn. Kết quả này không đánh giá trình độ A1.</p>
@@ -173,14 +187,22 @@
         ${lesson?`<div class="lesson-flow">
           <span class="lesson-step${lessonChecked?' done':lessonImported?' active':''}">${lessonChecked?'Đã làm kiểm hiểu':'1 · Đọc hội thoại & kiểm hiểu'}</span>
           <span class="lesson-step${state.complete?' done':state.installed?' active':''}">2 · Unit vào bộ ôn</span>
-          <span class="lesson-step${missionTries?' done':''}">${missionTries?'Đã thử vận dụng':'3 · Vận dụng đổi giờ'}</span>
+          <span class="lesson-step${missionTries?' done':''}">${missionTries?'Đã thử vận dụng':'3 · Viết / nói vận dụng'}</span>
         </div>
         ${evidence.length?`<p class="lesson-evidence">Bằng chứng: ${esc(evidence.join(' · '))} — luyện tập tự đối chiếu, chưa phải đánh giá đạt.</p>`:''}
         <button class="module-action lesson-open" type="button" data-lesson-open="${esc(cluster.id)}">${lessonImported?'Đọc lại hội thoại dẫn nhập':'② Đọc hội thoại — rồi làm 3 câu tình huống bên dưới'}</button>
         ${lesson.scenarioQuiz?.length?`<details class="lesson-scenario">
-          <summary>Kiểm hiểu tình huống — ${lesson.scenarioQuiz.length} câu (giờ đầu, giờ chốt, địa điểm)</summary>
+          <summary>Kiểm hiểu tình huống — ${lesson.scenarioQuiz.length} câu về thông tin trong bài</summary>
           <div class="lesson-quiz" data-scenario-quiz="${esc(cluster.id)}"></div>
         </details>`:''}`:''}
+        ${lesson?.listening?`<details class="lesson-listening">
+          <summary>③ Luyện nghe — giọng máy, có thể nghe lại</summary>
+          <p>Nghe một đoạn mới rồi trả lời. Lời thoại chỉ hiện khi bạn yêu cầu; lần thử có xem lời được ghi là có hỗ trợ. Giọng máy chưa được thẩm định như bài thi nghe.</p>
+          <button type="button" class="ghost-btn" data-listen-play>Nghe đoạn mới</button>
+          <button type="button" class="ghost-btn" data-listen-transcript>Xem lời và nghĩa (có hỗ trợ)</button>
+          <p data-listen-status role="status"></p><p data-listen-text class="hidden"></p>
+          <div class="lesson-quiz" data-listening-quiz="${esc(cluster.id)}"></div>
+        </details>`:''}
         <details class="guided-example">
           <summary>${esc(cluster.workedExample?.label||'Xem ví dụ')}</summary>
           <ol>${example}</ol>
@@ -193,6 +215,12 @@
         <button class="module-action" type="button" data-guided-cluster="${esc(cluster.id)}" ${state.complete?'disabled':''}>${esc(buttonLabel)}</button>
       </article>`;
     }).join('');
+    root.querySelectorAll('[data-foundation-audio]').forEach(button=>button.onclick=()=>speakSentence(L.A1_FOUNDATIONS[Number(button.dataset.foundationAudio)].text));
+    $('a1LessonSelect').onchange=(event)=>{
+      window.speechSynthesis?.cancel();
+      selectedClusterId=event.target.value;localStorage.setItem(lessonSelectionKey(),selectedClusterId);renderGuidedModules();renderTransferMissions();
+    };
+    root.querySelectorAll('[data-listening-quiz]').forEach(box=>bindListeningPractice(box,box.dataset.listeningQuiz));
     root.querySelectorAll('[data-guided-cluster]').forEach(button=>{
       button.onclick=()=>installCluster(button.dataset.guidedCluster);
     });
@@ -262,7 +290,7 @@
       <button class="module-action transfer-reveal" type="button" data-unit-reveal ${due.previousAttempt?'':'disabled'}>Xem câu mẫu sau khi đã thử</button>
       <div class="transfer-model hidden" id="unitTransferModel"><strong>Mẫu từ câu đã học — chỉ để đối chiếu</strong><p class="model-caveat">Tự đối chiếu theo checklist — đây là bài luyện, chưa phải đánh giá đạt.</p>${due.item.exampleSentence?`<p>${esc(due.item.exampleSentence)}</p>`:''}${due.item.exampleTranslation?`<p><em>${esc(due.item.exampleTranslation)}</em></p>`:''}<ul><li>Câu mới có dùng đúng cụm không?</li><li>Ngữ cảnh có khác câu gốc không?</li></ul><label class="transfer-check"><input type="checkbox" data-unit-self-review> Tôi đã so sánh câu của mình với mẫu</label><button class="primary-btn transfer-save" type="button" data-unit-save>Lưu — đã tự đối chiếu</button></div>
     </article>`:'';
-    root.innerHTML=unitHtml+L.TRANSFER_MISSIONS.map(mission=>{
+    root.innerHTML=unitHtml+L.TRANSFER_MISSIONS.filter(mission=>mission.clusterId===selectedClusterId).map(mission=>{
       const cluster=L.clusterById(mission.clusterId);
       const clusterState=L.clusterState(db,mission.clusterId);
       const state=L.missionState(db,mission.id);
@@ -321,7 +349,10 @@
     const spoke=card.querySelector('[data-transfer-spoke]');
     const reveal=card.querySelector('[data-transfer-reveal]');
     if(!response||!spoke||!reveal)return;
-    const updateReveal=()=>{reveal.disabled=!response.value.trim()&&!spoke.checked;};
+    const updateReveal=()=>{
+      const mission=L.missionById(missionId);
+      reveal.disabled=(!response.value.trim()&&!spoke.checked)||(mission.requireWritten&&!response.value.trim())||(mission.requireSpoken&&!spoke.checked);
+    };
     response.oninput=updateReveal;
     spoke.onchange=updateReveal;
     reveal.onclick=()=>{
@@ -329,6 +360,8 @@
       // declare the final time, and a written attempt must state that same
       // time in a time position — a bare digit or number word won't do.
       const mission=L.missionById(missionId);
+      if(mission.requireWritten&&!response.value.trim()){cardMessage(card,'Cần viết câu trả lời trước khi xem mẫu.');return;}
+      if(mission.requireSpoken&&!spoke.checked){cardMessage(card,'Hãy thực hành nói trước khi xem mẫu.');return;}
       if(mission?.requireFinalTimeConfirm){
         const gate=L.checkFinalTimeConfirm(mission,{
           declaredFinalTime:card.querySelector(`[id="finalTime-${missionId}"]`)?.value,
@@ -602,10 +635,59 @@
   // (initial time / final agreed time / place) with hints on wrong answers.
   // Records share the append-only comprehensionChecks log under the
   // '<lesson>:scenario' key — still practice evidence, not assessment.
+  function bindListeningPractice(box,clusterId){
+    const lesson=L.LESSON_DIALOGUES[clusterId];
+    const panel=box.closest('.lesson-listening');
+    const play=panel.querySelector('[data-listen-play]');
+    const transcript=panel.querySelector('[data-listen-transcript]');
+    const status=panel.querySelector('[data-listen-status]');
+    const text=panel.querySelector('[data-listen-text]');
+    box.listeningEvidence={ready:false,completedPlays:0,transcriptViewed:false};
+    let activeUtterance=null;
+    const refreshReady=()=>{
+      const submit=box.querySelector('.sq-submit');
+      if(submit&&!box.querySelector('.quiz-opt:disabled'))submit.disabled=!box.listeningEvidence.ready||box.querySelectorAll('.quiz-opt.picked').length!==lesson.listening.questions.length;
+    };
+    renderScenarioQuiz(box,clusterId,'listening');
+    transcript.onclick=()=>{
+      text.textContent=`${lesson.listening.text} — ${lesson.listening.translation}`;
+      text.classList.remove('hidden');transcript.setAttribute('aria-expanded','true');
+      box.listeningEvidence.transcriptViewed=true;box.listeningEvidence.ready=true;
+      status.textContent='Đã mở lời. Lần thử này được ghi là có hỗ trợ văn bản.';refreshReady();
+    };
+    play.onclick=()=>{
+      if(!window.speechSynthesis||!window.SpeechSynthesisUtterance){
+        status.textContent='Trình duyệt không có giọng đọc. Bạn có thể mở lời để luyện đọc; không ghi là đã nghe.';return;
+      }
+      const synth=window.speechSynthesis;
+      const voices=synth.getVoices();
+      const english=voices.find(voice=>/^en[-_]/i.test(voice.lang));
+      if(voices.length&&!english){status.textContent='Chưa có giọng tiếng Anh trên thiết bị. Mở lời để luyện đọc hoặc thử thiết bị khác.';return;}
+      synth.cancel();
+      const utterance=new SpeechSynthesisUtterance(lesson.listening.text);
+      activeUtterance=utterance;
+      utterance.lang='en-US';if(english)utterance.voice=english;
+      // Deliberately slower than the device default for supported beginner practice.
+      const BEGINNER_TTS_RATE=0.8;utterance.rate=BEGINNER_TTS_RATE;
+      play.disabled=true;status.textContent='Đang phát giọng máy…';
+      utterance.onend=()=>{
+        if(!box.isConnected||activeUtterance!==utterance)return;
+        play.disabled=false;box.listeningEvidence.completedPlays++;box.listeningEvidence.ready=true;
+        status.textContent=`Đã phát hết ${box.listeningEvidence.completedPlays} lần. Bạn có thể nghe lại.`;refreshReady();
+      };
+      utterance.onerror=()=>{
+        if(!box.isConnected||activeUtterance!==utterance)return;
+        play.disabled=false;status.textContent='Không phát xong âm thanh; chưa ghi nhận lượt nghe. Thử lại hoặc mở lời.';
+      };
+      synth.speak(utterance);
+    };
+  }
+
   function renderScenarioQuiz(box,clusterId,kind='scenario'){
     const lesson=L.LESSON_DIALOGUES?.[clusterId];
     const isPreparation=kind==='preparation';
-    const questions=isPreparation?L.clusterById(clusterId)?.preparation?.practiceQuiz:lesson?.scenarioQuiz;
+    const isListening=kind==='listening';
+    const questions=isPreparation?L.clusterById(clusterId)?.preparation?.practiceQuiz:isListening?lesson?.listening?.questions:lesson?.scenarioQuiz;
     if(!box||!questions?.length)return;
     const key=`${lesson.sourceId}:${kind}`;
     const picked=new Map();
@@ -621,9 +703,10 @@
       q.querySelectorAll('.quiz-opt').forEach(b=>b.classList.remove('picked'));
       btn.classList.add('picked');
       picked.set(Number(q.dataset.qi),Number(btn.dataset.oi));
-      submit.disabled=picked.size<questions.length;
+      submit.disabled=picked.size<questions.length||(isListening&&!box.listeningEvidence?.ready);
     });
     submit.onclick=()=>{
+      if(isListening&&!box.listeningEvidence?.ready)return;
       let correct=0;
       for(const q of box.querySelectorAll('.sq-q')){
         const qi=Number(q.dataset.qi);
@@ -638,7 +721,7 @@
         const hint=q.querySelector('.sq-hint');
         if(!ok&&hint){hint.textContent=questions[qi].hint;hint.classList.remove('hidden');}
       }
-      const record={id:SC.stableId('comp',[key,Date.now()].join('|')),sourceKey:key,correct,total:questions.length,at:Date.now(),activity:isPreparation?'supported-language-practice':'scenario-reading',contentVersion:lesson.contentVersion||1};
+      const record={id:SC.stableId('comp',[key,Date.now()].join('|')),sourceKey:key,correct,total:questions.length,at:Date.now(),activity:isPreparation?'supported-language-practice':isListening?(box.listeningEvidence.completedPlays?'tts-listening-practice':'listening-transcript-practice'):'scenario-reading',contentVersion:lesson.contentVersion||1,...(isListening?{audioSource:'browser-tts',completedPlays:box.listeningEvidence.completedPlays,transcriptViewed:box.listeningEvidence.transcriptViewed,assistance:box.listeningEvidence.transcriptViewed?'transcript-viewed':'tts-only'}:{})};
       store.transact((db)=>{db.comprehensionChecks=Array.isArray(db.comprehensionChecks)?db.comprehensionChecks:[];db.comprehensionChecks.push(record);return {result:true};});
       submit.disabled=true;
       const done=correct===questions.length;

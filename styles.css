@@ -331,8 +331,8 @@ svg { display: block; }
 .lesson-step.done::after { content: ' ✓'; }
 .lesson-open { margin-top: 12px; }
 .lesson-evidence { margin: 10px 0 0; color: var(--fd-text-tertiary); font-size: 12px; line-height: 1.5; }
-.lesson-scenario { margin: 14px 0 0; padding: 14px 0 0; border-top: 1px solid var(--fd-border); }
-.lesson-scenario summary { color: var(--fd-text-primary); cursor: pointer; font-size: 14px; font-weight: 800; }
+.lesson-scenario, .lesson-listening { margin: 14px 0 0; padding: 14px 0 0; border-top: 1px solid var(--fd-border); }
+.lesson-scenario summary, .lesson-listening summary { color: var(--fd-text-primary); cursor: pointer; font-size: 14px; font-weight: 800; }
 /* Shared quiz controls need theme tokens outside the source reader too. */
 .lesson-quiz { --rbg-line: var(--fd-border-interactive); --rtext: var(--fd-text-primary); --rtext-sub: var(--fd-text-secondary); --radius-md: var(--fd-radius-md); --teal-400: var(--fd-accent); --teal-500: var(--fd-accent); margin-top: 12px; display: grid; gap: 14px; }
 .sq-hint { margin: 6px 0 0; color: var(--fd-error); font-size: 12px; }
@@ -981,3 +981,11 @@ mark.token-new { border-bottom: 2px solid var(--memory-new); padding: 0 1px; }
 
 /* Reveal transition nhẹ cho card */
 .study-card .feedback { transition: opacity 0.25s ease; }
+
+.lesson-listening p { font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
+#a1LessonSelect { width: 100%; min-width: 0; max-width: 100%; font-size: 16px; padding: 10px; }
+
+.lesson-foundations { margin-bottom: 18px; }
+.lesson-foundations details { margin-top: 12px; padding: 12px; border: 1px solid var(--fd-border); border-radius: var(--fd-radius-md); }
+.lesson-foundations summary { cursor: pointer; font-weight: 700; }
+.lesson-foundations p { font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }

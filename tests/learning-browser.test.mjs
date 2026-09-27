@@ -23,6 +23,7 @@ try {
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await page.goto(`${origin}app/?preview`);
+    await page.locator("#a1LessonSelect").selectOption("a1-meeting-change");
     const preparation = page.locator("[data-preparation-quiz]");
     assert.equal(
       await preparation
@@ -121,7 +122,9 @@ try {
         .map((record) => record.correct);
     });
     assert.deepEqual(scores, [0, 3]);
-    const mission = page.locator("[data-transfer-mission]");
+    const mission = page.locator(
+      '[data-transfer-mission="a1-meeting-change-transfer"]',
+    );
     await mission.locator('input[id^="finalTime-"]').fill("7");
     await mission.locator("textarea").fill("See you at 7:30pm.");
     await mission.locator("[data-transfer-reveal]").click();
@@ -207,6 +210,181 @@ try {
   }
   // Synthetic prior review: exercise next-day practice without pretending
   // that an automated fixture is evidence of a real learner's retention.
+  // Real curriculum UI, synthetic speech events: tests lifecycle/evidence, not audio quality.
+  {
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+    });
+    await context.addInitScript(() => {
+      window.__speech = [];
+      window.SpeechSynthesisUtterance = class {
+        constructor(text) {
+          this.text = text;
+        }
+      };
+      Object.defineProperty(window, "speechSynthesis", {
+        value: {
+          getVoices: () => [{ lang: "en-US" }],
+          cancel() {},
+          speak(utterance) {
+            window.__speech.push(utterance);
+          },
+        },
+        configurable: true,
+      });
+    });
+    const page = await context.newPage();
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page.goto(`${origin}app/?preview`);
+    const ids = await page
+      .locator("#a1LessonSelect option")
+      .evaluateAll((nodes) => nodes.map((node) => node.value));
+    assert.equal(ids.length, 13);
+    for (const id of ids) {
+      await page.locator("#a1LessonSelect").selectOption(id);
+      assert.equal(
+        await page.locator(`[data-cluster-card="${id}"]`).count(),
+        1,
+      );
+      assert.equal(
+        await page.locator("[data-preparation-quiz] .sq-q").count(),
+        3,
+      );
+      assert.equal(await page.locator("[data-scenario-quiz] .sq-q").count(), 3);
+      assert.equal(await page.locator("[data-listen-text]").isVisible(), false);
+      assert.equal(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+        true,
+        `curriculum overflow: ${id}`,
+      );
+    }
+    await page.locator("#a1LessonSelect").selectOption("a1-introductions");
+    await page.locator(".lesson-listening summary").click();
+    const listening = page.locator("[data-listening-quiz]");
+    for (const [index, answer] of [1, 0].entries())
+      await listening
+        .locator(".sq-q")
+        .nth(index)
+        .locator(".quiz-opt")
+        .nth(answer)
+        .click();
+    assert.equal(
+      await listening.locator(".sq-submit").isDisabled(),
+      true,
+      "answers alone cannot count as listening",
+    );
+    await page.locator("[data-listen-play]").click();
+    await page.evaluate(() => window.__speech.at(-1).onerror());
+    assert.equal(
+      await listening.locator(".sq-submit").isDisabled(),
+      true,
+      "failed playback cannot unlock listening",
+    );
+    await page.locator("[data-listen-play]").click();
+    assert.equal(
+      await listening.locator(".sq-submit").isDisabled(),
+      true,
+      "wait until speech completes",
+    );
+    await page.evaluate(() => window.__speech.at(-1).onend());
+    await listening.locator(".sq-submit").click();
+    assert.match(await listening.locator(".sq-result").innerText(), /2\/2/);
+    let records = await page.evaluate(
+      () =>
+        JSON.parse(
+          localStorage.getItem(window.FlashDayData.dbKey(localStorage)),
+        ).comprehensionChecks,
+    );
+    assert.equal(records.at(-1).assistance, "tts-only");
+    assert.equal(records.at(-1).completedPlays, 1);
+    // Separate lesson uses transcript fallback; it must not add to the listening activity count.
+    await page.locator("#a1LessonSelect").selectOption("a1-contact");
+    await page.locator(".lesson-listening summary").click();
+    await page.locator("[data-listen-transcript]").click();
+    for (const [index, answer] of [1, 0].entries())
+      await listening
+        .locator(".sq-q")
+        .nth(index)
+        .locator(".quiz-opt")
+        .nth(answer)
+        .click();
+    await listening.locator(".sq-submit").click();
+    records = await page.evaluate(
+      () =>
+        JSON.parse(
+          localStorage.getItem(window.FlashDayData.dbKey(localStorage)),
+        ).comprehensionChecks,
+    );
+    assert.equal(records.at(-1).activity, "listening-transcript-practice");
+    assert.equal(records.at(-1).assistance, "transcript-viewed");
+    assert.equal(records.at(-1).completedPlays, 0);
+    assert.match(
+      await page.locator("#coursePracticeSummary").innerText(),
+      /nghe giọng máy 1\/13/,
+    );
+    await page.locator("#a1LessonSelect").selectOption("a1-introductions");
+    await page.locator("[data-guided-cluster]").click();
+    await page.locator("[data-guided-cluster]:disabled").waitFor();
+    assert.equal(
+      await page.locator("#a1LessonSelect").inputValue(),
+      "a1-introductions",
+      "selection survives import reload",
+    );
+    const writing = page.locator(
+      '[data-transfer-mission="a1-introductions-writing"]',
+    );
+    await writing.locator("[data-transfer-spoke]").check();
+    assert.equal(
+      await writing.locator("[data-transfer-reveal]").isDisabled(),
+      true,
+      "spoken checkbox cannot bypass written work",
+    );
+    await writing
+      .locator("textarea")
+      .fill("My name is An. I live in Hue. What is your name?");
+    await writing.locator("[data-transfer-reveal]").click();
+    await writing.locator("[data-transfer-save]").click();
+    const speaking = page.locator(
+      '[data-transfer-mission="a1-introductions-speaking"]',
+    );
+    await speaking
+      .locator("textarea")
+      .fill("I am An. I practised both roles alone.");
+    assert.equal(
+      await speaking.locator("[data-transfer-reveal]").isDisabled(),
+      true,
+    );
+    await speaking.locator("[data-transfer-spoke]").check();
+    await speaking.locator("[data-transfer-reveal]").click();
+    await speaking.locator("[data-transfer-save]").click();
+    const result = await page.evaluate(() => {
+      const db = JSON.parse(
+        localStorage.getItem(window.FlashDayData.dbKey(localStorage)),
+      );
+      return {
+        attempts: db.transferAttempts,
+        state: window.FlashDayLearningEntry.coursePracticeState(db),
+        profile: db.learningProfile,
+      };
+    });
+    assert.deepEqual(
+      result.attempts.map((a) => a.skill),
+      ["write", "speak"],
+    );
+    assert(result.attempts.every((a) => a.grading === "self-check"));
+    assert.equal(result.state.counts.write, 1);
+    assert.equal(result.state.counts.speak, 1);
+    assert(!result.profile?.overallLevel);
+    assert.deepEqual(errors, []);
+    await context.close();
+    console.log(
+      "A1 curriculum browser: lesson navigation, speech failure/completion, assistance and task evidence PASS",
+    );
+  }
+
   {
     const context = await browser.newContext({
       viewport: { width: 390, height: 844 },
@@ -240,6 +418,7 @@ try {
       );
     });
     await page.goto(`${origin}app/?preview`);
+    await page.locator("#a1LessonSelect").selectOption("a1-meeting-change");
     const task = page.locator("[data-unit-transfer]");
     await task
       .locator("#unitTransferResponse")
@@ -303,6 +482,7 @@ try {
     const context = await browser.newContext();
     const page = await context.newPage();
     await page.goto(`${origin}app/?preview`);
+    await page.locator("#a1LessonSelect").selectOption("a1-meeting-change");
     await page.locator("[data-guided-cluster]").waitFor();
     await page.evaluate(() => {
       const D = window.FlashDayData;
