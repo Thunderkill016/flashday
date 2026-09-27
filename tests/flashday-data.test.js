@@ -52,4 +52,29 @@ const D=require('../flashday-data.js');
   assert.strictEqual(item.origin,'source-captured');
 }
 
-console.log('FlashDay data layer: 4 checks passed');
+{
+  // F1: per-account local namespaces. Guest/preview data lives at the base
+  // key; signing in claims it into the uid slot and empties the shared pool
+  // so a second account on the same browser can never inherit it.
+  const storage={ _m:new Map(),
+    getItem(k){ return this._m.has(k)?this._m.get(k):null; },
+    setItem(k,v){ this._m.set(k,String(v)); },
+    removeItem(k){ this._m.delete(k); } };
+  assert.strictEqual(D.dbKey(storage), D.DB_BASE_KEY, 'no owner marker → shared guest key');
+  storage.setItem(D.DB_BASE_KEY, JSON.stringify({ items: [{ id: 'a-only' }] }));
+  D.claimDbNamespace(storage, 'alice');
+  assert.strictEqual(D.dbKey(storage), `${D.DB_BASE_KEY}:u:alice`, 'marker routes reads to the uid namespace');
+  assert.deepStrictEqual(JSON.parse(storage.getItem(`${D.DB_BASE_KEY}:u:alice`)).items, [{ id: 'a-only' }], 'guest work claimed into the account');
+  assert.strictEqual(storage.getItem(D.DB_BASE_KEY), null, 'shared pool cleared after claim');
+  // A second account must not see alice's claimed data.
+  D.claimDbNamespace(storage, 'bob');
+  assert.strictEqual(D.dbKey(storage), `${D.DB_BASE_KEY}:u:bob`);
+  assert.strictEqual(storage.getItem(`${D.DB_BASE_KEY}:u:bob`), null, 'bob gets a clean namespace — no alice leftovers');
+  assert(storage.getItem(`${D.DB_BASE_KEY}:u:alice`) != null, "alice's namespace is untouched");
+  // Sign-out returns to the (now empty) shared pool.
+  D.releaseDbNamespace(storage);
+  assert.strictEqual(D.dbKey(storage), D.DB_BASE_KEY);
+  assert.strictEqual(storage.getItem(D.DB_BASE_KEY), null, 'sign-out lands on an empty guest pool, not alice data');
+}
+
+console.log('FlashDay data layer: 5 checks passed');

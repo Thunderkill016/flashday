@@ -167,6 +167,26 @@ const C=require('../flashday-cloud.js');
 }
 
 {
+  // F5: a verbatim copy of the unit's stored example is recall, not transfer —
+  // the produce step needs a sentence carrying NEW detail.
+  const T0=1_700_000_000_000;
+  const db=D.createInitialDb([],1000);
+  const item=D.addItem(db,{target:"I'm on my way.",meaning:'đang trên đường',
+    exampleSentence:"I'm on my way. I'll be there in ten minutes."});
+  db.events=[{id:'e1',mode:'write',cardId:'c1',unitIds:[item.id],ratings:{[item.id]:3},answeredAt:T0}];
+  assert.throws(
+    ()=>L.submitUnitTransferAttempt(db,{unitId:item.id,responseText:"I'm on my way. I'll be there in ten minutes."}),
+    /trùng nguyên/,'verbatim copy of the example is not a new production'
+  );
+  assert.throws(
+    ()=>L.submitUnitTransferAttempt(db,{unitId:item.id,responseText:"So — I'm on my way. I'll be there in ten minutes."}),
+    /trùng nguyên/,'copy + padding is still a copy'
+  );
+  const ok=L.submitUnitTransferAttempt(db,{unitId:item.id,responseText:"Sorry, I'm on my way to the airport — traffic is bad."});
+  assert.equal(ok.unitId,item.id,'a sentence with changed detail passes');
+}
+
+{
   // Evidence-first eligibility: when an event carries the M3 split, the
   // unaidedUnits list is the authority — self-report cannot launder aided
   // recall into a transfer trigger.

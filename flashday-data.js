@@ -79,5 +79,43 @@
     return db.items.every(item=>expected.get(item.id)===normalizeKey(item.target));
   }
 
-  return {SEED_ITEMS,HYBRID_SCHEDULER,HYBRID_SOURCE,createInitialDb,migrateDb,addItem,isPristineDb,normalizeKey,uid,clone};
+  // Per-account local namespaces. The shared (un-namespaced) record is the
+  // guest/preview pool; once an account signs in, its learner data must live
+  // under its own uid key so a second account on the same browser never
+  // merges with or uploads the first account's leftovers.
+  const DB_BASE_KEY='flashday-memory-engine-repo-driven';
+  const DB_OWNER_KEY='flashday:db-owner';
+
+  function dbKey(storage){
+    let owner='';
+    try{owner=String(storage?.getItem(DB_OWNER_KEY)||'').trim();}catch(_error){}
+    return owner?`${DB_BASE_KEY}:u:${owner}`:DB_BASE_KEY;
+  }
+
+  function claimDbNamespace(storage,uid){
+    // Marker first: even if the claim itself is interrupted, later reads
+    // must not fall back into the shared pool while a session is active.
+    try{storage.setItem(DB_OWNER_KEY,String(uid));}catch(_error){return dbKey(storage);}
+    const uidKey=`${DB_BASE_KEY}:u:${uid}`;
+    try{
+      if(storage.getItem(uidKey)==null){
+        const guestRaw=storage.getItem(DB_BASE_KEY);
+        if(guestRaw!=null){
+          // First sign-in on this browser: adopt guest/preview work into the
+          // account namespace, then empty the shared pool so another account
+          // cannot inherit it. When the uid namespace already exists the
+          // guest pool is left alone — anonymous work stays anonymous.
+          storage.setItem(uidKey,guestRaw);
+          storage.removeItem(DB_BASE_KEY);
+        }
+      }
+    }catch(_error){}
+    return uidKey;
+  }
+
+  function releaseDbNamespace(storage){
+    try{storage.removeItem(DB_OWNER_KEY);}catch(_error){}
+  }
+
+  return {SEED_ITEMS,HYBRID_SCHEDULER,HYBRID_SOURCE,DB_BASE_KEY,DB_OWNER_KEY,dbKey,claimDbNamespace,releaseDbNamespace,createInitialDb,migrateDb,addItem,isPristineDb,normalizeKey,uid,clone};
 });

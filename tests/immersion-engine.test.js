@@ -25,8 +25,8 @@ const mixed = (unitId) => (unitId === 'u1' ? 'known' : 'learning');
 {
   const db = dbFixture();
   db.captures = [
-    cap('a1', "I'm on my way to work.", 'video-a', 0, 4),
-    cap('a2', 'Wait, on my way already.', 'video-a', 4, 7),
+    cap('a1', 'On my way — ended up.', 'video-a', 0, 4),
+    cap('a2', "I'm on my way.", 'video-a', 4, 7),
     cap('b1', 'Cryptic jargon nobody taught you yesterday.', 'video-b', 0, 5)
   ];
   const sources = IM.assessSources(db, { taskState: known });
@@ -35,7 +35,7 @@ const mixed = (unitId) => (unitId === 'u1' ? 'known' : 'learning');
   // Coverage is measured honestly: only chars inside deck units count, so a
   // 9-char chunk inside a longer sentence is partial coverage, not fake 100%.
   assert(sources[0].coverage > 0 && sources[0].coverage < 1);
-  assert.strictEqual(sources[0].verdict.key, 'easy', 'all covered units known, no learning → easy');
+  assert.strictEqual(sources[0].verdict.key, 'easy', 'high absolute coverage + all covered units known → easy');
   assert.strictEqual(sources[1].coverage, 0, 'no deck match = zero coverage, not a low guess');
   assert.strictEqual(sources[1].verdict.key, 'thin');
   assert.strictEqual(sources[1].outsidePct, 100);
@@ -171,6 +171,26 @@ const mixed = (unitId) => (unitId === 'u1' ? 'known' : 'learning');
   // Encountered lines are quizzed first — the check covers what was read.
   const seenQuiz = IM.comprehensionQuiz({ encounters: [{ captureId: 'l6', kind: 'line-viewed' }] }, caps, { count: 1 });
   assert.strictEqual(seenQuiz.questions[0].captureId, 'l6', 'encountered line must be picked first');
+
+  // Two lines sharing one translation cannot form distractors — a one-option
+  // question is a guaranteed click, so it must be excluded, and a source where
+  // every translated line means the same thing reports unavailable.
+  const dupA = tcap('d1', 'Hi.', 'Chào.', 0);
+  const dupB = tcap('d2', 'Hello.', 'Chào.', 1);
+  const sameMeaning = IM.comprehensionQuiz({ encounters: [] }, [dupA, dupB]);
+  assert.strictEqual(sameMeaning.available, false, 'identical translations give no real distractors');
+  const mixed = IM.comprehensionQuiz({ encounters: [] }, [dupA, dupB, tcap('d3', 'Bye.', 'Tạm biệt.', 2)]);
+  assert.strictEqual(mixed.available, true);
+  assert(mixed.questions.every((q) => q.options.length >= 2), 'every question needs a real distractor');
+  assert(!mixed.questions.some((q) => q.captureId === 'd2') || mixed.questions.length >= 1);
+
+  // F4: a source that is 83% outside the deck must not be labeled 'easy' —
+  // coverage verdicts describe deck fit, not claimed comprehension.
+  // F4: a source that is mostly outside the deck must not be labeled 'easy' —
+  // coverage verdicts describe deck fit, not claimed comprehension.
+  const mostlyUnknown = SC.normalizeCapture({ id: 'u1', sentence: 'on my way through complicated bureaucratic terminology', sourceTitle: 'x', subtitle: { text: 'x', start: 0, end: 1, index: 0 } });
+  const fakeSource = IM.assessSource(dbFixture(), 'x', [mostlyUnknown], { taskState: known });
+  assert.notStrictEqual(fakeSource.verdict.key, 'easy', 'mostly-uncovered source must not claim easy');
 }
 
 console.log('FlashDay immersion engine: 13 checks passed');

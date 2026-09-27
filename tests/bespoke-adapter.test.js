@@ -147,7 +147,7 @@ function dbFixture() {
     error: { stage: 'exact', types: [], missedUnits: ['u1'], finalMissing: [], firstAttempt: 'I am coming.', finalAttempt: "I'm on my way.", corrected: true, retryCount: 1 },
     nowMs: 2000
   });
-  assert.strictEqual(corrected.event.ratings.u1, 2, 'unit produced only after correction is aided recall — Hard at best');
+  assert.strictEqual(corrected.event.ratings.u1, 1, 'first recall failed then corrected — a lapse feeds Again, not Hard (Anki: Hard = recalled with difficulty)');
 
   const db3 = dbFixture();
   const selection3 = A.selectNext(db3, 1000);

@@ -762,6 +762,7 @@ mark.token-new { border-bottom: 2px solid var(--memory-new); padding: 0 1px; }
 .source-reader .footer-note { padding: 10px 20px; border-top: 1px solid var(--rbg-line); margin: 0; color: var(--rtext-faint); font-size: 13px; }
 
 /* Comprehension quiz — sits inside the reader, follows the reader theme. */
+.source-reader.quiz-active .reader-text small { display: none; }
 #readerQuiz { padding: 14px 20px; border-top: 1px solid var(--rbg-line); }
 .quiz-head { display: grid; gap: 2px; margin-bottom: 12px; }
 .quiz-head strong { color: var(--rtext); font-size: 15px; }
@@ -776,6 +777,7 @@ mark.token-new { border-bottom: 2px solid var(--memory-new); padding: 0 1px; }
 .quiz-q.quiz-wrong .quiz-opt.picked { border-color: #D97A6C; background: rgba(217, 122, 108, 0.12); }
 .quiz-q.quiz-wrong .quiz-opt.quiz-answer { border-color: var(--teal-500); }
 .quiz-score { color: var(--rtext); font-size: 14px; margin-top: 10px; }
+.transfer-msg { color: var(--fd-error); font-size: 13px; margin: 8px 0 0; }
 /* The global action dock is sticky-on-canvas; inside the reader it must be a
    plain in-flow row on the document surface, or light themes get a black bar. */
 .source-reader .secondary-actions { position: static; background: transparent; padding: 0; margin-top: 14px; }

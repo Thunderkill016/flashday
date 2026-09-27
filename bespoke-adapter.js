@@ -390,17 +390,15 @@
       }
     }
     // Aided-recall guard: the word diff is objective evidence, self-report
-    // cannot override it. A unit the attempt ever missed can never receive
-    // unaided 'Good' credit — still absent in the final attempt means the
-    // recall failed ('Again'); produced only after seeing the correction is
-    // aided recall ('Hard' at best). The corrected attempt still lives in
-    // the event as practice evidence.
+    // cannot override it. A unit whose FIRST recall failed feeds the
+    // scheduler a lapse ('Again') — matching Anki semantics where Hard means
+    // "recalled with difficulty", not "forgot then corrected after reveal".
+    // The corrected attempt still lives in the event as practice evidence.
     const missedUnits=new Set(Array.isArray(error?.missedUnits)?error.missedUnits.map(String):[]);
     const finalMissing=new Set(Array.isArray(error?.finalMissing)?error.finalMissing.map(String):[]);
     for(const unitId of unitIds){
       let score=Number(ratings?.[unitId]??0);
-      if(finalMissing.has(unitId))score=Math.min(score,1);
-      else if(missedUnits.has(unitId))score=Math.min(score,2);
+      if(finalMissing.has(unitId)||missedUnits.has(unitId))score=Math.min(score,1);
       const unit=engine.unitLookup[unitId]||{id:unitId,name:unitId,definition:unitId,difficulty:B.Difficulty.A1};
       engine.rate(unit,selection.mode,bespokeScore(score),nowMs/1000);applied[unitId]=score;
     }

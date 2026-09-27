@@ -38,24 +38,25 @@
   }
 
   // Per-unit knowledge rollup across the four skills. 'known' requires at
-  // least one mode sitting in FSRS Review with nothing due — any due work
-  // pulls it back to 'learning' so an overdue unit is never presented as
-  // already understood. Untouched units are 'new'.
+  // least TWO distinct modes sitting in FSRS Review with nothing due — one
+  // mode's success is evidence for that skill only, not mastery of the unit.
+  // Any due work pulls it back to 'learning' so an overdue unit is never
+  // presented as already understood. Untouched units are 'new'.
   function unitKnowledge(db,unitId,{nowMs=Date.now(),taskState=null}={}){
     const inDeck=(db.items||[]).some(item=>item.id===unitId);
     if(!inDeck)return 'new';
     if(typeof taskState==='function')return taskState(unitId);
     if(!F)return 'new';
-    let sawState=false,anyDue=false,anyReview=false;
+    let sawState=false,anyDue=false,reviewModes=0;
     for(const mode of ACTIVE_MODES){
       const memory=F.taskState(db,unitId,mode,nowMs);
       if(memory.isNew)continue;
       sawState=true;
       if(memory.isDue){anyDue=true;continue;}
-      if(memory.card?.state===F.State.Review)anyReview=true;
+      if(memory.card?.state===F.State.Review)reviewModes++;
     }
     if(!sawState)return 'new';
-    if(anyReview&&!anyDue)return 'known';
+    if(reviewModes>=2&&!anyDue)return 'known';
     return 'learning';
   }
 
@@ -96,12 +97,14 @@
   // Coverage is measured against the deck, not claimed comprehension — a
   // sentence containing words nobody taught stays honestly "outside deck",
   // never silently counted as understood. Verdicts describe how productive a
-  // source is as immersion material FOR THIS DECK right now.
+  // source is as immersion material FOR THIS DECK right now, so "easy" also
+  // requires high ABSOLUTE coverage: a source that is 83% outside the deck
+  // is not "known" no matter how well the covered slice is remembered.
   function verdictFor(coverage,knownShareOfCovered,learningCount,fresh){
-    if(coverage<0.15)return {key:'thin',label:'Deck chưa phủ nguồn này'};
+    if(coverage<0.35)return {key:'thin',label:'Deck chưa phủ nguồn này'};
     if(learningCount>0)return {key:'good-fit',label:'Vừa sức — có unit đang học'};
     if(fresh>0)return {key:'stretch',label:'Có unit chưa ôn — đọc kèm dịch'};
-    if(knownShareOfCovered>=0.9)return {key:'easy',label:'Thuộc gần hết — đọc lại củng cố'};
+    if(coverage>=0.6&&knownShareOfCovered>=0.9)return {key:'easy',label:'Deck phủ gần hết — đọc lại củng cố'};
     return {key:'good-fit',label:'Vừa sức'};
   }
 
@@ -237,6 +240,9 @@
       .sort((a,b)=>b.seen-a.seen||a.i-b.i);
     const picked=ordered.slice(0,count).map((row)=>row.c);
     const pool=[...new Set(usable.map(c=>c.nativeSentence))];
+    // A line whose translation is the pool's only distinct value produces a
+    // one-option question — a guaranteed click, not a check. Skip those lines;
+    // if nothing survives, the source honestly has no quiz.
     const questions=picked.map((line)=>{
       // Seeded RNG per question: distractor pick and option order stay stable
       // across re-renders so the learner can't answer-position memorise.
@@ -244,6 +250,7 @@
       const rand=()=>{seed=(seed*1103515245+12345)>>>0;return seed/4294967296;};
       const distractors=[];
       const others=pool.filter(t=>t!==line.nativeSentence);
+      if(!others.length)return null;
       for(let guard=0;distractors.length<Math.min(3,others.length)&&guard<64;guard++){
         const cand=others[Math.floor(rand()*others.length)];
         if(!distractors.includes(cand))distractors.push(cand);
@@ -253,7 +260,8 @@
       const options=[line.nativeSentence,...distractors];
       for(let i=options.length-1;i>0;i--){const j=Math.floor(rand()*(i+1));[options[i],options[j]]=[options[j],options[i]];}
       return {captureId:String(line.id),sentence:line.sentence,answer:line.nativeSentence,options};
-    });
+    }).filter(Boolean);
+    if(!questions.length)return {available:false,reason:'Các dòng có dịch đều trùng nghĩa — chưa đủ lựa chọn để đối chiếu.',questions:[]};
     return {available:true,questions};
   }
 

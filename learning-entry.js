@@ -410,6 +410,28 @@
     const forms=[item.target,...(Array.isArray(item.forms)?item.forms:[]),...(Array.isArray(item.accepted)?item.accepted:[])].filter(Boolean);
     if(!forms.some(form=>phraseAppears(responseText,form)))
       throw new Error(`Câu chưa dùng “${item.target}” — viết lại có cụm này.`);
+    // Verbatim copies of a sentence the learner already saw are recall, not
+    // transfer — the mission exists to produce the unit in NEW detail.
+    // Rejected shapes: exact copy, or the stored sentence embedded whole
+    // (copy + extra padding). A response that changes any detail passes.
+    const responseNorm=canonTokens(responseText).join(' ');
+    const referenceSentences=[
+      item.exampleSentence,
+      item.source?.sentence,
+      ...(Array.isArray(db.captures)?db.captures:[])
+        .filter(c=>Array.isArray(c?.linkedUnitIds)&&c.linkedUnitIds.map(String).includes(unitId))
+        .map(c=>c?.sentence)
+    ].filter(Boolean);
+    const unitFormsNorm=new Set(forms.map(f=>canonTokens(f).join(' ')));
+    for(const ref of referenceSentences){
+      const refNorm=canonTokens(ref).join(' ');
+      // A "reference" that is just the bare unit can never be evidence of a
+      // copy — it is the required material itself.
+      if(!refNorm||unitFormsNorm.has(refNorm))continue;
+      if(responseNorm===refNorm||responseNorm.includes(refNorm)||refNorm.includes(responseNorm)){
+        throw new Error('Câu trùng nguyên câu mẫu — hãy đổi chi tiết (người, giờ, nơi, món) rồi lưu lại.');
+      }
+    }
     const submittedAt=Number.isFinite(Number(raw.submittedAt))?Number(raw.submittedAt):Number(now);
     const attempt={
       id:cleanMissionValue(raw.id,200)||`unit-transfer_${submittedAt}_${Math.random().toString(36).slice(2,10)}`,

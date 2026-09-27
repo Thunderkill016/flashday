@@ -205,12 +205,24 @@
 
     // 2) Existing FlashDay source sentence becomes a card only when a full native
     // translation is explicitly present. Never fabricate translation here.
+    // Curated/guided units carry a reviewed exampleSentence+exampleTranslation —
+    // that is real context too, so it becomes a card with its own provenance.
     for(const item of items||[]){
       const sentence=item.source?.sentence?.trim();
       const native=item.source?.native_sentence||item.source?.translation||'';
-      if(!sentence||!native||seenSentences.has(sentence))continue;
-      const sourceCard=cardFromSentence(sentence,native,items,{source:item.source,notes:item.source?.note?[item.source.note]:[]});
-      addUniqueCard(index,seenSentences,sourceCard);
+      if(sentence&&native&&!seenSentences.has(sentence)){
+        const sourceCard=cardFromSentence(sentence,native,items,{source:item.source,notes:item.source?.note?[item.source.note]:[]});
+        addUniqueCard(index,seenSentences,sourceCard);
+      }
+      const example=String(item.exampleSentence||'').trim();
+      const exampleNative=String(item.exampleTranslation||'').trim();
+      if(example&&exampleNative&&!seenSentences.has(example)){
+        const exampleCard=cardFromSentence(example,exampleNative,items,{
+          id:`flashday:${item.id}:example`,
+          source:{type:'curated-example',label:'Ví dụ lộ trình'}
+        });
+        addUniqueCard(index,seenSentences,exampleCard);
+      }
     }
 
     // 3) A bare target phrase is only a transitional fallback for a unit that

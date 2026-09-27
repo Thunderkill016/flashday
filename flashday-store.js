@@ -21,11 +21,16 @@
     if(typeof hydrate!=='function')throw new Error('hydrate() is required');
     if(typeof fallback!=='function')throw new Error('fallback() is required');
 
+    // `key` may be a resolver so the active account namespace is read fresh
+    // on every access — sign-in/sign-out must not strand writes in the
+    // previous owner's slot.
+    const resolveKey=typeof key==='function'?key:()=>key;
+
     const listeners=new Set();
 
     function readLatest(){
       try{
-        const raw=storage.getItem(key);
+        const raw=storage.getItem(resolveKey());
         if(raw)return hydrate(JSON.parse(raw));
       }catch(_error){}
       return hydrate(fallback());
@@ -46,7 +51,7 @@
     }
 
     function persist(next){
-      storage.setItem(key,JSON.stringify(next));
+      storage.setItem(resolveKey(),JSON.stringify(next));
     }
 
     function transact(mutator){

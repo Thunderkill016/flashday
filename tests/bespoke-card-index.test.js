@@ -160,4 +160,20 @@ function ok(){checks++;}
   ok();
 }
 
+{
+  // F2: a curated unit's exampleSentence/exampleTranslation is reviewed real
+  // context — it must become a sentence card, not leave the unit on the bare
+  // fallback. No translation → still fallback; never fabricate one.
+  const items=[{id:'on-way',target:"I'm on my way.",meaning:'Tôi đang trên đường tới.',
+    exampleSentence:"I'm on my way. I'll be there in ten minutes.",
+    exampleTranslation:'Tôi đang trên đường. Tôi sẽ tới trong mười phút.'}];
+  const index=CI.importFlashDayItems(items);
+  assert.strictEqual(index.size('on-way'),1);
+  assert.strictEqual(index.cards('on-way')[0].sentence,"I'm on my way. I'll be there in ten minutes.");
+  assert.strictEqual(index.cards('on-way')[0].source.type,'curated-example');
+  const noTrans=[{id:'no-trans',target:'see you',meaning:'hẹn gặp',exampleSentence:'See you tomorrow.'}];
+  assert.strictEqual(CI.importFlashDayItems(noTrans).cards('no-trans')[0].source.type,'fallback');
+  ok();
+}
+
 console.log(`Bespoke/source capture: ${checks} repo-driven checks passed`);

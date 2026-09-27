@@ -18,7 +18,7 @@
 
   const store=S.createPersistentStore({
     storage:localStorage,
-    key:KEY,
+    key:()=>D.dbKey(localStorage),
     hydrate:(raw)=>D.migrateDb(raw),
     fallback:()=>D.createInitialDb()
   });
@@ -143,8 +143,8 @@
     const due=L.dueUnitTransfer(db);
     const unitHtml=due?`<article class="transfer-mission" data-unit-transfer="${esc(due.unitId)}">
       <div class="transfer-heading"><div><span class="eyebrow">TRANSFER · NGÀY HÔM SAU</span><h4>${esc(due.item.target||due.unitId)}</h4><p>${esc(due.item.intent||due.item.canDo||due.item.meaning||'')}</p></div><span class="transfer-status">Đến hạn</span></div>
-      <p class="mission-setup">Tình huống mới: ${esc(due.item.contexts?.[0]||due.item.meaning||'dùng cụm này trong một câu của riêng bạn.')}</p>
-      <p class="mission-instructions">Viết MỘT câu tiếng Anh mới dùng “${esc(due.item.target||'')}” — không chép lại câu đã học.</p>
+      <p class="mission-setup">Gợi ý tình huống: ${esc(due.item.contexts?.[0]||due.item.meaning||'dùng cụm này trong một câu của riêng bạn.')}</p>
+      <p class="mission-instructions">Viết MỘT câu tiếng Anh mới dùng “${esc(due.item.target||'')}” — đổi ít nhất một chi tiết (người, giờ, nơi, món); câu giống nguyên mẫu sẽ bị từ chối.</p>
       <label class="field transfer-field" for="unitTransferResponse">Câu của bạn<textarea id="unitTransferResponse" maxlength="1600" placeholder="Write one new sentence in English…"></textarea></label>
       <button class="module-action transfer-reveal" type="button" data-unit-reveal disabled>Xem câu mẫu sau khi đã thử</button>
       <div class="transfer-model hidden" id="unitTransferModel"><strong>Mẫu từ câu đã học — chỉ để đối chiếu</strong>${due.item.exampleSentence?`<p>${esc(due.item.exampleSentence)}</p>`:''}${due.item.exampleTranslation?`<p><em>${esc(due.item.exampleTranslation)}</em></p>`:''}<ul><li>Câu mới có dùng đúng cụm không?</li><li>Ngữ cảnh có khác câu gốc không?</li></ul><label class="transfer-check"><input type="checkbox" data-unit-self-review> Tôi đã so sánh câu của mình với mẫu</label><button class="primary-btn transfer-save" type="button" data-unit-save>Lưu — đã tự đối chiếu</button></div>
@@ -196,7 +196,7 @@
           $('transferMissions').appendChild(back);
         }
       }catch(error){
-        showInlineMessage(error.message,true);
+        cardMessage(card,error.message);
       }
     });
   }
@@ -228,8 +228,16 @@
       renderTransferMissions();
       showInlineMessage(attempt.selfReviewed?'Đã lưu lần thử và việc tự đối chiếu mẫu.':'Đã lưu lần thử. Bạn có thể quay lại tự đối chiếu mẫu sau.',false);
     }catch(error){
-      showInlineMessage(error.message,true);
+      cardMessage(card,error.message);
     }
+  }
+
+  // Transfer feedback must land inside the card the learner is looking at —
+  // routing it to the import summary hides rejections inside a collapsed panel.
+  function cardMessage(card,message){
+    let note=card.querySelector('[data-card-msg]');
+    if(!note){note=document.createElement('p');note.className='transfer-msg';note.dataset.cardMsg='';card.appendChild(note);}
+    note.textContent=message;note.style.color='var(--fd-error)';
   }
 
   function sourceSkill(){return 'listen';}
@@ -257,8 +265,11 @@
   // the rest rank by live comprehensibility. An empty library shows the
   // fastest way in: one demo transcript or the import form right below.
   const LAST_SOURCE_KEY='flashday:last-source';
+  // The continue-reading pin is learner state like the db itself — scope it
+  // to the active namespace so one account's pin can't surface in another's.
+  const lastSourceKey=()=>`${D.dbKey(localStorage)}:last-source`;
   function lastOpenedSource(){
-    try{return localStorage.getItem(LAST_SOURCE_KEY)||'';}catch{return '';}
+    try{return localStorage.getItem(lastSourceKey())||'';}catch{return '';}
   }
   function renderSources(){
     const root=$('sourceRecommendations');if(!root)return;
@@ -401,7 +412,7 @@
     destroyReaderPlayer();
     readerSourceKey=null;
     readerCaptures=[];
-    if(panel){panel.classList.add('hidden');panel.innerHTML='';}
+    if(panel){panel.classList.add('hidden');panel.classList.remove('quiz-active');panel.innerHTML='';}
   }
 
   // Comprehension spot-check — "đã đọc" ≠ "hiểu". Each question shows a
@@ -409,7 +420,8 @@
   // result is a learner record, not a scheduler input.
   function toggleComprehensionQuiz(key){
     const box=$('readerQuiz');if(!box)return;
-    if(!box.classList.contains('hidden')){box.classList.add('hidden');box.innerHTML='';return;}
+    const reader=$('sourceReader');
+    if(!box.classList.contains('hidden')){box.classList.add('hidden');box.innerHTML='';reader?.classList.remove('quiz-active');return;}
     const db=store.refresh();
     const quiz=IM.comprehensionQuiz(db,readerCaptures,{count:5});
     if(!quiz.available){
@@ -425,6 +437,9 @@
       </div>`).join('')+
       `<button type="button" class="primary-btn" id="quizSubmit" disabled>Nộp — chấm thử</button><div id="quizResult"></div>`;
     box.classList.remove('hidden');
+    // Hide the line translations while the check runs — a visible answer
+    // column makes the quiz measure eyeballing, not comprehension.
+    reader?.classList.add('quiz-active');
     box.querySelectorAll('.quiz-opt').forEach(btn=>btn.onclick=()=>{
       const q=btn.closest('.quiz-q');
       q.querySelectorAll('.quiz-opt').forEach(b=>b.classList.remove('picked'));
@@ -448,7 +463,8 @@
       const record={id:SC.stableId('comp',[key,Date.now()].join('|')),sourceKey:key,correct,total:quiz.questions.length,at:Date.now()};
       store.transact((db)=>{db.comprehensionChecks=Array.isArray(db.comprehensionChecks)?db.comprehensionChecks:[];db.comprehensionChecks.push(record);return {result:true};});
       $('quizSubmit').disabled=true;
-      $('quizResult').innerHTML=`<p class="quiz-score">Đúng ${correct}/${quiz.questions.length} dòng — ${correct===quiz.questions.length?'hiểu chắc phần đã kiểm tra.':correct>0?'có dòng chưa chắc nghĩa — đọc lại dòng đánh dấu đỏ.':'chưa nắm được nghĩa — đọc lại kèm dịch rồi thử lại.'}</p>`;
+      $('quizResult').innerHTML=`<p class="quiz-score">Đúng ${correct}/${quiz.questions.length} dòng — ${correct===quiz.questions.length?'chọn đúng hết trong lần này (bản dịch đã hiện lại — đọc lại để củng cố).':correct>0?'có dòng chưa chắc nghĩa — đọc lại dòng đánh dấu đỏ.':'chưa nắm được nghĩa — đọc lại kèm dịch rồi thử lại.'}</p>`;
+      reader?.classList.remove('quiz-active');
       window.dispatchEvent(new CustomEvent('flashday:learning-state-changed'));
     };
   }
@@ -597,7 +613,7 @@
       .sort((a,b)=>(Number(a.subtitle?.index)||0)-(Number(b.subtitle?.index)||0)||(Number(a.mediaTimestamp)||0)-(Number(b.mediaTimestamp)||0));
     const summary=IM.assessSource(db,key,readerCaptures);
     const videoId=WLK?.youtubeVideoId?WLK.youtubeVideoId(readerCaptures[0]?.url||''):null;
-    try{localStorage.setItem(LAST_SOURCE_KEY,key);}catch{}
+    try{localStorage.setItem(lastSourceKey(),key);}catch{}
     const prefs=readerPrefs();
     panel.dataset.theme=prefs.theme;
     panel.dataset.size=prefs.size;

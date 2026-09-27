@@ -121,6 +121,21 @@ const C = require('../flashday-cloud.js');
 }
 
 {
+  // F3: an edited capture keeps its id, so "new id" detection alone would
+  // never upload the fix. dirtyCaptures must flag local rows whose updatedAt
+  // is newer than the last stamp seen remotely.
+  const known = C.knownIds({ captures: [{ id: 'cap-1', payload: { id: 'cap-1', sentence: 's', updatedAt: 1000 } }] });
+  const untouched = [{ id: 'cap-1', sentence: 's', updatedAt: 1000 }];
+  assert.strictEqual(C.dirtyCaptures(untouched, known).length, 0, 'same stamp → nothing to upload');
+  const edited = [{ id: 'cap-1', sentence: 's', nativeSentence: 'dịch mới', updatedAt: 2000 }];
+  assert.strictEqual(C.dirtyCaptures(edited, known).length, 1, 'local edit newer than remote stamp must upload');
+  const fresh = [{ id: 'cap-2', sentence: 'x' }];
+  assert.strictEqual(C.dirtyCaptures(fresh, known).length, 1, 'unknown id still uploads');
+  C.rememberIds(known, 'captures', edited);
+  assert.strictEqual(C.dirtyCaptures(edited, known).length, 0, 'rememberIds must record the uploaded stamp');
+}
+
+{
   // Comprehension spot-check records ride the learning_progress payload —
   // remote + local records union by id like encounters, never FSRS state.
   const merged = C.mergeLearnerDb(

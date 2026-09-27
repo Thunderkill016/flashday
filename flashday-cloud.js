@@ -237,16 +237,23 @@
 
   function knownIds(remote = {}) {
     const ids = (values, selector) => new Set((Array.isArray(values) ? values : []).map(selector).filter(Boolean).map(String));
+    const captureStamps = new Map();
+    for (const row of Array.isArray(remote.captures) ? remote.captures : []) {
+      // The uploaded row embeds the whole capture in payload — its updatedAt
+      // is the last remote state we know about for edit-detection.
+      captureStamps.set(String(row?.id), Number(row?.payload?.updatedAt) || 0);
+    }
     return {
       units: ids(remote.units, (row) => row?.id),
       cards: ids(remote.cards, (row) => row?.id),
       captures: ids(remote.captures, (row) => row?.id),
-      events: ids(remote.events, (row) => row?.id)
+      events: ids(remote.events, (row) => row?.id),
+      captureStamps
     };
   }
 
   function emptyKnownIds() {
-    return { units: new Set(), cards: new Set(), captures: new Set(), events: new Set() };
+    return { units: new Set(), cards: new Set(), captures: new Set(), events: new Set(), captureStamps: new Map() };
   }
 
   function unknownById(values, known) {
@@ -254,10 +261,27 @@
     return (Array.isArray(values) ? values : []).filter((value) => value?.id != null && !set.has(String(value.id)));
   }
 
+  // Captures are editable in place (translation fixes keep the same id), so
+  // "new id" is not enough — a local edit whose updatedAt is newer than the
+  // stamp we last saw remotely must also upload.
+  function dirtyCaptures(values, known) {
+    const set = known?.captures instanceof Set ? known.captures : new Set();
+    const stamps = known?.captureStamps instanceof Map ? known.captureStamps : new Map();
+    return (Array.isArray(values) ? values : []).filter((capture) => {
+      if (capture?.id == null) return false;
+      const id = String(capture.id);
+      if (!set.has(id)) return true;
+      return (Number(capture.updatedAt) || 0) > (stamps.get(id) || 0);
+    });
+  }
+
   function rememberIds(known, key, values) {
     if (!known?.[key]) return;
     for (const value of Array.isArray(values) ? values : []) {
       if (value?.id != null) known[key].add(String(value.id));
+      if (key === 'captures' && known.captureStamps instanceof Map) {
+        known.captureStamps.set(String(value.id), Number(value.updatedAt) || 0);
+      }
     }
   }
 
@@ -276,6 +300,7 @@
     knownIds,
     emptyKnownIds,
     unknownById,
+    dirtyCaptures,
     rememberIds
   };
 });

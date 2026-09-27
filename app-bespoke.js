@@ -65,7 +65,7 @@
 
   function loadDb() {
     try {
-      const raw = localStorage.getItem(KEY);
+      const raw = localStorage.getItem(D.dbKey(localStorage));
       if (raw) return D.migrateDb(JSON.parse(raw));
     } catch (_error) {
       // A malformed local snapshot must not stop the learner from studying.
@@ -75,7 +75,7 @@
 
   function save() {
     try {
-      localStorage.setItem(KEY, JSON.stringify(db));
+      localStorage.setItem(D.dbKey(localStorage), JSON.stringify(db));
     } catch (_error) {
       toast('Không thể lưu trên thiết bị này. Hãy đăng nhập để đồng bộ.');
     }
@@ -947,7 +947,7 @@
     const pending = {
       units: C.unknownById(db.items || [], cloudKnown.units),
       cards: C.unknownById(db.bespokeCards || [], cloudKnown.cards),
-      captures: C.unknownById(db.captures || [], cloudKnown.captures),
+      captures: C.dirtyCaptures(db.captures || [], cloudKnown),
       events: C.unknownById(db.events || [], cloudKnown.events)
     };
 
@@ -1069,12 +1069,30 @@
     if (error) toast(`Không đọc được phiên đăng nhập: ${error.message}`);
     learner = data?.session?.user || null;
     renderAuth();
-    if (learner) await hydrateCloud();
+    if (learner) {
+      // Move local reads/writes into this account's namespace before merging —
+      // the shared guest pool must not stay the write target once a session
+      // exists, or its leftovers would upload under this owner.
+      const keyBefore = D.dbKey(localStorage);
+      D.claimDbNamespace(localStorage, learner.id);
+      if (D.dbKey(localStorage) !== keyBefore) db = loadDb();
+      await hydrateCloud();
+    }
     supabaseClient.auth.onAuthStateChange((event, session) => {
       // INITIAL_SESSION replays the session getSession() just returned — hydrating
       // again would double every Firestore read on each page load.
       if (event === 'INITIAL_SESSION') return;
       window.setTimeout(() => {
+        const nextUid = session?.user?.id || null;
+        if (nextUid !== (learner?.id || null)) {
+          // Identity changed (sign-out or a different account): re-point the
+          // namespace and reload so both modules re-init under the right key
+          // instead of writing the previous owner's in-memory db onward.
+          if (nextUid) D.claimDbNamespace(localStorage, nextUid);
+          else D.releaseDbNamespace(localStorage);
+          window.location.reload();
+          return;
+        }
         learner = session?.user || null;
         activeDeck = null;
         cloudKnown = C.emptyKnownIds();
@@ -1101,7 +1119,7 @@
       activeDeck = null;
       cloudKnown = C.emptyKnownIds();
     }
-    localStorage.removeItem(KEY);
+    localStorage.removeItem(D.dbKey(localStorage));
     db = D.createInitialDb();
     save();
     sessionReviews = 0;
