@@ -4,6 +4,7 @@
 // a mastery claim.
 import { LESSONS } from '../../content/a1/index.js';
 import { chunkForKey, dueChunks, nextDueAt, rateChunk } from '../../core/scheduler.js';
+import { playButton } from '../speech.js';
 
 const GRADES = [
   { grade: 1, label: 'Quên', key: '1' },
@@ -102,7 +103,10 @@ function renderCard(host) {
   const back = document.createElement('div');
   back.className = 'review-back';
   back.hidden = true;
-  back.appendChild(el('p', chunk.target, 'review-target'));
+  const targetRow = document.createElement('p');
+  targetRow.className = 'review-target';
+  targetRow.append(chunk.target, ' ', playButton(chunk.target));
+  back.appendChild(targetRow);
   if (chunk.example) back.appendChild(el('p', chunk.example, 'view-placeholder'));
 
   const gradeRow = document.createElement('div');
