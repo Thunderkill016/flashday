@@ -25,6 +25,11 @@ import s5l2 from './s5-l2.js';
 import s5l3 from './s5-l3.js';
 import s5l4 from './s5-l4.js';
 import s5l5 from './s5-l5.js';
+import s6l1 from './s6-l1.js';
+import s6l2 from './s6-l2.js';
+import s6l3 from './s6-l3.js';
+import s6l4 from './s6-l4.js';
+import s6l5 from './s6-l5.js';
 
 export const STAGES = Object.freeze([
   { id: 1, title: 'Tôi và mọi người', blurb: 'Chào hỏi, thông tin liên hệ, gia đình, công việc.' },
@@ -41,6 +46,7 @@ export const LESSONS = Object.freeze([
   s3l1, s3l2, s3l3, s3l4, s3l5,
   s4l1, s4l2, s4l3, s4l4, s4l5,
   s5l1, s5l2, s5l3, s5l4, s5l5,
+  s6l1, s6l2, s6l3, s6l4, s6l5,
 ]);
 
 export function lessonById(id) {
