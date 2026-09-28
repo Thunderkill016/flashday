@@ -779,10 +779,30 @@ try {
   }
 
   // ── 17. Mission acceptance (issue #33): context → gist → notice → retrieve
-  //        → interact → unaided exit → retry aided; no AI, mobile width ──
+  //        → interact → unaided exit → hint-level retry; no AI, mobile ──
   {
     const context = await browser.newContext({
       viewport: { width: 390, height: 844 },
+    });
+    // English voice present so the listening path mints real tasks.
+    await context.addInitScript(() => {
+      window.__ttsCalls = [];
+      window.SpeechSynthesisUtterance = class {
+        constructor(text) {
+          this.text = text;
+        }
+      };
+      Object.defineProperty(window, 'speechSynthesis', {
+        value: {
+          getVoices: () => [{ name: 'Mock en-US', lang: 'en-US' }],
+          cancel: () => {},
+          speak: (u) => {
+            window.__ttsCalls.push(u.text);
+            u.onend?.();
+          },
+          addEventListener: () => {},
+        },
+      });
     });
     const errors = [];
     const page = await context.newPage();
@@ -804,14 +824,19 @@ try {
     assert.equal(await page.locator('.step-pill').count(), 0, 'no step-tab navigation to bypass the flow');
     assert.equal(await page.locator('[data-role="roleplay"]').count(), 0, 'no AI affordance inside the mission');
 
-    // CONTEXT — one exchange, translations on demand (recorded support).
-    assert.equal(await stage('context').locator('.mission-line').count(), 4, 'one four-line exchange');
-    assert.equal(await stage('context').locator('.translation:not([hidden])').count(), 0, 'translations hidden by default');
-    await stage('context').locator('[data-role="translation-toggle"]').click();
-    assert.equal(await stage('context').locator('.translation:not([hidden])').count(), 4);
-    // One primary action only — no forward link exists before this stage's
-    // record is written.
-    await stage('context').locator('.mission-primary').click();
+    // CONTEXT — one exchange; the continue action exists only AFTER a real
+    // exposure (play or translation), not on arrival.
+    const ctxStage = stage('context');
+    assert.equal(await ctxStage.locator('.mission-line').count(), 4, 'one four-line exchange');
+    assert.equal(await ctxStage.locator('.translation:not([hidden])').count(), 0, 'translations hidden by default');
+    assert.equal(await ctxStage.locator('.mission-primary:not([hidden])').count(), 0,
+      'no continue before a real exposure action');
+    await ctxStage.locator('[data-role="play-all"]').click();
+    const ttsCalls = await page.evaluate(() => window.__ttsCalls);
+    assert.equal(ttsCalls.length, 4, 'the whole exchange is heard as one sequence');
+    await ctxStage.locator('[data-role="translation-toggle"]').click();
+    assert.equal(await ctxStage.locator('.translation:not([hidden])').count(), 4);
+    await ctxStage.locator('.mission-primary').click();
     await stage('gist').waitFor();
 
     // GIST — two meaning checks about what just happened.
@@ -857,47 +882,69 @@ try {
     await interact.locator('.mission-primary').click();
     await stage('exit').waitFor();
 
-    // EXIT — attempt 1 is frozen BEFORE any model is revealed. Reload mid-
-    // attempt proves the frozen response survives (draft restore).
+    // EXIT — attempt 1 is frozen BEFORE any model is revealed. A nonsense
+    // response must NOT pass the communicative checks (keyword-soup
+    // counterexample from review). Reload mid-attempt proves the frozen
+    // response survives (draft restore).
     const exit = stage('exit');
-    await exit.locator('[aria-label="Lượt của bạn 1"]').fill('Hi, I’m Linh. What’s your name?');
+    await exit.locator('[aria-label="Lượt của bạn 1"]').fill('Hi, I am your name');
     await exit.locator('[data-role="exit-send"]:not([disabled])').click();
     await sleep(600); // draft persistence is debounced ~400ms
     await reload(page);
     await stage('exit').waitFor();
     assert.equal(await stage('exit').locator('[aria-label="Lượt của bạn 2"]').count(), 1,
       'frozen turn survives reload; the next turn still asks');
-    assert.match(await stage('exit').textContent(), /Hi, I’m Linh/, 'restored frozen response on screen');
+    assert.match(await stage('exit').textContent(), /Hi, I am your name/, 'restored frozen response on screen');
     await stage('exit').locator('[aria-label="Lượt của bạn 2"]').fill('Nice to meet you too.');
     await stage('exit').locator('[data-role="exit-send"]:not([disabled])').click();
     await exit.locator('.mission-exit-feedback').waitFor();
-    assert.equal(await exit.locator('.exit-checks .check-met').count(), 4, 'all four communicative checks met');
 
-    // Attempt 1 recorded ONCE (restore did not duplicate), unaided, model
-    // not yet revealed.
+    // Feedback shows per-goal results + targeted hints — NO model yet.
+    assert.equal(await exit.locator('.exit-checks .check-met').count(), 2, 'greet + polite met; name + ask missed');
+    assert.equal(await exit.locator('.exit-checks .check-missed').count(), 2);
+    assert.equal(await exit.locator('[data-role="exit-model"] .en').count(), 0,
+      'attempt-1 feedback shows hints, never the full model');
+    assert.equal(await exit.locator('[data-role="exit-model-reveal"]').count(), 1,
+      'explicit model reveal is available but not automatic');
+
+    // Attempt 1 recorded ONCE (restore did not duplicate), fully unaided.
     let exitEvents = await eventsOfKind('exit');
     assert.equal(exitEvents.length, 1, 'restored mid-attempt did not double-record');
     assert.equal(exitEvents[0].payload.attempt, 1);
-    assert.equal(exitEvents[0].payload.unaidedFirst, true, 'attempt 1 frozen before any model');
+    assert.equal(exitEvents[0].payload.unaidedFirst, true, 'attempt 1 frozen before any support');
+    assert.equal(exitEvents[0].payload.aided, false);
+    assert.equal(exitEvents[0].support.hintViewed, false);
     assert.equal(exitEvents[0].support.modelRevealed, false);
-    assert.equal(exitEvents[0].payload.correct, 4);
+    assert.equal(exitEvents[0].payload.correct, 2);
+    assert.deepEqual(exitEvents[0].payload.responses[0].missed, ['name', 'ask'],
+      'structured scorer: keyword soup fails name + ask');
 
-    // RETRY — the model is now on screen; attempt 2 is a separate aided record.
+    // RETRY — attempt 2 sees the targeted hint under the input, still no
+    // model; its support provenance is hintViewed, not modelRevealed.
     await exit.locator('[data-role="exit-retry"]').click();
-    await stage('exit').locator('[aria-label="Lượt của bạn 1"]').fill('Hello'); // partial on purpose
+    assert.equal(await stage('exit').locator('.exit-hint').count(), 1, 'hint shown for the turn that missed');
+    assert.equal(await stage('exit').locator('text=Mẫu:').count(), 0, 'still no model on a hint retry');
+    await stage('exit').locator('[aria-label="Lượt của bạn 1"]').fill('Hi, I’m Linh. What’s your name?');
     await stage('exit').locator('[data-role="exit-send"]:not([disabled])').click();
     await stage('exit').locator('[aria-label="Lượt của bạn 2"]').fill('Nice to meet you too.');
     await stage('exit').locator('[data-role="exit-send"]:not([disabled])').click();
     await exit.locator('.mission-exit-feedback').waitFor();
+    assert.equal(await exit.locator('.exit-checks .check-met').count(), 4, 'all four checks met on retry');
+    // A clean aided attempt finishes WITHOUT auto-revealing the model.
+    assert.equal(await exit.locator('[data-role="exit-model"] .en').count(), 0, 'clean run never dumps the model');
     exitEvents = await eventsOfKind('exit');
     assert.equal(exitEvents.length, 2, 'retry is a separate durable record');
     assert.equal(exitEvents[1].payload.attempt, 2);
-    assert.equal(exitEvents[1].payload.unaidedFirst, false, 'post-model retry is not unaided');
-    assert.equal(exitEvents[1].support.modelRevealed, true, 'model was visible for attempt 2');
-    assert(exitEvents[1].payload.correct < 4, 'partial retry scores partial');
+    assert.equal(exitEvents[1].payload.unaidedFirst, false);
+    assert.equal(exitEvents[1].payload.aided, true);
+    assert.equal(exitEvents[1].support.hintViewed, true, 'hint-level aid recorded');
+    assert.equal(exitEvents[1].support.modelRevealed, false, 'model never revealed for this attempt');
+    assert.equal(exitEvents[1].payload.correct, 4);
 
-    // Staged enrollment — only exercised modalities mint tasks:
-    // context → listening 4, notice → form+meaning 8, exit → production 4.
+    // Staged enrollment — only exercised modalities/chunks mint tasks:
+    // context (heard all 4) → listening 4; notice (seen all) → form 4;
+    // retrieve (attempted all) → meaning 4; exit produces c1,c2,c4 → 3 —
+    // c3 is Sam's line and must NOT mint a production card.
     const taskCounts = await page.evaluate((key) => {
       const db = JSON.parse(localStorage.getItem(key) || '{}');
       const keys = Object.keys(db.fsrs || {}).filter((k) => k.startsWith('a1-s1-l1:'));
@@ -906,15 +953,20 @@ try {
         const kind = k.split(':').pop();
         byKind[kind] = (byKind[kind] || 0) + 1;
       }
-      return { keys: keys.length, byKind };
+      return { keys, byKind };
     }, DB_KEY);
-    assert.equal(taskCounts.keys, 16, `16 tasks minted, got ${taskCounts.keys}`);
+    assert.equal(taskCounts.keys.length, 15, `15 honest tasks minted, got ${taskCounts.keys.length}`);
     assert.deepEqual(taskCounts.byKind, {
       listening_recognition: 4,
       form_recognition: 4,
       meaning_recall: 4,
-      cued_production: 4
-    }, 'one task of each exercised kind per chunk');
+      cued_production: 3
+    }, 'task kinds match modalities actually exercised');
+    assert.equal(
+      taskCounts.keys.filter((k) => k.startsWith('a1-s1-l1:c3@') && k.endsWith(':cued_production')).length,
+      0,
+      'no production card for c3 — the learner never says it'
+    );
 
     // Every stage event exists exactly once except exit (two attempts).
     for (const kind of ['context', 'gist', 'notice', 'retrieve', 'interact']) {
@@ -922,17 +974,59 @@ try {
     }
     const retrieveEvents = await eventsOfKind('retrieve');
     assert.equal(retrieveEvents[0].support.hintViewed, true, 'hint use is recorded support');
+    const contextEvents = await eventsOfKind('context');
+    assert.equal(contextEvents[0].payload.heardAll, true, 'the exchange was heard');
+    assert.equal(contextEvents[0].payload.ttsUnavailable, false);
 
-    // Summary sees the mission stages, not the five panes; completion is
-    // activity-complete, not a mastery claim.
+    // Summary shows can-do evidence from the exit task, not a mixed
+    // "N câu đúng" counter — and no stage left undone.
     await goto(page, `${origin}app/?preview#/summary/${L1}`);
     assert.equal(await page.locator('[data-role="celebration"]').count(), 1, 'all six stages attempted → celebration');
-    assert.match(await page.locator('.summary-steps').textContent(), /Tự làm/);
+    const missionResult = page.locator('[data-role="mission-result"]');
+    await missionResult.waitFor();
+    const resultText = await missionResult.textContent();
+    assert.match(resultText, /Chào lại/);
+    assert.match(resultText, /Hỏi tên họ/);
+    assert.match(resultText, /sau gợi ý/, 'final attempt was hint-aided, and the summary says so');
     assert.match(await page.locator('.summary-steps').textContent(), /Xem tình huống/);
     assert.equal(await page.locator('.summary-steps a', { hasText: 'Chưa làm' }).count(), 0, 'no stage left undone');
     assert.deepEqual(errors, [], `pageerrors: ${errors.join(' | ')}`);
     await context.close();
-    check('mission: context→gist→notice→retrieve→interact→unaided exit→aided retry (mobile, no AI)');
+    check('mission: context→gist→notice→retrieve→interact→unaided exit→hinted retry (mobile, no AI)');
+  }
+
+  // ── 18. No-TTS context: explicit fallback, and silent click-through
+  //        mints zero tasks ──
+  {
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+    });
+    const page = await context.newPage();
+    const stage = (name) => page.locator(`.mission-stage[data-stage="${name}"]`);
+    await goto(page, `${origin}app/?preview#/lesson/${L1}/context`);
+    await stage('context').waitFor();
+    assert.equal(await stage('context').locator('.mission-primary:not([hidden])').count(), 0,
+      'no continue before exposure');
+    await stage('context').locator('[data-role="play-all"]').click();
+    // Headless has no English voice → explicit fallback: translations open,
+    // the click is recorded as ttsUnavailable — and mints NOTHING.
+    assert.equal(await stage('context').locator('.translation:not([hidden])').count(), 4,
+      'no-TTS fallback opens the text path');
+    await stage('context').locator('.mission-primary').click();
+    await stage('gist').waitFor();
+    await sleep(600); // debounced save
+    const after = await page.evaluate((key) => {
+      const db = JSON.parse(localStorage.getItem(key) || '{}');
+      return {
+        tasks: Object.keys(db.fsrs || {}).filter((k) => k.startsWith('a1-s1-l1:')),
+        ctx: (db.lessonEvents || []).find((e) => e.kind === 'context'),
+      };
+    }, DB_KEY);
+    assert.equal(after.tasks.length, 0, 'silent/degraded context mints no tasks at all');
+    assert.equal(after.ctx?.payload?.ttsUnavailable, true, 'fallback is recorded, not silent');
+    assert.equal(after.ctx?.payload?.heardAll, false);
+    await context.close();
+    check('no-TTS context falls back explicitly and mints zero tasks');
   }
 
   // ── 18. Old lessons still load — the five-pane runner is intact for the

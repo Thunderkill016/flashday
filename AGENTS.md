@@ -79,9 +79,14 @@ truth and the ONLY path to task state — `hydrateDb` sets
 cache, so devices converge byte-equivalent. Lesson 1 runs `format:
 'mission'` (issue #33, `src/ui/views/mission.js`): one guided flow
 context → gist → notice → retrieve → interact → unaided-exit →
-hint/model → aided retry — stage events project through the same
-`STEP_TASKS` modality map, and `app.js` dispatches runner vs mission by
-`lesson.format`; the five-pane runner still serves lessons 2–30. Rev-less legacy keys resolve
+hint → aided retry → model only if still stuck. Mission stages do NOT
+use `STEP_TASKS` — the runner passes a per-chunk enrollment plan
+(heard lines mint listening, attempted cues mint recall, `produces`
+chunks mint production; a silent/degraded context mints nothing), and
+`app.js` dispatches runner vs mission by
+`lesson.format`; the five-pane runner still serves lessons 2–30. Exit
+checks are structured patterns in `src/core/mission-checks.js`
+(stem+slot, ordered phrases, word boundaries — keyword soup fails). Rev-less legacy keys resolve
 ONLY when the ledger proves a single revision (`unambiguousRev`); on
 multi-revision slots they PARK as rev-less `ambiguous` cards — kept,
 counted, never presented. Replay is timestamp-deterministic: corrupt `at`

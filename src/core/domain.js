@@ -58,22 +58,16 @@ export function skillTargetFor(taskKind) {
 
 // Which retrieval tasks a submitted step legitimately introduces. A task
 // never enters the pool before its modality has been exercised (ADR —
-// staged enrollment).
+// staged enrollment). Five-pane steps use this static map; the mission
+// runner (issue #33) instead computes a per-chunk enrollment plan from
+// what the attempt actually exercised — heard lines, attempted recalls,
+// produced turns — see src/ui/views/mission.js recordStage.
 export const STEP_TASKS = Object.freeze({
   prepare: ['form_recognition', 'meaning_recall'],
   read: [],
   listen: ['listening_recognition'],
   write: ['cued_production'],
-  speak: [],
-  // Mission-format stages (issue #33): the same honest modality staging —
-  // heard the exchange → listening; saw+imitated the phrase → recognition
-  // and recall; produced it unaided at the exit → cued production.
-  context: ['listening_recognition'],
-  gist: [],
-  notice: ['form_recognition', 'meaning_recall'],
-  retrieve: [],
-  interact: [],
-  exit: ['cued_production']
+  speak: []
 });
 
 // Legacy reviewLog keys (`lesson:chunk`) were graded on a VI→EN recall card.

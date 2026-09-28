@@ -13,7 +13,7 @@ import { lessonById } from '../../content/a1/index.js';
 import { restoreDraft } from '../../core/session.js';
 import { appendLessonEvent } from '../../core/evidence.js';
 import { enrollTasks } from '../../core/scheduler.js';
-import { STEP_TASKS } from '../../core/domain.js';
+import { scoreExitTurn } from '../../core/mission-checks.js';
 import { MISSION_STEPS, STEP_LABELS } from '../../core/progress.js';
 import { mountQuiz } from '../components/quiz.js';
 import { mountWordBank } from '../components/wordbank.js';
@@ -172,7 +172,12 @@ function nextStage() {
   showStage(STAGES.indexOf(state.stage) + 1);
 }
 
-function recordStage(stage, payload, support) {
+// taskPlan = [{ kinds, chunkIds }] — enrollment is computed per stage from
+// what the learner ACTUALLY exercised, never "every chunk × every kind":
+// context mints listening only for heard chunks, notice mints recognition
+// for seen chunks, retrieve mints recall for attempted items, exit mints
+// production only for chunks the turn's `produces` declares.
+function recordStage(stage, payload, support, taskPlan = []) {
   const { ctx, lesson } = state;
   ctx.store.transact((db) => {
     appendLessonEvent(db, {
@@ -183,9 +188,11 @@ function recordStage(stage, payload, support) {
       payload,
       support
     });
-    // Staged enrollment — same honest modality mapping as the old runner
-    // (domain.js STEP_TASKS carries the mission stage names).
-    enrollTasks(db, lesson, STEP_TASKS[stage]);
+    for (const plan of taskPlan) {
+      if (!plan?.kinds?.length) continue;
+      if (plan.chunkIds != null && !plan.chunkIds.length) continue;
+      enrollTasks(db, lesson, plan.kinds, Date.now(), plan.chunkIds ?? null);
+    }
   });
 }
 
@@ -249,7 +256,7 @@ function speakerAvatar(name) {
   return avatar;
 }
 
-function chatLine({ speaker, en, vi, you = false }) {
+function chatLine({ speaker, en, vi, you = false, onPlay = null, onPlayDegraded = null }) {
   const row = document.createElement('div');
   row.className = `mission-line${you ? ' mission-line-you' : ''}`;
   const bubble = document.createElement('div');
@@ -257,7 +264,11 @@ function chatLine({ speaker, en, vi, you = false }) {
   bubble.append(speakerAvatar(speaker), text('span', en, 'en'));
   const viEl = text('p', vi || '', 'vi translation');
   bubble.appendChild(viEl);
-  row.append(playButton(en), bubble);
+  const play = playButton(en, { onDegraded: () => onPlayDegraded?.() });
+  // playButton's own handler runs first and marks degradation, so onPlay
+  // here means the click happened — callers decide how to count it.
+  if (onPlay) play.addEventListener('click', onPlay);
+  row.append(play, bubble);
   return row;
 }
 
@@ -287,68 +298,59 @@ function speakSequence(texts, { rate = LEARNER_SPEECH_RATE, onend } = {}) {
   return true;
 }
 
-/* ── deterministic exit scoring ────────────────────────────── */
-
-// Canonical form for requirement matching: lowercase, punctuation stripped,
-// contractions expanded — "I'm"/"im"/"i am" all match the 'i am' pattern.
-function canonLine(value) {
-  const flat = String(value || '')
-    .toLowerCase()
-    .replace(/[’‘]/g, "'")
-    .replace(/[.,!?…;:()"“”«»]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return flat
-    .split(' ')
-    .flatMap((word) => {
-      if (word === "i'm" || word === 'im') return ['i', 'am'];
-      if (word === "what's" || word === 'whats') return ['what', 'is'];
-      if (word === "it's" || word === 'its') return ['it', 'is'];
-      if (word === "that's" || word === 'thats') return ['that', 'is'];
-      return [word];
-    })
-    .join(' ');
-}
-
-function meetsCheck(response, check) {
-  const canon = canonLine(response);
-  const tokens = new Set(canon.split(' ').filter(Boolean));
-  return (Array.isArray(check.match) ? check.match : []).some((pattern) => {
-    const p = canonLine(pattern);
-    if (!p) return false;
-    return p.includes(' ') ? canon.includes(p) : tokens.has(p);
-  });
-}
-
-function scoreExitTurn(turn, response) {
-  const checks = (Array.isArray(turn.checks) ? turn.checks : []).map((check) => ({
-    key: check.key,
-    label: check.label,
-    met: meetsCheck(response, check)
-  }));
-  const met = checks.filter((c) => c.met).length;
-  return { checks, met, total: checks.length, score: checks.length ? met / checks.length : 1 };
-}
-
 /* ── stage renderers ───────────────────────────────────────── */
 
 const builders = {
   // 1. SEE THE SITUATION — the whole exchange first, translation on demand.
+  // Completion requires ONE real exposure action: hearing the exchange
+  // (play-all or a line), or opening the translations. A silent click-
+  // through mints nothing and cannot continue — issue #33 round 2.
   context(host) {
     const m = state.lesson.mission;
     host.appendChild(text('h2', `${STEP_LABELS.context} — ${m.title}`));
     host.appendChild(text('p', m.scene, 'mission-scene'));
 
+    const heard = new Set(); // chunk ids genuinely played
+    const playedLines = new Set();
+    const degradedLines = new Set();
+    let playedAll = false;
+    let ttsUnavailable = false;
+    let translationViewed = false;
+    let armed = false;
+
+    const nav = missionNav(null);
+    const gate = text('p', 'Nghe đoạn hội thoại — hoặc mở nghĩa — để tiếp tục.', 'view-placeholder');
+
     const lines = document.createElement('div');
     lines.className = 'mission-dialogue';
-    for (const line of m.lines) {
-      lines.appendChild(chatLine({ ...line, you: Boolean(line.you) }));
-    }
+    m.lines.forEach((line, i) => {
+      lines.appendChild(
+        chatLine({
+          ...line,
+          you: Boolean(line.you),
+          onPlay: () => {
+            // playButton's handler ran first: only count the play as
+            // listening exposure when the speech actually fired.
+            if (degradedLines.has(i)) return;
+            playedLines.add(i);
+            for (const id of line.covers || []) heard.add(id);
+            maybeArm();
+          },
+          onPlayDegraded: () => {
+            degradedLines.add(i);
+            ttsUnavailable = true;
+            // Explicit fallback: no voice → the text path is the exposure.
+            for (const viEl of lines.querySelectorAll('.translation')) viEl.hidden = false;
+            translationViewed = true;
+            maybeArm();
+          }
+        })
+      );
+    });
     // Translations hidden until asked for — support is on-demand, recorded.
     for (const viEl of lines.querySelectorAll('.translation')) viEl.hidden = true;
     host.appendChild(lines);
 
-    let translationViewed = false;
     const translateBtn = document.createElement('button');
     translateBtn.type = 'button';
     translateBtn.className = 'btn-secondary';
@@ -358,38 +360,62 @@ const builders = {
       translationViewed = true;
       for (const viEl of lines.querySelectorAll('.translation')) viEl.hidden = false;
       translateBtn.disabled = true;
+      maybeArm();
     });
     host.appendChild(translateBtn);
 
     const voiceStatus = text('p', '', 'runner-notice');
     voiceStatus.setAttribute('aria-live', 'polite');
-    let plays = 0;
     const playAll = document.createElement('button');
     playAll.type = 'button';
     playAll.className = 'btn-secondary';
     playAll.dataset.role = 'play-all';
     playAll.textContent = '🔊 Nghe cả đoạn';
     playAll.addEventListener('click', () => {
-      const ok = speakSequence(m.lines.map((line) => line.en), {
-        onend: () => {}
-      });
+      const ok = speakSequence(m.lines.map((line) => line.en));
       if (!ok) {
+        // Explicit no-TTS fallback: the text path IS the exposure — show
+        // the translations and record that audio never happened.
+        ttsUnavailable = true;
         for (const viEl of lines.querySelectorAll('.translation')) viEl.hidden = false;
-        voiceStatus.textContent = 'Thiết bị không có giọng đọc tiếng Anh — bạn có thể đọc lời thoại thay thế.';
         translationViewed = true;
+        voiceStatus.textContent =
+          'Thiết bị không có giọng đọc tiếng Anh — hãy đọc lời thoại kèm nghĩa bên dưới.';
+        translateBtn.disabled = true;
         playAll.disabled = true;
+        maybeArm();
         return;
       }
-      plays += 1;
+      playedAll = true;
+      m.lines.forEach((line) => (line.covers || []).forEach((id) => heard.add(id)));
+      maybeArm();
     });
-    host.append(playAll, voiceStatus);
+    host.append(playAll, voiceStatus, gate, nav);
 
-    const nav = missionNav(null);
-    armPrimary(nav, 'Hiểu đoạn này →', () => {
-      recordStage('context', { lines: m.lines.length, plays }, { translationViewed });
-      nextStage();
-    });
-    host.appendChild(nav);
+    function maybeArm() {
+      if (armed) return;
+      const exposed = playedAll || playedLines.size > 0 || translationViewed;
+      if (!exposed) return;
+      armed = true;
+      gate.hidden = true;
+      armPrimary(nav, 'Hiểu đoạn này →', () => {
+        const linesHeard = [...playedLines].filter((i) => !degradedLines.has(i));
+        recordStage(
+          'context',
+          {
+            lines: m.lines.length,
+            plays: playedLines.size + (playedAll ? 1 : 0),
+            linesHeard,
+            heardAll: playedAll || linesHeard.length === m.lines.length,
+            translationViewed,
+            ttsUnavailable
+          },
+          { translationViewed },
+          heard.size ? [{ kinds: ['listening_recognition'], chunkIds: [...heard] }] : []
+        );
+        nextStage();
+      });
+    }
   },
 
   // 2. UNDERSTAND — 1–2 gist checks about what just happened.
@@ -420,6 +446,8 @@ const builders = {
     host.appendChild(card);
     const counter = text('p', '', 'view-placeholder');
     const seen = new Set();
+    const heard = new Set();
+    const degradedChunks = new Set();
     let speakAttempts = 0;
     let cursor = 0;
 
@@ -455,14 +483,33 @@ const builders = {
       sayCheck.button.addEventListener('click', () => {
         speakAttempts += 1;
       });
-      controls.append(playButton(chunk.example), sayCheck.button);
+      // A chunk mints a listening task only if its audio actually fired —
+      // the degraded fallback is reading, not listening.
+      const play = playButton(chunk.example, {
+        onDegraded: () => degradedChunks.add(chunk.id)
+      });
+      play.addEventListener('click', () => {
+        if (!degradedChunks.has(chunk.id)) heard.add(chunk.id);
+      });
+      controls.append(play, sayCheck.button);
       card.append(controls, sayCheck.output);
       counter.textContent = `Cụm ${cursor + 1}/${chunks.length}`;
       prev.disabled = cursor === 0;
       next.disabled = cursor === chunks.length - 1;
       if (seen.size === chunks.length && !continueBtn) {
         continueBtn = armPrimary(navRow, 'Nhớ lại các cụm →', () => {
-          recordStage('notice', { chunks: chunks.length, viewed: [...seen], speakAttempts }, {});
+          // Saw the chunk→meaning pair = form recognition introduced;
+          // heard the chunk = listening. Meaning→English recall has NOT
+          // happened yet — that mints at retrieve.
+          recordStage(
+            'notice',
+            { chunks: chunks.length, viewed: [...seen], heard: [...heard], speakAttempts },
+            {},
+            [
+              { kinds: ['form_recognition'], chunkIds: [...seen] },
+              { kinds: ['listening_recognition'], chunkIds: [...heard] }
+            ]
+          );
           nextStage();
         });
       }
@@ -489,6 +536,9 @@ const builders = {
 
     const finish = () => {
       const correct = results.filter((r) => r.ok && !r.usedHint && !r.usedAnswer).length;
+      // VI cue → typed English IS meaning recall — mint it here, per chunk
+      // actually attempted, not at notice where the pair was only shown.
+      const attempted = results.filter((r) => r && r.attempts > 0).map((r) => r.chunkId);
       recordStage(
         'retrieve',
         {
@@ -499,7 +549,8 @@ const builders = {
         {
           hintViewed: results.some((r) => r.usedHint),
           modelRevealed: results.some((r) => r.usedAnswer)
-        }
+        },
+        attempted.length ? [{ kinds: ['meaning_recall'], chunkIds: attempted }] : []
       );
       nextStage();
     };
@@ -638,21 +689,46 @@ const builders = {
     renderTurn();
   },
 
-  // 6. EXIT TASK — a new person. Attempt 1 is frozen BEFORE any model;
-  // feedback then unlocks retry, which is recorded as aided.
+  // 6. EXIT TASK — a new person. Progressive support, never model-first:
+  //   attempt 1: unaided, frozen before ANY feedback
+  //   feedback 1: per-goal ✓/✗ + targeted hints for misses — no model
+  //   attempt 2: hintViewed; if it still misses → full model revealed
+  //   attempt 3+: modelRevealed
+  // A perfect unaided run never reveals the model.
   exit(host) {
     const ex = state.lesson.mission.exit;
     host.appendChild(text('h2', `${STEP_LABELS.exit} — gặp ${ex.partner}`));
     host.appendChild(text('p', ex.setup));
 
     const priorAttempts = events().filter((e) => e.lessonId === state.lesson.id && e.step === 'exit').length;
-    const draftResponses = Array.isArray(state.draft?.mission?.exitResponses) && priorAttempts === 0
-      ? state.draft.mission.exitResponses
+    const draftMission = state.draft?.mission || {};
+    const draftResponses = Array.isArray(draftMission.exitResponses) && priorAttempts === 0
+      ? draftMission.exitResponses
       : [];
+
+    // Support that was visible BEFORE this attempt — restored from the
+    // draft so a reload can't launder an aided retry into an unaided one.
+    const priorSupport = priorAttempts > 0 && draftMission.exitSupport
+      ? { ...draftMission.exitSupport }
+      : {};
+
+    // Which goals the previous recorded attempt missed — rebuilt from the
+    // durable event (not the draft) so per-turn hints survive a reload.
+    const lastExit = events()
+      .filter((e) => e.lessonId === state.lesson.id && e.step === 'exit')
+      .at(-1);
+    const missedByTurn = new Map();
+    for (const r of lastExit?.payload?.responses || []) {
+      const missed = (r.missed || [])
+        .map((key) => ex.turns[r.turn]?.checks.find((c) => c.key === key))
+        .filter(Boolean);
+      if (missed.length) missedByTurn.set(r.turn, missed);
+    }
 
     const attempt = {
       no: priorAttempts + 1,
-      aided: priorAttempts > 0, // a model was shown after attempt 1
+      support: priorSupport,
+      missedByTurn,
       responses: draftResponses.map((r) => ({ ...r }))
     };
 
@@ -668,11 +744,18 @@ const builders = {
       const all = attempt.responses;
       const met = all.reduce((sum, r) => sum + r.met, 0);
       const total = all.reduce((sum, r) => sum + r.total, 0);
+      // Production tasks mint only for chunks the learner was actually
+      // asked to produce in a submitted turn (`produces`) — the partner's
+      // own phrases (e.g. c3 "Nice to meet you." from Sam) never enroll.
+      const produced = new Set();
+      for (const r of all) (ex.turns[r.turn]?.produces || []).forEach((id) => produced.add(id));
+      const aided = Boolean(attempt.support.hintViewed || attempt.support.modelRevealed);
       recordStage(
         'exit',
         {
           attempt: attempt.no,
-          unaidedFirst: attempt.no === 1 && !attempt.aided,
+          unaidedFirst: attempt.no === 1 && !aided,
+          aided,
           responses: all.map((r) => ({
             turn: r.turn,
             response: r.response,
@@ -683,45 +766,93 @@ const builders = {
           correct: met,
           total
         },
-        { modelRevealed: attempt.no > 1 }
+        {
+          hintViewed: Boolean(attempt.support.hintViewed),
+          modelRevealed: Boolean(attempt.support.modelRevealed)
+        },
+        produced.size ? [{ kinds: ['cued_production'], chunkIds: [...produced] }] : []
       );
-      patchMission({ exitResponses: [] });
+      patchMission({ exitResponses: [], exitSupport: null });
     };
 
     const showFeedback = () => {
       feedback.textContent = '';
-      feedback.appendChild(text('h3', 'So với mẫu'));
+      const missedByTurnNow = new Map();
+      for (const r of attempt.responses) {
+        const missed = r.checks.filter((c) => !c.met);
+        if (missed.length) missedByTurnNow.set(r.turn, missed);
+      }
+      const totalMissed = [...missedByTurnNow.values()].reduce((n, l) => n + l.length, 0);
+      // The full model auto-reveals only after an AIDED attempt still
+      // misses goals — attempt-1 feedback stays at hint level.
+      let modelShown = attempt.no >= 2 && totalMissed > 0;
+
+      feedback.appendChild(text('h3', totalMissed ? 'Kết quả lần thử' : 'Làm được rồi'));
+      const modelSlots = [];
       for (const r of attempt.responses) {
         const turn = ex.turns[r.turn];
         const block = document.createElement('div');
         block.className = 'exit-check';
-        block.append(
-          text('p', `Bạn nói: "${r.response}"`, 'exit-response'),
-          text('p', `Mẫu: ${turn.model}`, 'en')
-        );
+        block.appendChild(text('p', `Bạn nói: "${r.response}"`, 'exit-response'));
         const list = document.createElement('ul');
         list.className = 'exit-checks';
         for (const check of r.checks) {
-          const li = text('li', `${check.met ? '✓' : '✗'} ${check.label}`);
+          const li = text('li', check.met ? `✓ ${check.label}` : `✗ ${check.label} — ${check.hint}`);
           li.className = check.met ? 'check-met' : 'check-missed';
           list.appendChild(li);
         }
         block.appendChild(list);
-        block.appendChild(playButton(turn.model));
+        const modelSlot = document.createElement('div');
+        modelSlot.dataset.role = 'exit-model';
+        if (modelShown) {
+          modelSlot.append(text('p', `Mẫu: ${turn.model}`, 'en'), playButton(turn.model));
+        }
+        block.appendChild(modelSlot);
+        modelSlots.push({ slot: modelSlot, turn });
         feedback.appendChild(block);
       }
+
+      // The NEXT attempt's provenance is written the moment support lands
+      // on screen — persisting at render/click time (not at retry) keeps an
+      // intervening reload from laundering an aided retry into unaided.
+      const nextSupport = {
+        hintViewed: Boolean(attempt.support.hintViewed) || totalMissed > 0,
+        modelRevealed: Boolean(attempt.support.modelRevealed) || modelShown
+      };
+      patchMission({ exitSupport: nextSupport, exitResponses: [] });
+
       const actions = document.createElement('div');
       actions.className = 'mission-row';
+      // Explicit reveal is the learner's choice — the NEXT attempt records
+      // modelRevealed for it; the frozen attempt is already durable.
+      if (!modelShown) {
+        const showModel = document.createElement('button');
+        showModel.type = 'button';
+        showModel.className = 'btn-secondary';
+        showModel.dataset.role = 'exit-model-reveal';
+        showModel.textContent = 'Xem mẫu';
+        showModel.addEventListener('click', () => {
+          modelShown = true;
+          nextSupport.modelRevealed = true;
+          patchMission({ exitSupport: nextSupport });
+          for (const { slot, turn } of modelSlots) {
+            slot.append(text('p', `Mẫu: ${turn.model}`, 'en'), playButton(turn.model));
+          }
+          showModel.disabled = true;
+        });
+        actions.appendChild(showModel);
+      }
       const retry = document.createElement('button');
       retry.type = 'button';
       retry.className = 'btn-secondary';
       retry.dataset.role = 'exit-retry';
-      retry.textContent = 'Thử lại từ đầu';
+      retry.textContent = nextSupport.modelRevealed || totalMissed === 0 ? 'Thử lại từ đầu' : 'Thử lại có gợi ý';
       retry.addEventListener('click', () => {
+        attempt.support = { ...nextSupport };
+        attempt.missedByTurn = missedByTurnNow;
         feedback.remove();
         thread.textContent = '';
         attempt.responses = [];
-        attempt.aided = true; // the model is on screen now
         attempt.no += 1;
         renderTurn(0);
       });
@@ -745,7 +876,11 @@ const builders = {
       const input = document.createElement('input');
       input.type = 'text';
       input.className = 'mission-input';
-      input.placeholder = attempt.aided ? 'Nói lại — lần này đã có mẫu ở dưới' : 'Bạn nói gì? (không có mẫu)';
+      input.placeholder = attempt.support.modelRevealed
+        ? 'Nói lại — lần này đã có mẫu ở dưới'
+        : attempt.support.hintViewed
+          ? 'Thử lại — có gợi ý ở dưới'
+          : 'Bạn nói gì? (không có mẫu)';
       input.setAttribute('aria-label', `Lượt của bạn ${turnIdx + 1}`);
       const send = document.createElement('button');
       send.type = 'button';
@@ -754,9 +889,17 @@ const builders = {
       send.textContent = 'Gửi';
       row.append(input, send);
       thread.appendChild(row);
-      // On retry the model is already visible below — honest aided attempt.
-      if (attempt.aided) {
+      // Aid under the input: the model when revealed, else only the hints
+      // for goals this turn missed last time — never the full answer.
+      if (attempt.support.modelRevealed) {
         row.appendChild(text('p', `Mẫu: ${turn.model}`, 'view-placeholder'));
+      } else if (attempt.support.hintViewed) {
+        const missed = attempt.missedByTurn?.get(turnIdx) || [];
+        if (missed.length) {
+          row.appendChild(
+            text('p', `Gợi ý: ${missed.map((c) => c.hint).join(' ')}`, 'view-placeholder exit-hint')
+          );
+        }
       }
       input.focus();
 
@@ -783,7 +926,7 @@ const builders = {
     };
 
     // Restore frozen pre-reload responses: they were typed unaided before
-    // the model existed, so keeping them in attempt 1 stays honest.
+    // any support existed, so keeping them in this attempt stays honest.
     let resumeIdx = 0;
     for (const saved of attempt.responses) {
       const turn = ex.turns[saved.turn];

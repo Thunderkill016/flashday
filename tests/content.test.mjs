@@ -23,6 +23,28 @@ import lesson from '../src/content/a1/s1-l1.js';
 }
 
 {
+  // Honest-enrollment metadata (issue #33 round 2): context lines declare
+  // which chunks they voice; exit turns declare which chunks the learner
+  // produces. Missing/unknown ids fail validation — otherwise tasks mint
+  // for work the learner never did.
+  const broken = JSON.parse(JSON.stringify(lesson));
+  delete broken.mission.lines[0].covers;
+  assert(validateLesson(broken).length > 0, 'a context line must declare covered chunks');
+
+  const badCover = JSON.parse(JSON.stringify(lesson));
+  badCover.mission.lines[0].covers = ['c9'];
+  assert(validateLesson(badCover).length > 0, 'covers must reference real chunk ids');
+
+  const noProduce = JSON.parse(JSON.stringify(lesson));
+  delete noProduce.mission.exit.turns[0].produces;
+  assert(validateLesson(noProduce).length > 0, 'an exit turn must declare produced chunks');
+
+  const noHint = JSON.parse(JSON.stringify(lesson));
+  delete noHint.mission.exit.turns[0].checks[1].hint;
+  assert(validateLesson(noHint).length > 0, 'every check needs a targeted hint');
+}
+
+{
   assert.deepEqual(validateCourse([lesson]), [], 'single-lesson course must produce no errors');
 }
 

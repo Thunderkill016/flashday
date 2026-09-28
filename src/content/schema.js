@@ -141,6 +141,12 @@ function validateMission(lesson, errors, p) {
       checkText(errors, `${lp}.speaker`, line.speaker);
       checkText(errors, `${lp}.en`, line.en);
       checkText(errors, `${lp}.vi`, line.vi);
+      // covers = which chunks this line actually voices — listening tasks
+      // mint only for heard chunks, so coverage must be explicit.
+      if (!Array.isArray(line.covers)) return fail(errors, `${lp}.covers`, 'expected array of chunk ids');
+      line.covers.forEach((id, j) => {
+        if (!chunkIds.has(id)) fail(errors, `${lp}.covers[${j}]`, 'unknown chunk');
+      });
     });
   }
   checkQuestions(errors, `${p}.mission.gist`, m.gist, MISSION_BOUNDS.gist);
@@ -191,12 +197,24 @@ function validateMission(lesson, errors, p) {
         checkText(errors, `${tp}.them`, turn.them);
         checkText(errors, `${tp}.themVi`, turn.themVi);
         checkText(errors, `${tp}.model`, turn.model);
+        // produces = chunks the learner must actually say this turn —
+        // production tasks mint only for these, never for the partner's lines.
+        if (!Array.isArray(turn.produces) || !turn.produces.length) {
+          fail(errors, `${tp}.produces`, 'expected ≥1 chunk id');
+        } else {
+          turn.produces.forEach((id, j) => {
+            if (!chunkIds.has(id)) fail(errors, `${tp}.produces[${j}]`, 'unknown chunk');
+          });
+        }
         if (checkCount(errors, `${tp}.checks`, turn.checks, { min: 1, max: 4 })) {
           turn.checks.forEach((check, j) => {
             const cp = `${tp}.checks[${j}]`;
             if (!check || typeof check !== 'object') return fail(errors, cp, 'expected object');
             checkText(errors, `${cp}.key`, check.key);
             checkText(errors, `${cp}.label`, check.label);
+            // Every check needs a targeted hint — feedback names the missed
+            // goal without revealing the full model (issue #33 round 2).
+            checkText(errors, `${cp}.hint`, check.hint);
             if (checkCount(errors, `${cp}.match`, check.match, { min: 1, max: 6 })) {
               check.match.forEach((pattern, k) => checkText(errors, `${cp}.match[${k}]`, pattern));
             }

@@ -54,27 +54,33 @@ export default {
     scene:
       'Buổi học tiếng Anh đầu tiên của bạn. Bạn ngồi xuống cạnh một bạn ' +
       'tên Mia — bạn ấy quay sang chào bạn. Nghe và đọc đoạn hội thoại này.',
+    // `covers` là chunk nào thực sự vang lên trong câu — listening task chỉ
+    // được mint cho chunk đã nghe, không phải mọi chunk của bài.
     lines: [
       {
         speaker: 'Mia',
         en: 'Hi! I’m Mia. What’s your name?',
         vi: 'Chào! Mình là Mia. Tên bạn là gì?',
+        covers: ['c1', 'c2'],
       },
       {
         speaker: 'Linh',
         en: 'Hi, I’m Linh.',
         vi: 'Chào, mình là Linh.',
+        covers: ['c1'],
         you: true,
       },
       {
         speaker: 'Mia',
         en: 'Nice to meet you.',
         vi: 'Rất vui được gặp bạn.',
+        covers: ['c3'],
       },
       {
         speaker: 'Linh',
         en: 'Nice to meet you too.',
         vi: 'Mình cũng rất vui được gặp bạn.',
+        covers: ['c4'],
         you: true,
       },
     ],
@@ -126,8 +132,12 @@ export default {
     },
 
     // EXIT TASK: người mới (Sam), tình huống mới. Lượt đầu KHÔNG có mẫu —
-    // attempt đóng băng rồi mới hiện feedback + model → retry. Mỗi check
-    // là một yếu tố giao tiếp bắt buộc, chấm deterministic trên text.
+    // attempt đóng băng rồi mới hiện feedback: gợi ý theo từng mục thiếu →
+    // retry → mẫu đầy đủ chỉ khi vẫn còn thiếu. `produces` là chunk learner
+    // phải tự nói trong lượt đó — production card chỉ mint cho chunk thật
+    // sự được nói (c3 là lời của Sam, không phải của learner). Mỗi check
+    // là một yếu tố giao tiếp bắt buộc, chấm deterministic trên text —
+    // xem src/core/mission-checks.js cho grammar của match patterns.
     exit: {
       setup:
         'Sau giờ học, một người khác — Sam — bắt chuyện với bạn ở quán ' +
@@ -138,18 +148,46 @@ export default {
           them: 'Hi!',
           themVi: 'Chào!',
           model: 'Hi, I’m Linh. What’s your name?',
+          produces: ['c1', 'c2'],
           checks: [
-            { key: 'greet', label: 'Chào lại', match: ['hi', 'hello', 'hey'] },
-            { key: 'name', label: 'Nói tên mình', match: ['i am', 'im', 'my name is'] },
-            { key: 'ask', label: 'Hỏi tên họ', match: ['your name'] },
+            {
+              key: 'greet',
+              label: 'Chào lại',
+              match: ['hi', 'hello', 'hey'],
+              hint: 'Bắt đầu bằng một lời chào: "Hi!" hoặc "Hello!"',
+            },
+            {
+              key: 'name',
+              label: 'Nói tên mình',
+              match: ['i am *', 'my name is *', 'call me *'],
+              hint: 'Nói tên mình bằng "I’m <tên>." — ví dụ "I’m Linh."',
+            },
+            {
+              key: 'ask',
+              label: 'Hỏi tên họ',
+              match: [
+                'what is your name',
+                'and your name',
+                'what about you',
+                'tell me your name',
+                'your name please',
+              ],
+              hint: 'Hỏi tên họ bằng "What’s your name?"',
+            },
           ],
         },
         {
           them: 'I’m Sam. Nice to meet you.',
           themVi: 'Mình là Sam. Rất vui được gặp bạn.',
           model: 'Nice to meet you too.',
+          produces: ['c4'],
           checks: [
-            { key: 'polite', label: 'Đáp lời lịch sự', match: ['meet you too', 'you too'] },
+            {
+              key: 'polite',
+              label: 'Đáp lời lịch sự',
+              match: ['meet you too', 'nice to meet you', 'you too'],
+              hint: 'Đáp lại bằng "Nice to meet you too."',
+            },
           ],
         },
       ],

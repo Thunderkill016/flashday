@@ -29,36 +29,88 @@ export function mount(root, ctx) {
 
   const events = db.lessonEvents.filter((event) => event.lessonId === lesson.id);
   const steps = stepsForLesson(lesson);
+  const isMission = lesson.format === 'mission';
+  const exitEvents = isMission ? events.filter((e) => e.step === 'exit') : [];
+  const lastExit = exitEvents.at(-1);
 
   // Celebration (Duolingo lesson-complete screen): every step done → a real
-  // reward moment, not just a data table. Numbers are activity facts.
+  // reward moment, not just a data table. Numbers are activity facts —
+  // for missions the headline is the exit attempt's provenance, never a
+  // sum of heterogeneous 'correct' counters (issue #33 round 2).
   const allDone = steps.every((step) => events.some((e) => e.step === step));
   if (allDone) {
     const banner = document.createElement('div');
     banner.className = 'celebration-banner';
     banner.dataset.role = 'celebration';
-    const quizSteps = steps.filter((s) => s !== 'write' && s !== 'speak');
-    const correctTotal = quizSteps.reduce((sum, step) => {
-      const best = Math.max(
-        0,
-        ...events.filter((e) => e.step === step).map((e) => Number(e.payload?.correct) || 0)
-      );
-      return sum + best;
-    }, 0);
     const streak = computeStreak(db);
     banner.appendChild(el('p', '🎉 Xong bài!', 'celebration-title'));
-    banner.appendChild(
-      el(
-        'p',
+    let detail;
+    if (isMission) {
+      const aidTxt = lastExit?.support?.modelRevealed
+        ? 'có xem mẫu'
+        : lastExit?.support?.hintViewed
+          ? 'có dùng gợi ý'
+          : 'không cần hỗ trợ';
+      const tries = exitEvents.length;
+      detail =
+        `${steps.length}/${steps.length} phần · tự làm ${tries} lần thử — ${aidTxt}` +
+        (streak > 0 ? ` · 🔥 ${streak} ngày liên tiếp` : '');
+    } else {
+      const quizSteps = steps.filter((s) => s !== 'write' && s !== 'speak');
+      const correctTotal = quizSteps.reduce((sum, step) => {
+        const best = Math.max(
+          0,
+          ...events.filter((e) => e.step === step).map((e) => Number(e.payload?.correct) || 0)
+        );
+        return sum + best;
+      }, 0);
+      detail =
         `${steps.length}/${steps.length} bước · ${correctTotal} câu đúng` +
-          (streak > 0 ? ` · 🔥 ${streak} ngày liên tiếp` : ''),
-        'celebration-detail'
-      )
-    );
+        (streak > 0 ? ` · 🔥 ${streak} ngày liên tiếp` : '');
+    }
+    banner.appendChild(el('p', detail, 'celebration-detail'));
     section.appendChild(banner);
     // Arrival jingle — plays only if the browser allows audio by now (the
     // last step's submit click is the gesture that unlocks it).
     playFeedback('complete');
+  }
+
+  // Mission can-do evidence: what the learner actually did at the exit
+  // task — each communicative goal, met or missed, with the attempt's
+  // support level. This is the learner-facing proof, not an FSRS count.
+  if (isMission && lastExit?.payload?.responses?.length) {
+    const card = document.createElement('div');
+    card.className = 'summary-mission';
+    card.dataset.role = 'mission-result';
+    card.appendChild(el('h2', `Nhiệm vụ — ${lesson.mission?.exit?.partner || 'người mới'}`));
+    const turns = lesson.mission?.exit?.turns || [];
+    const aidTxt = lastExit.support?.modelRevealed
+      ? 'sau khi xem mẫu'
+      : lastExit.support?.hintViewed
+        ? 'sau gợi ý'
+        : 'tự làm, không cần hỗ trợ';
+    card.appendChild(
+      el('p', `Lần thử ${lastExit.payload.attempt ?? exitEvents.length} — ${aidTxt}.`, 'view-placeholder')
+    );
+    for (const r of lastExit.payload.responses) {
+      const turn = turns[r.turn];
+      if (!turn) continue;
+      const block = document.createElement('div');
+      block.className = 'summary-turn';
+      block.appendChild(el('p', `${turn.them}`, 'summary-them'));
+      block.appendChild(el('p', `Bạn: ${r.response}`, 'summary-response'));
+      const list = document.createElement('ul');
+      list.className = 'exit-checks';
+      for (const check of Array.isArray(turn.checks) ? turn.checks : []) {
+        const met = (r.met || []).includes(check.key);
+        const item = el('li', `${met ? '✓' : '✗'} ${check.label}${met ? '' : ' — cần luyện thêm'}`);
+        item.className = met ? 'check-met' : 'check-missed';
+        list.appendChild(item);
+      }
+      block.appendChild(list);
+      card.appendChild(block);
+    }
+    section.appendChild(card);
   }
 
   const table = document.createElement('ul');
@@ -96,12 +148,13 @@ export function mount(root, ctx) {
   }
   section.appendChild(table);
 
-  // Enrolled retrieval tasks for this lesson (one card per ability × chunk)
+  // Enrolled retrieval tasks for this lesson (one card per ability × chunk).
+  // Kept muted — it's scheduling info, not a mastery metric.
   const enrolled = Object.keys(db.fsrs || {}).filter((key) => key.startsWith(`${lesson.id}:`)).length;
   const enrolledLine = document.createElement('p');
   enrolledLine.className = 'view-placeholder';
   enrolledLine.textContent = enrolled
-    ? `Thẻ ôn đã tạo: ${enrolled} (mỗi cụm luyện nhiều kỹ năng)`
+    ? `Thẻ ôn từ phần đã luyện: ${enrolled}`
     : `Thẻ ôn đã tạo: chưa có — nộp phần ${STEP_LABELS[steps[0]]} để thêm`;
   section.appendChild(enrolledLine);
 

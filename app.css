@@ -490,7 +490,10 @@ textarea.write-area, textarea.speak-area {
 .mission-stage h2 { outline: none; }
 .mission-scene { color: var(--text-secondary); margin-bottom: var(--space-4); }
 .mission-dialogue { margin: var(--space-4) 0; }
-.mission-line { display: flex; align-items: flex-start; gap: var(--space-2); margin-bottom: var(--space-3); }
+.mission-line { display: flex; align-items: flex-start; gap: var(--space-2); margin-bottom: var(--space-3); flex-wrap: wrap; }
+/* Inline aid under the learner's input row (hint / model) wraps to its own
+   line instead of squeezing the input. */
+.mission-line > p { flex-basis: 100%; margin: 0; }
 .mission-line .play-target { flex: none; margin-top: var(--space-1); }
 .mission-bubble {
   flex: 1; padding: var(--space-3) var(--space-4);
@@ -526,3 +529,17 @@ textarea.write-area, textarea.speak-area {
 .exit-checks { list-style: none; margin: var(--space-2) 0; padding: 0; font-size: 14px; }
 .exit-checks .check-met { color: var(--feedback-correct); }
 .exit-checks .check-missed { color: var(--feedback-error, #c0392b); }
+.exit-hint { font-style: italic; }
+
+/* Mission summary — the can-do evidence card (issue #33 round 2): per-turn
+   results with provenance, ahead of the raw activity list. */
+.summary-mission {
+  margin: var(--space-4) 0;
+  padding: var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+.summary-mission h2 { margin-top: 0; }
+.summary-turn { margin-bottom: var(--space-3); }
+.summary-them { margin: 0; color: var(--text-secondary); font-size: 14px; }
+.summary-response { margin: var(--space-1) 0 0; font-weight: 600; }
