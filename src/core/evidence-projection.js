@@ -19,6 +19,7 @@
 import {
   canDoIdFor,
   componentId,
+  contentRev,
   normalizeTaskKey,
   parseTaskKey,
   unambiguousRev,
@@ -29,20 +30,30 @@ export const OUTCOMES = Object.freeze(['failed', 'partial', 'success', 'submitte
 
 // lessonEvent.kind → skill target. `drill`/`read` are recognition-layer
 // skills; `listen` only counts as listening when the transcript was not
-// used as a crutch — the aid flag is carried, not hidden.
+// used as a crutch — the aid flag is carried, not hidden. Mission-format
+// kinds (issue #33) map to the same honest axes: typed dialogue turns are
+// written production, never implied speech evidence.
 const EVENT_SKILL = Object.freeze({
   drill: 'lexical.form_recognition',
   read: 'reception.reading',
   listen: 'reception.listening',
   write: 'production.writing',
-  speak: 'production.speaking'
+  speak: 'production.speaking',
+  context: 'reception.listening',
+  gist: 'reception.reading',
+  notice: 'lexical.form_recognition',
+  retrieve: 'lexical.meaning_recall',
+  interact: 'production.writing',
+  exit: 'production.writing'
 });
 
 const GRADE_OUTCOME = Object.freeze({ 1: 'again', 2: 'hard', 3: 'good', 4: 'easy' });
 
 function isAided(support) {
   if (!support || typeof support !== 'object') return false;
-  return Boolean(support.translationViewed || support.transcriptViewed || support.modelRevealed);
+  return Boolean(
+    support.translationViewed || support.transcriptViewed || support.modelRevealed || support.hintViewed
+  );
 }
 
 function quizOutcome(payload) {
@@ -61,18 +72,23 @@ function sourceOf(payload) {
 }
 
 // lessonEvent → one EvidenceEvent at lesson scope. componentIds lists the
-// lesson's components — for chunks with a single-revision ledger entry the
-// rev is unambiguous (one phrase ever lived there); for chunks whose text
-// changed, a step-level event cannot prove which phrase the learner saw,
-// so the bare slot id `lesson:chunk` is emitted (resolves to the registry's
-// ambiguous component — honest "some phrase at this slot", not a guess).
+// lesson's components. An event stamped with the lesson's CURRENT
+// contentVersion provably saw the live text — the live rev is its honest
+// component. Events from older content go through the ledger instead:
+// single-revision slots resolve to that one rev (only one phrase ever
+// lived there); chunks whose text changed emit the bare slot id
+// `lesson:chunk` (resolves to the registry's ambiguous component —
+// honest "some phrase at this slot", never a guess).
 export function projectLessonEvent(event, lesson) {
   if (!event || typeof event !== 'object') return null;
   const skillTargetId = EVENT_SKILL[event.kind];
   if (!skillTargetId) return null;
   const at = Number(event.submittedAt) || 0;
+  const eventVersion = Number(event.contentVersion) || 0;
+  const isCurrent = eventVersion > 0 && eventVersion === Number(lesson?.contentVersion);
   const componentIds = Array.isArray(lesson?.chunks)
-    ? lesson.chunks.map((c) => componentId(lesson.id, c.id, unambiguousRev(lesson.id, c.id)))
+    ? lesson.chunks.map((c) =>
+        componentId(lesson.id, c.id, isCurrent ? contentRev(c) : unambiguousRev(lesson.id, c.id)))
     : [];
   return {
     id: `ev:${String(event.id)}`,

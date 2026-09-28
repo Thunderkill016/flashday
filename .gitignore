@@ -5,6 +5,7 @@ supabase/.temp/
 node_modules/
 dist/
 .firebase/
+mission-shots/
 
 # Local emulator diagnostics may contain account/project metadata.
 firebase-debug*.log

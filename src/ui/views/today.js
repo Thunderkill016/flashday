@@ -2,7 +2,7 @@
 // Streak shows activity facts only (consecutive days with work) — still no
 // XP or proficiency claims.
 import { LESSONS, STAGES, lessonById } from '../../content/a1/index.js';
-import { STEPS, computeStreak, lessonStatus, stageStatus, stepsForLesson } from '../../core/progress.js';
+import { STEPS, STEP_LABELS, computeStreak, lessonStatus, stageStatus, stepsForLesson } from '../../core/progress.js';
 import { planNext } from '../../core/planner.js';
 import { lessonIcon } from '../icons.js';
 import { reviewQueue } from '../../core/scheduler.js';
@@ -11,7 +11,9 @@ function draftHasContent(draft) {
   if (!draft) return false;
   const answers = draft.answers || {};
   if (Object.values(answers).some((s) => s && Object.keys(s).length)) return true;
-  return Object.keys(draft.write || {}).length > 0 || Object.keys(draft.speak || {}).length > 0;
+  if (Object.keys(draft.write || {}).length > 0 || Object.keys(draft.speak || {}).length > 0) return true;
+  // Mission drafts hold their in-flight work under `mission`.
+  return draft.mission && typeof draft.mission === 'object' && Object.keys(draft.mission).length > 0;
 }
 
 export function mount(root, ctx) {
@@ -120,7 +122,7 @@ export function mount(root, ctx) {
 }
 
 function stepLabel(step) {
-  return { prepare: 'Hiểu mẫu', read: 'Đọc', listen: 'Nghe', write: 'Viết', speak: 'Nói' }[step] || step;
+  return STEP_LABELS[step] || step;
 }
 
 function el(tag, content, className) {

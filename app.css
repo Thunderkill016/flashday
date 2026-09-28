@@ -484,3 +484,64 @@ textarea.write-area, textarea.speak-area {
 .streak-chip { animation: pop-in .3s ease; }
 .match-chip.match-hit { animation: pop-in .2s ease; }
 .review-suggestion { animation: pop-in .25s ease; }
+
+/* ── Mission runner (issue #33, format 'mission') ── */
+
+.mission-stage h2 { outline: none; }
+.mission-scene { color: var(--text-secondary); margin-bottom: var(--space-4); }
+.mission-dialogue { margin: var(--space-4) 0; }
+.mission-line { display: flex; align-items: flex-start; gap: var(--space-2); margin-bottom: var(--space-3); flex-wrap: wrap; }
+/* Inline aid under the learner's input row (hint / model) wraps to its own
+   line instead of squeezing the input. */
+.mission-line > p { flex-basis: 100%; margin: 0; }
+.mission-line .play-target { flex: none; margin-top: var(--space-1); }
+.mission-bubble {
+  flex: 1; padding: var(--space-3) var(--space-4);
+  background: var(--bg-surface-2, var(--bg-surface-1));
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
+}
+.mission-line-you { justify-content: flex-end; }
+.mission-line-you .mission-bubble { background: var(--action-primary-soft, var(--bg-surface-1)); border-color: var(--action-primary-bg); }
+.mission-bubble .en { font-weight: 500; }
+.mission-bubble .vi { display: block; margin: var(--space-1) 0 0; color: var(--text-secondary); font-size: 14px; }
+.mission-line .mission-input { flex: 1; }
+
+.mission-cue { font-size: 16px; font-weight: 600; margin: var(--space-3) 0; }
+.mission-name { margin: var(--space-3) 0; }
+.mission-name-label { display: block; font-size: 14px; font-weight: 600; margin-bottom: var(--space-2); }
+.mission-input {
+  width: 100%; min-height: 44px; padding: 0 var(--space-3);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-md);
+  font-size: 15px; background: var(--bg-surface-1); color: var(--text-primary);
+}
+.mission-row { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-3); }
+.mission-feedback { margin-top: var(--space-3); font-size: 14px; color: var(--feedback-warning); }
+.mission-feedback.mission-ok { color: var(--feedback-correct); }
+.mission-example { margin: var(--space-3) 0; color: var(--text-secondary); }
+.mission-notice-card, .mission-retrieve-card, .mission-interact-wb {
+  margin: var(--space-4) 0; padding: var(--space-4);
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
+  background: var(--bg-surface-1);
+}
+.mission-nav { margin-top: var(--space-4); }
+
+.mission-exit-feedback { margin-top: var(--space-4); }
+.exit-check { margin-bottom: var(--space-3); padding: var(--space-3) var(--space-4); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); }
+.exit-response { margin: 0 0 var(--space-1); font-weight: 600; }
+.exit-checks { list-style: none; margin: var(--space-2) 0; padding: 0; font-size: 14px; }
+.exit-checks .check-met { color: var(--feedback-correct); }
+.exit-checks .check-missed { color: var(--feedback-error, #c0392b); }
+.exit-hint { font-style: italic; }
+
+/* Mission summary — the can-do evidence card (issue #33 round 2): per-turn
+   results with provenance, ahead of the raw activity list. */
+.summary-mission {
+  margin: var(--space-4) 0;
+  padding: var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+.summary-mission h2 { margin-top: 0; }
+.summary-turn { margin-bottom: var(--space-3); }
+.summary-them { margin: 0; color: var(--text-secondary); font-size: 14px; }
+.summary-response { margin: var(--space-1) 0 0; font-weight: 600; }

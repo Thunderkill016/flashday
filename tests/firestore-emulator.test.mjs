@@ -123,6 +123,19 @@ try {
     (await sdk.getDoc(sdk.doc(first.db, eventPath))).data().kind,
     "drill",
   );
+  // Mission-format stage names (issue #33) are valid step/kind values.
+  const missionPath = "users/alice/lesson_events/ev-mission";
+  await sdk.setDoc(sdk.doc(first.db, missionPath), {
+    ...validEvent,
+    id: "ev-mission",
+    step: "exit",
+    kind: "exit",
+    payload: { attempt: 1, unaidedFirst: true, correct: 4, total: 4 },
+  });
+  assert.equal(
+    (await sdk.getDoc(sdk.doc(first.db, missionPath))).data().step,
+    "exit",
+  );
   await assertFails(
     sdk.updateDoc(sdk.doc(first.db, eventPath), { kind: "read" }),
   );

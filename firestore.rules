@@ -36,8 +36,9 @@ rules_version = '2';
 // users/{uid}/lesson_events/{id}   (A1 rebuild — append-only evidence)
 //   id: string (= doc id), owner_id: string (= uid)
 //   lesson_id: string 1..60, content_version: int
-//   step: 'prepare'|'read'|'listen'|'write'|'speak'
-//   kind: 'drill'|'read'|'listen'|'write'|'speak'
+//   step: five-pane step or mission stage (context|gist|notice|retrieve|
+//         interact|exit)
+//   kind: 'drill'|'read'|'listen'|'write'|'speak' or the mission stage names
 //   payload, support: small maps; submitted_at, created_at: ISO-8601
 //   CREATE + READ + DELETE only — updates are denied (append-only).
 // ===============================================================
@@ -195,8 +196,10 @@ service cloud.firestore {
         && idMatchesPath(docId)
         && validString(d.lesson_id, 1, 60)
         && d.content_version is int
-        && d.step in ['prepare', 'read', 'listen', 'write', 'speak']
-        && d.kind in ['drill', 'read', 'listen', 'write', 'speak']
+        && d.step in ['prepare', 'read', 'listen', 'write', 'speak',
+                      'context', 'gist', 'notice', 'retrieve', 'interact', 'exit']
+        && d.kind in ['drill', 'read', 'listen', 'write', 'speak',
+                      'context', 'gist', 'notice', 'retrieve', 'interact', 'exit']
         && isSmallMap(d.payload) && isSmallMap(d.support)
         && isIsoDateString(d.submitted_at)
         && isIsoDateString(d.created_at);

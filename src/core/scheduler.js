@@ -86,14 +86,18 @@ function isNewCard(card) {
 
 // Idempotent per (component, task kind): only kinds not already scheduled
 // enroll. `tasks` in the log entry stores the full revision-aware task ids
-// so replay never has to guess which phrase was enrolled. Returns the newly
+// so replay never has to guess which phrase was enrolled. `chunkIds`
+// restricts enrollment to the components actually exercised — a stage that
+// only heard two chunks must not mint cards for all four. Returns the newly
 // created task keys.
-export function enrollTasks(db, lesson, kinds, now = Date.now()) {
+export function enrollTasks(db, lesson, kinds, now = Date.now(), chunkIds = null) {
   const cards = cardMap(db);
   if (!Array.isArray(db.reviewLog)) db.reviewLog = [];
   const wanted = (Array.isArray(kinds) ? kinds : TASK_KINDS).filter((k) => TASK_KINDS.includes(k));
+  const only = chunkIds == null ? null : new Set(chunkIds);
   const enrolled = [];
   for (const chunk of Array.isArray(lesson?.chunks) ? lesson.chunks : []) {
+    if (only && !only.has(String(chunk.id))) continue;
     if (typeof chunk?.target !== 'string' || !chunk.target.trim() ||
         typeof chunk?.meaning !== 'string' || !chunk.meaning.trim()) {
       // A chunk without its full retrieval artifact would fingerprint to a

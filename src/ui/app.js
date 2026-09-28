@@ -7,8 +7,10 @@ import { createInitialDb, hydrateDb } from '../core/evidence.js';
 import { createSession } from '../core/session.js';
 import { claimDbNamespace, dbKey, releaseDbNamespace } from '../core/namespace.js';
 import { createCloudSync } from '../core/cloud.js';
+import { lessonById } from '../content/a1/index.js';
 import * as todayView from './views/today.js';
 import * as runnerView from './views/runner.js';
+import * as missionView from './views/mission.js';
 import * as summaryView from './views/summary.js';
 import * as pathView from './views/path.js';
 import * as reviewView from './views/review.js';
@@ -64,8 +66,27 @@ setCloudPill('local');
 
 window.addEventListener('flashday:cloud-hydrated', () => render());
 
+// Lesson host: the route target stays the same, but a lesson's `format`
+// picks its runner — 'mission' gets the guided flow (issue #33), anything
+// else keeps the five-pane runner until the course is re-sequenced.
+const lessonHost = {
+  inner: null,
+  mount(root, ctx) {
+    const lesson = lessonById(ctx.params?.lessonId);
+    this.inner = lesson?.format === 'mission' ? missionView : runnerView;
+    this.inner.mount(root, ctx);
+  },
+  update(ctx) {
+    return Boolean(this.inner?.update?.(ctx));
+  },
+  unmount() {
+    this.inner?.unmount?.();
+    this.inner = null;
+  }
+};
+
 const routes = [
-  { pattern: /^#\/lesson\/([^/]+)\/([^/]+)$/, view: runnerView, tab: 'learn',
+  { pattern: /^#\/lesson\/([^/]+)\/([^/]+)$/, view: lessonHost, tab: 'learn',
     params: (m) => ({ lessonId: m[1], step: m[2] }) },
   { pattern: /^#\/summary\/([^/]+)$/, view: summaryView, tab: 'learn',
     params: (m) => ({ lessonId: m[1] }) },

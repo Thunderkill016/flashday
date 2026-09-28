@@ -2,14 +2,33 @@
  * Pure progress labelling. Every label is activity-only — "attempted",
  * "started" — never "đạt A1" (rule 3: counters don't prove proficiency).
  */
-import { STEPS } from '../content/schema.js';
+import { STEPS, MISSION_STEPS } from '../content/schema.js';
 
-export { STEPS };
+export { STEPS, MISSION_STEPS };
 
 const STEP_KIND = { prepare: 'drill', read: 'read', listen: 'listen', write: 'write', speak: 'speak' };
 
+// Display names shared by today/path/summary — mission stages are the
+// durable `step` values on mission-lesson events (issue #33).
+export const STEP_LABELS = Object.freeze({
+  prepare: 'Hiểu mẫu',
+  read: 'Đọc',
+  listen: 'Nghe',
+  write: 'Viết',
+  speak: 'Nói',
+  context: 'Xem tình huống',
+  gist: 'Hiểu ý',
+  notice: 'Học cụm từ',
+  retrieve: 'Nhớ lại',
+  interact: 'Hội thoại',
+  exit: 'Tự làm'
+});
+
 // Checkpoints skip the prepare step — their offered steps start at read.
+// Mission-format lessons (issue #33) offer their stage sequence instead of
+// the five school panes.
 export function stepsForLesson(lesson) {
+  if (lesson?.format === 'mission') return MISSION_STEPS;
   return lesson?.kind === 'checkpoint' ? STEPS.slice(1) : STEPS;
 }
 
@@ -21,9 +40,15 @@ export function lessonStatus(events, lesson) {
   // Only steps the lesson offers get a status — a checkpoint's 'prepare'
   // would otherwise sit at 'todo' forever and look permanently unfinished.
   for (const step of stepsForLesson(lesson)) {
-    status[step] = relevant.some(
-      (event) => event.step === step || event.kind === STEP_KIND[step]
-    ) ? 'attempted' : 'todo';
+    status[step] = relevant.some((event) => {
+      if (event.step !== step && event.kind !== STEP_KIND[step]) return false;
+      // Mission exit: a failed attempt is evidence, not completion — the
+      // step counts as done only when an attempt passed every check.
+      if (step === 'exit' && lesson?.format === 'mission') {
+        return event.step === 'exit' && event.payload?.passed === true;
+      }
+      return true;
+    }) ? 'attempted' : 'todo';
   }
   return status;
 }
@@ -48,6 +73,8 @@ function draftHasContent(draft) {
   if (Object.values(answers).some((step) => step && Object.keys(step).length > 0)) return true;
   if (Object.keys(draft.write || {}).length > 0) return true;
   if (Object.keys(draft.speak || {}).length > 0) return true;
+  // Mission-format drafts keep in-flight stage work under `mission`.
+  if (draft.mission && typeof draft.mission === 'object' && Object.keys(draft.mission).length > 0) return true;
   return false;
 }
 

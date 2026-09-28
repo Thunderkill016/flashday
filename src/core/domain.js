@@ -58,7 +58,10 @@ export function skillTargetFor(taskKind) {
 
 // Which retrieval tasks a submitted step legitimately introduces. A task
 // never enters the pool before its modality has been exercised (ADR —
-// staged enrollment).
+// staged enrollment). Five-pane steps use this static map; the mission
+// runner (issue #33) instead computes a per-chunk enrollment plan from
+// what the attempt actually exercised — heard lines, attempted recalls,
+// produced turns — see src/ui/views/mission.js recordStage.
 export const STEP_TASKS = Object.freeze({
   prepare: ['form_recognition', 'meaning_recall'],
   read: [],

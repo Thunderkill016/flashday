@@ -263,9 +263,11 @@ const tk = (chunkId, kind, l = lesson) => {
   assert.equal(modelled.outcome, 'submitted', 'write submits are artifacts, not scores');
 
   // componentIds are real KnowledgeComponent ids — resolvable in the domain
-  // registry. Single-revision chunks emit their rev'd id; multi-revision
-  // chunks emit the bare slot id (a step-level event cannot prove which
-  // phrase was on screen) — it resolves to the registry's ambiguous slot.
+  // registry. Events stamped for an OLDER contentVersion go through the
+  // ledger: single-revision chunks emit their rev'd id; multi-revision
+  // chunks emit the bare slot id (the event cannot prove which phrase was
+  // on screen) — it resolves to the registry's ambiguous slot. Events
+  // stamped for the CURRENT version provably saw the live text → live rev.
   const registry = adaptCourse(LESSONS).components;
   const realLesson = LESSONS.find((l) => l.id === 'a1-s1-l1');
   for (const evId of ['e1', 'e2']) {
@@ -274,13 +276,24 @@ const tk = (chunkId, kind, l = lesson) => {
       assert(registry.has(id), `componentId ${id} resolves in adaptCourse registry`);
     }
   }
-  // c7 is multi-revision → its projected id is the ambiguous slot `l:c`,
-  // not a guessed phrase.
-  const c7ref = projectLessonEvent(ev({ id: 'ec7' }), realLesson)
-    .componentIds.find((id) => id.includes(':c7') || id.endsWith(':c7'));
-  assert.equal(c7ref, 'a1-s1-l1:c7', 'multi-rev slot projects the ambiguous bare id');
-  assert.equal(registry.get(c7ref)?.ambiguous, true,
+  // s1-l5:c1 is multi-revision — an event stamped for a DIFFERENT content
+  // version cannot prove which phrase it saw → bare slot `l:c`.
+  const s1l5 = LESSONS.find((l) => l.id === 'a1-s1-l5');
+  const oldVersion = projectLessonEvent(
+    ev({ id: 'ec7', lessonId: 'a1-s1-l5', contentVersion: s1l5.contentVersion + 1 }),
+    s1l5
+  ).componentIds.find((id) => id === 'a1-s1-l5:c1');
+  assert.equal(oldVersion, 'a1-s1-l5:c1', 'stale-version event on multi-rev slot projects the ambiguous bare id');
+  assert.equal(registry.get(oldVersion)?.ambiguous, true,
     'bare slot id resolves to the ambiguous component — honest, never guessed');
+  // Same slot, CURRENT-version event: the learner provably saw the live
+  // text — attribute to the live revision, not the ambiguous slot.
+  const currentRef = projectLessonEvent(
+    ev({ id: 'ec8', lessonId: 'a1-s1-l5', contentVersion: s1l5.contentVersion }),
+    s1l5
+  ).componentIds.find((id) => id.startsWith('a1-s1-l5:c1'));
+  assert(currentRef?.startsWith('a1-s1-l5:c1@'), 'current-version event attributes to the live rev');
+  assert.equal(registry.get(currentRef)?.ambiguous, false, 'live rev component is not ambiguous');
 
   // Counterexample honesty: a perfect quiz NEVER mints production evidence.
   const drill = projectLessonEvent(

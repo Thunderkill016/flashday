@@ -23,3 +23,11 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run verify:full
+      # 390px visual gate for the mission lesson — reviewers download the
+      # mission-shots artifact instead of trusting DOM tests (#33).
+      - run: node qa-mission-shots.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mission-shots
+          path: mission-shots/
+          retention-days: 14
