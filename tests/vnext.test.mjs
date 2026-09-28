@@ -17,6 +17,7 @@ import {
   validateGraph
 } from '../src/vnext/capabilities.js';
 import { makeEvent } from '../src/vnext/evidence.js';
+import { EVENT_TYPES_FOR_PURPOSE } from '../src/vnext/contracts.js';
 import {
   RETENTION_DELAY_MS,
   projectLearnerState
@@ -29,8 +30,18 @@ const HOUR = 3600_000;
 const LEARNER = 'learner-test';
 let seq = 0;
 
+/* The projection only credits contract-bound events — test events must
+ * carry the same provenance bindAttempt stamps. Purpose is derived from
+ * the event type so a 'transfer_attempt' reads as purpose 'transfer',
+ * a 'checkpoint' as 'assessment', etc. effectiveSupportAllowed is left
+ * absent so the capability's own conditions apply (no task narrowing). */
+const PURPOSE_FOR_TYPE = {};
+for (const [purpose, types] of Object.entries(EVENT_TYPES_FOR_PURPOSE)) {
+  for (const t of types) PURPOSE_FOR_TYPE[t] ??= purpose;
+}
+
 function ev(capabilityId, over = {}) {
-  return makeEvent({
+  const e = makeEvent({
     id: `e${++seq}`,
     learnerId: LEARNER,
     capabilityId,
@@ -49,6 +60,9 @@ function ev(capabilityId, over = {}) {
     evaluation: { authority: 'deterministic', contractId: 'test.eval.v1' },
     ...over
   });
+  const purpose = PURPOSE_FOR_TYPE[e.eventType];
+  if (purpose) e.binding = { purpose, familyClass: 'practiced', freshnessRequired: false };
+  return e;
 }
 
 const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES).byCapability.get(id);

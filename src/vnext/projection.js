@@ -32,6 +32,7 @@
  *     change the projection; replay of the same event set is identical.
  */
 import { answerBearing, conditionsViolated } from './evidence.js';
+import { EVENT_TYPES_FOR_PURPOSE } from './contracts.js';
 
 export const CAPABILITY_STATES = [
   'NOT_SEEN',
@@ -94,13 +95,22 @@ const unionSupport = (a, b) => {
 };
 
 // Observed, unaided, condition-valid, authority-backed success — the
-// only evidence that can carry a capability past SUPPORTED.
+// only evidence that can carry a capability past SUPPORTED. The event
+// must also be contract-bound: `bindAttempt` is the only path that can
+// mint independent evidence, and the stamped purpose must agree with
+// the event type.
+const boundWell = (e) =>
+  e.binding != null &&
+  typeof e.binding.purpose === 'string' &&
+  (EVENT_TYPES_FOR_PURPOSE[e.binding.purpose] ?? []).includes(e.eventType);
+
 const isIndependent = (e, cap, support, allowed) =>
   isSuccess(e) &&
   e.attempt?.observed === true &&
   !answerBearing(support) &&
   !conditionsViolated(support, allowed) &&
-  INDEPENDENT_AUTHORITIES.has(e.evaluation?.authority);
+  INDEPENDENT_AUTHORITIES.has(e.evaluation?.authority) &&
+  boundWell(e);
 
 function emptyCapability() {
   return {
@@ -160,23 +170,26 @@ export function projectLearnerState(learnerId, events, capabilities, { retention
     slot.milestones.exposed = true;
     slot.lastEventAt = e.occurredAt;
 
-    // Families rehearsed in a practiced context — succeeded OR failed,
-    // aided OR not — can never be re-sold as a novel transfer context.
-    if (e.context?.practicedOrTransfer === 'practiced' && e.context?.promptFamily) {
+    // Families encountered in ANY non-transfer context — practiced or
+    // assessment — are rehearsed: an assessed family cannot later be
+    // re-sold as a novel transfer context either.
+    if (e.context?.practicedOrTransfer !== 'transfer' && e.context?.promptFamily) {
       if (!slot.rehearsedPromptFamilies.includes(e.context.promptFamily)) {
         slot.rehearsedPromptFamilies.push(e.context.promptFamily);
       }
     }
 
     // Attempt-boundary accumulation happens for EVERY event kind — a
-    // support_use/feedback record on this attemptId is part of its
-    // support history, not only attempt outcomes.
+    // support_use/feedback record on this attempt is part of its support
+    // history. The boundary key is task-scoped: reusing the same
+    // attemptId on a different task must not leak support across.
     const aid = e.attempt?.attemptId;
     let effSupport = e.support;
     if (aid) {
-      const prior = supportByAttempt.get(aid) ?? null;
+      const key = `${e.taskId}::${aid}`;
+      const prior = supportByAttempt.get(key) ?? null;
       effSupport = unionSupport(prior, e.support);
-      supportByAttempt.set(aid, effSupport);
+      supportByAttempt.set(key, effSupport);
     }
 
     // Non-attempt events may carry an outcome field; it is context, not

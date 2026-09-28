@@ -18,23 +18,8 @@
  * truth); the projection then demotes the attempt to SUPPORTED because
  * it violated the effective conditions. Recording ≠ crediting.
  */
-import { EVALUATION_AUTHORITIES, makeEvent } from './evidence.js';
-import { ELICITING_PURPOSES, effectiveAllowedSupport } from './contracts.js';
-
-/* Which attempt event types a purpose may produce. Assessment binds to
- * 'checkpoint'; transfer to 'transfer_attempt'; retrieval-style purposes
- * to their attempt types. A purpose can never emit an event type it does
- * not own — a retrieval task cannot mint a transfer_attempt. */
-const PURPOSE_EVENT_TYPES = {
-  diagnostic: ['recognition_attempt', 'recall_attempt', 'production_attempt', 'interaction_turn'],
-  retrieval: ['recognition_attempt', 'recall_attempt', 'retry'],
-  production: ['production_attempt', 'retry'],
-  interaction: ['interaction_turn', 'retry'],
-  remediation: ['retry', 'recognition_attempt', 'recall_attempt', 'production_attempt', 'interaction_turn'],
-  delayed_retrieval: ['delayed_retrieval'],
-  transfer: ['transfer_attempt'],
-  assessment: ['checkpoint']
-};
+import { makeEvent } from './evidence.js';
+import { ELICITING_PURPOSES, EVENT_TYPES_FOR_PURPOSE, effectiveAllowedSupport } from './contracts.js';
 
 /* Non-attempt observation records — exposure/support/feedback carry no
  * outcome credit, so any purpose may file them honestly. */
@@ -52,24 +37,36 @@ const checkForgery = (raw) => {
   }
 };
 
+/* Family class → context kind. 'assessment' is NOT 'transfer' — a fresh
+ * assessment samples ability, it does not earn transfer credit. */
+const CONTEXT_FOR_FAMILY = {
+  practiced: 'practiced',
+  fresh_transfer: 'transfer',
+  fresh_assessment: 'assessment'
+};
+
 const derivedContext = (task, raw) => ({
   missionId: task.missionId,
-  practicedOrTransfer: task.freshness?.familyClass === 'practiced' ? 'practiced' : 'transfer',
+  practicedOrTransfer: CONTEXT_FOR_FAMILY[task.freshness?.familyClass ?? 'practiced'],
   promptFamily: task.promptFamily,
   partnerType: raw?.partnerType ?? null
 });
 
 const bindEvaluation = (task, raw) => {
-  const auth = raw?.evaluation?.authority ?? task.evaluation?.authority ?? 'deterministic';
-  if (!EVALUATION_AUTHORITIES.includes(auth)) {
-    throw new Error(`unknown evaluation authority '${auth}'`);
+  // Authority is contract-derived — the caller may report evaluator
+  // identity/version, never a stronger authority than declared.
+  const declared = task.evaluation?.authority ?? 'deterministic';
+  if (raw?.evaluation?.authority != null && raw.evaluation.authority !== declared) {
+    throw new Error(
+      `authority mismatch: task declares '${declared}', caller reported '${raw.evaluation.authority}'`
+    );
   }
   const contractId = task.evaluation?.contractId ?? null;
   if (raw?.evaluation?.contractId != null && contractId != null && raw.evaluation.contractId !== contractId) {
     throw new Error(`evaluation contract mismatch: task declares '${contractId}', caller reported '${raw.evaluation.contractId}'`);
   }
   return {
-    authority: auth,
+    authority: declared,
     contractId,
     evaluator: raw?.evaluation?.evaluator ?? null,
     version: raw?.evaluation?.version ?? null
@@ -95,7 +92,7 @@ export function bindAttempt(task, capability, raw = {}) {
   }
   checkForgery(raw);
 
-  const allowed = PURPOSE_EVENT_TYPES[task.purpose];
+  const allowed = EVENT_TYPES_FOR_PURPOSE[task.purpose];
   const eventType = raw.eventType ?? allowed[0];
   if (!allowed.includes(eventType)) {
     throw new Error(`purpose '${task.purpose}' cannot emit '${eventType}'`);

@@ -22,7 +22,10 @@ export const EVENT_TYPES = [
 ];
 
 export const OUTCOMES = ['success', 'partial', 'fail'];
-export const CONTEXT_KINDS = ['practiced', 'transfer'];
+/* 'assessment' is its own context kind — a fresh assessment family is
+ * an ability check, not transfer evidence. Only 'transfer' context can
+ * feed the TRANSFERRED milestone. */
+export const CONTEXT_KINDS = ['practiced', 'transfer', 'assessment'];
 
 /* Evaluation authority v0 (#45 §10): how the outcome was determined is
  * provenance, not decoration — conservative rules live in projection:

@@ -48,6 +48,21 @@ export const ELICITING_PURPOSES = new Set([
 // attempt evidence.
 export const EXPOSURE_PURPOSES = new Set(['input', 'notice']);
 
+/* Which attempt event types a purpose may produce. Assessment binds to
+ * 'checkpoint'; transfer to 'transfer_attempt'. A purpose can never emit
+ * an event type it does not own — a retrieval task cannot mint a
+ * transfer_attempt. The projection re-checks this on bound events. */
+export const EVENT_TYPES_FOR_PURPOSE = {
+  diagnostic: ['recognition_attempt', 'recall_attempt', 'production_attempt', 'interaction_turn'],
+  retrieval: ['recognition_attempt', 'recall_attempt', 'retry'],
+  production: ['production_attempt', 'retry'],
+  interaction: ['interaction_turn', 'retry'],
+  remediation: ['retry', 'recognition_attempt', 'recall_attempt', 'production_attempt', 'interaction_turn'],
+  delayed_retrieval: ['delayed_retrieval'],
+  transfer: ['transfer_attempt'],
+  assessment: ['checkpoint']
+};
+
 export const TRANSFER_DIMENSIONS = [
   'wording',
   'partner',
@@ -172,13 +187,20 @@ export function makeMission(fields) {
     targetCapabilities: [],
     prerequisiteCapabilities: [],
     supportCapabilities: [],
-    language: { assumedKnown: [], introduced: { chunks: [], vocabulary: [], constructions: [] } },
+    language: {
+      assumedKnown: { chunks: [], vocabulary: [], constructions: [] },
+      introduced: { chunks: [], vocabulary: [], constructions: [] }
+    },
     taskIds: [],
     transferPlan: { required: false, dimensions: [] },
     assessmentPlan: { required: false, freshnessRequired: true },
     ...fields,
     language: {
-      assumedKnown: fields?.language?.assumedKnown ?? [],
+      assumedKnown: {
+        chunks: fields?.language?.assumedKnown?.chunks ?? [],
+        vocabulary: fields?.language?.assumedKnown?.vocabulary ?? [],
+        constructions: fields?.language?.assumedKnown?.constructions ?? []
+      },
       introduced: {
         chunks: fields?.language?.introduced?.chunks ?? [],
         vocabulary: fields?.language?.introduced?.vocabulary ?? [],
@@ -221,10 +243,17 @@ export function validateMission(mission, tasks, capabilities) {
 
   // Tasks: every declared id resolves, every given task belongs to this
   // mission, and its declared capability is in the mission surface.
+  // A task that claims this missionId but is absent from taskIds is an
+  // integrity violation — it never counts toward any invariant below.
   const taskById = new Map(tasks.map((t) => [t.id, t]));
-  if (new Set(mission?.taskIds ?? []).size !== (mission?.taskIds ?? []).length) {
-    p.push('duplicate taskIds');
+  const idSet = new Set(mission?.taskIds ?? []);
+  if (idSet.size !== (mission?.taskIds ?? []).length) p.push('duplicate taskIds');
+  for (const t of tasks) {
+    if (t.missionId === mission.id && !idSet.has(t.id)) {
+      p.push(`task '${t.id}' claims mission '${mission.id}' but is not declared in taskIds`);
+    }
   }
+  const missionTasks = [];
   for (const tid of mission?.taskIds ?? []) {
     const t = taskById.get(tid);
     if (!t) { p.push(`taskIds references missing task '${tid}'`); continue; }
@@ -232,13 +261,14 @@ export function validateMission(mission, tasks, capabilities) {
     if (t.capabilityId && !declared.has(t.capabilityId)) {
       p.push(`task '${tid}' targets undeclared capability '${t.capabilityId}'`);
     }
+    missionTasks.push(t);
   }
 
   // Every target capability needs at least one eliciting/evidence path —
   // exposure alone never proves ability.
   for (const capId of mission?.targetCapabilities ?? []) {
-    const hasPath = tasks.some(
-      (t) => t.missionId === mission.id && t.capabilityId === capId && ELICITING_PURPOSES.has(t.purpose)
+    const hasPath = missionTasks.some(
+      (t) => t.capabilityId === capId && ELICITING_PURPOSES.has(t.purpose)
     );
     if (!hasPath) p.push(`target '${capId}' has no eliciting task — exposure is not evidence`);
   }
@@ -247,10 +277,9 @@ export function validateMission(mission, tasks, capabilities) {
   // freshness-required task may reuse a family already used for practice.
   if (mission?.assessmentPlan?.freshnessRequired) {
     const practiced = new Set(
-      tasks.filter((t) => t.missionId === mission.id && t.freshness?.familyClass === 'practiced')
-        .map((t) => t.promptFamily)
+      missionTasks.filter((t) => t.freshness?.familyClass === 'practiced').map((t) => t.promptFamily)
     );
-    for (const t of tasks.filter((t) => t.missionId === mission.id && t.freshness?.required)) {
+    for (const t of missionTasks.filter((t) => t.freshness?.required)) {
       if (practiced.has(t.promptFamily)) {
         p.push(`task '${t.id}' reuses practiced family '${t.promptFamily}' — teaching cannot leak into ${t.freshness.familyClass}`);
       }
@@ -261,33 +290,28 @@ export function validateMission(mission, tasks, capabilities) {
 
 /* ── Content-load validation ──────────────────────────────── */
 
-/* Task language must be declared somewhere reachable: the mission's
- * introduced/assumed-known lists, or the language of the capabilities
- * the mission declares. Undeclared language in a task = a lesson
- * smuggling content past the syllabus. Budgets are injected, never
- * hard-coded — calibration comes from real learners, not a number we
- * made up. */
+/* Task language must be DECLARED by the mission itself — in
+ * `language.introduced` (what this mission teaches) or
+ * `language.assumedKnown` (structured per kind). A capability's own
+ * language list is NOT a whitelist: it only describes what the
+ * capability targets; whether a mission may use it is the mission's
+ * declaration. Undeclared language in a task = a lesson smuggling
+ * content past the syllabus. Budgets are injected, never hard-coded. */
 export function validateMissionContent(mission, tasks, capabilities, policy = {}) {
   const p = [];
-  const byId = new Map(capabilities.map((c) => [c.id, c]));
-  const declaredCaps = [
-    ...(mission.targetCapabilities ?? []),
-    ...(mission.prerequisiteCapabilities ?? []),
-    ...(mission.supportCapabilities ?? [])
-  ].map((id) => byId.get(id)).filter(Boolean);
-
+  const assumed = mission.language?.assumedKnown;
+  if (assumed != null && (Array.isArray(assumed) || typeof assumed !== 'object')) {
+    p.push('language.assumedKnown must be structured { chunks, vocabulary, constructions } — a flat list cannot be typed');
+  }
   const known = {
     chunks: new Set(mission.language?.introduced?.chunks ?? []),
     vocabulary: new Set(mission.language?.introduced?.vocabulary ?? []),
     constructions: new Set(mission.language?.introduced?.constructions ?? [])
   };
-  for (const item of mission.language?.assumedKnown ?? []) {
-    for (const bucket of Object.values(known)) bucket.add(item);
-  }
-  for (const cap of declaredCaps) {
-    for (const x of cap.language?.chunks ?? []) known.chunks.add(x);
-    for (const x of cap.language?.vocabulary ?? []) known.vocabulary.add(x);
-    for (const x of cap.language?.constructions ?? []) known.constructions.add(x);
+  if (assumed && typeof assumed === 'object' && !Array.isArray(assumed)) {
+    for (const x of assumed.chunks ?? []) known.chunks.add(x);
+    for (const x of assumed.vocabulary ?? []) known.vocabulary.add(x);
+    for (const x of assumed.constructions ?? []) known.constructions.add(x);
   }
 
   const needs = [
@@ -295,6 +319,10 @@ export function validateMissionContent(mission, tasks, capabilities, policy = {}
     ['requiredVocabulary', 'vocabulary'],
     ['requiredConstructions', 'constructions']
   ];
+  // Every task claiming this mission must respect the declaration —
+  // even one missing from taskIds. Ghost tasks cannot satisfy evidence
+  // paths (validateMission scopes those to taskIds), but they also
+  // cannot smuggle undeclared language past the syllabus.
   for (const t of tasks) {
     if (t.missionId !== mission.id) continue;
     for (const [field, bucket] of needs) {

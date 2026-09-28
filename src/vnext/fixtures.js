@@ -34,10 +34,13 @@ export const MISSION_MEET_PERSON = makeMission({
   ],
   supportCapabilities: ['interact.ask_repeat', 'interact.signal_nonunderstanding'],
   language: {
-    assumedKnown: [],
+    assumedKnown: { chunks: [], vocabulary: [], constructions: [] },
     introduced: {
-      chunks: ['Hi', 'Hello', "I'm …", 'My name is …', "What's your name?", 'Nice to meet you', 'Nice to meet you too'],
-      vocabulary: ['name', 'nice', 'meet'],
+      chunks: [
+        'Hi', 'Hello', "I'm …", 'My name is …', "What's your name?",
+        'Nice to meet you', 'Nice to meet you too', 'Sorry?', 'Can you repeat that?'
+      ],
+      vocabulary: ['name', 'nice', 'meet', 'hi', 'hello', 'sorry', 'repeat'],
       constructions: ['wh_question_name']
     }
   },
@@ -227,7 +230,7 @@ export const MISSION_ORDER_DRINK = makeMission({
   prerequisiteCapabilities: [],
   supportCapabilities: ['interact.ask_repeat', 'interact.signal_nonunderstanding'],
   language: {
-    assumedKnown: [],
+    assumedKnown: { chunks: [], vocabulary: [], constructions: [] },
     introduced: {
       chunks: ['What would you like?', 'Can I have …?', 'A coffee, please', 'Anything else?'],
       vocabulary: ['like', 'drink', 'coffee', 'tea', 'please'],
