@@ -47,12 +47,18 @@ export const MISSION_MEET_PERSON = makeMission({
   taskIds: [
     'task.meet.diagnostic.opening',
     'task.meet.diagnostic.listen',
+    'task.meet.diagnostic.identity_q',
+    'task.meet.diagnostic.own_name',
+    'task.meet.diagnostic.ask_name',
     'task.meet.input.scene',
     'task.meet.input.questions',
+    'task.meet.input.ask_name',
     'task.meet.retrieval.questions',
     'task.meet.retrieval.phrases',
+    'task.meet.retrieval.ask_name',
     'task.meet.interaction.guided',
     'task.meet.remediation.repair',
+    'task.meet.remediation.ask_name',
     'task.meet.interaction.unaided',
     'task.meet.interaction.polite',
     'task.meet.delayed.check',
@@ -87,6 +93,39 @@ export const TASKS_MEET_PERSON = [
     language: { requiredChunks: ['Hello'], requiredVocabulary: ['hello'], requiredConstructions: [] }
   }),
   task({
+    id: 'task.meet.diagnostic.identity_q',
+    missionId: 'mission.meet_new_person',
+    capabilityId: 'listen.identity_question_basic',
+    modality: 'listening',
+    purpose: 'diagnostic',
+    promptFamily: 'meet.identity_q.baseline.v1',
+    stimulus: { type: 'audio_line', languageComponents: ["What's your name?"] },
+    response: { type: 'choice', requiredFunctions: ['understand_identity_question'] },
+    language: { requiredChunks: ["What's your name?"], requiredVocabulary: ['name'], requiredConstructions: ['wh_question_name'] }
+  }),
+  task({
+    id: 'task.meet.diagnostic.own_name',
+    missionId: 'mission.meet_new_person',
+    capabilityId: 'speak.say_own_name',
+    modality: 'spoken_production',
+    purpose: 'diagnostic',
+    promptFamily: 'meet.own_name.baseline.v1',
+    stimulus: { type: 'partner_turn', languageComponents: ["What's your name?"] },
+    response: { type: 'spoken_turn', requiredFunctions: ['state_own_name'] },
+    language: { requiredChunks: ["I'm …"], requiredVocabulary: ['name'], requiredConstructions: [] }
+  }),
+  task({
+    id: 'task.meet.diagnostic.ask_name',
+    missionId: 'mission.meet_new_person',
+    capabilityId: 'interact.ask_name',
+    modality: 'spoken_interaction',
+    purpose: 'diagnostic',
+    promptFamily: 'meet.ask_name.baseline.v1',
+    stimulus: { type: 'partner_turn', languageComponents: ['Hi'] },
+    response: { type: 'spoken_turn', requiredFunctions: ['ask_name'] },
+    language: { requiredChunks: ["What's your name?"], requiredVocabulary: ['name'], requiredConstructions: ['wh_question_name'] }
+  }),
+  task({
     id: 'task.meet.input.scene',
     missionId: 'mission.meet_new_person',
     capabilityId: 'listen.greeting_basic',
@@ -107,6 +146,17 @@ export const TASKS_MEET_PERSON = [
     stimulus: { type: 'dialogue', languageComponents: ["What's your name?"] },
     response: { type: 'none', requiredFunctions: [] },
     language: { requiredChunks: ["What's your name?"], requiredVocabulary: ['name'], requiredConstructions: ['wh_question_name'] }
+  }),
+  task({
+    id: 'task.meet.input.ask_name',
+    missionId: 'mission.meet_new_person',
+    capabilityId: 'interact.ask_name',
+    modality: 'spoken_interaction',
+    purpose: 'input',
+    promptFamily: 'meet.ask_name.input.v1',
+    stimulus: { type: 'dialogue', languageComponents: ["What's your name?", 'My name is …'] },
+    response: { type: 'none', requiredFunctions: [] },
+    language: { requiredChunks: ["What's your name?", 'My name is …'], requiredVocabulary: ['name'], requiredConstructions: ['wh_question_name'] }
   }),
   task({
     id: 'task.meet.retrieval.questions',
@@ -131,6 +181,17 @@ export const TASKS_MEET_PERSON = [
     language: { requiredChunks: ["I'm …", 'My name is …'], requiredVocabulary: ['name'], requiredConstructions: [] }
   }),
   task({
+    id: 'task.meet.retrieval.ask_name',
+    missionId: 'mission.meet_new_person',
+    capabilityId: 'interact.ask_name',
+    modality: 'spoken_interaction',
+    purpose: 'retrieval',
+    promptFamily: 'meet.ask_name.practice.v1',
+    stimulus: { type: 'cued_prompt', languageComponents: ["What's your name?"] },
+    response: { type: 'spoken_turn', requiredFunctions: ['ask_name'] },
+    language: { requiredChunks: ["What's your name?"], requiredVocabulary: ['name'], requiredConstructions: ['wh_question_name'] }
+  }),
+  task({
     id: 'task.meet.interaction.guided',
     missionId: 'mission.meet_new_person',
     capabilityId: 'interact.ask_name',
@@ -152,6 +213,17 @@ export const TASKS_MEET_PERSON = [
     stimulus: { type: 'partner_turn', languageComponents: [] },
     response: { type: 'spoken_turn', requiredFunctions: ['ask_repeat'] },
     language: { requiredChunks: ['Sorry?', 'Can you repeat that?'], requiredVocabulary: ['sorry', 'repeat'], requiredConstructions: [] }
+  }),
+  task({
+    id: 'task.meet.remediation.ask_name',
+    missionId: 'mission.meet_new_person',
+    capabilityId: 'interact.ask_name',
+    modality: 'spoken_interaction',
+    purpose: 'remediation',
+    promptFamily: 'meet.ask_name.repair.v1',
+    stimulus: { type: 'partner_turn', languageComponents: [] },
+    response: { type: 'spoken_turn', requiredFunctions: ['ask_name'] },
+    language: { requiredChunks: ["What's your name?"], requiredVocabulary: ['name'], requiredConstructions: ['wh_question_name'] }
   }),
   task({
     id: 'task.meet.interaction.unaided',
