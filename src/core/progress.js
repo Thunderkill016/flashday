@@ -40,9 +40,15 @@ export function lessonStatus(events, lesson) {
   // Only steps the lesson offers get a status — a checkpoint's 'prepare'
   // would otherwise sit at 'todo' forever and look permanently unfinished.
   for (const step of stepsForLesson(lesson)) {
-    status[step] = relevant.some(
-      (event) => event.step === step || event.kind === STEP_KIND[step]
-    ) ? 'attempted' : 'todo';
+    status[step] = relevant.some((event) => {
+      if (event.step !== step && event.kind !== STEP_KIND[step]) return false;
+      // Mission exit: a failed attempt is evidence, not completion — the
+      // step counts as done only when an attempt passed every check.
+      if (step === 'exit' && lesson?.format === 'mission') {
+        return event.step === 'exit' && event.payload?.passed === true;
+      }
+      return true;
+    }) ? 'attempted' : 'todo';
   }
   return status;
 }

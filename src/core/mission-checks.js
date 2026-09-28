@@ -42,6 +42,12 @@ export function canonLine(value) {
     .toLowerCase()
     .replace(/[’‘]/g, "'")
     .replace(/[.,!?…;:()"“”«»]/g, ' ')
+    // Learner names are often Vietnamese — "Hoàng" entered once must
+    // still match "i am hoang" typed without diacritics. NFD-stripping
+    // marks + đ→d covers it; English text is unaffected.
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // combining marks U+0300–U+036F
+    .replace(/\u0111/g, 'd')
     .replace(/\s+/g, ' ')
     .trim();
   return flat

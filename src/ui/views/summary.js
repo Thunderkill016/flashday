@@ -36,8 +36,13 @@ export function mount(root, ctx) {
   // Celebration (Duolingo lesson-complete screen): every step done → a real
   // reward moment, not just a data table. Numbers are activity facts —
   // for missions the headline is the exit attempt's provenance, never a
-  // sum of heterogeneous 'correct' counters (issue #33 round 2).
-  const allDone = steps.every((step) => events.some((e) => e.step === step));
+  // sum of heterogeneous 'correct' counters (issue #33 round 2). A failed
+  // mission exit is NOT done — only a passed attempt counts (round 4).
+  const stepDone = (step) =>
+    events.some(
+      (e) => e.step === step && (!isMission || step !== 'exit' || e.payload?.passed === true)
+    );
+  const allDone = steps.every(stepDone);
   if (allDone) {
     const banner = document.createElement('div');
     banner.className = 'celebration-banner';
@@ -119,11 +124,18 @@ export function mount(root, ctx) {
   for (const step of steps) {
     const stepEvents = events.filter((event) => event.step === step);
     const li = document.createElement('li');
-    if (!stepEvents.length) {
+    // Mission exit with only failed attempts is unfinished work — the
+    // step lists as "cần làm lại" and the next action routes back to it.
+    const failedOnly =
+      isMission && step === 'exit' && stepEvents.length > 0 &&
+      !stepEvents.some((e) => e.payload?.passed === true);
+    if (!stepEvents.length || failedOnly) {
       todoSteps.push(step);
       const link = document.createElement('a');
       link.href = `#/lesson/${lesson.id}/${step}`;
-      link.textContent = `${STEP_LABELS[step]} — Chưa làm`;
+      link.textContent = failedOnly
+        ? `${STEP_LABELS[step]} — Cần làm lại (đã thử ${stepEvents.length} lần)`
+        : `${STEP_LABELS[step]} — Chưa làm`;
       li.appendChild(link);
     } else {
       li.appendChild(el('span', `${STEP_LABELS[step]} — `, 'summary-label'));

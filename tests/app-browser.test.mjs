@@ -839,6 +839,9 @@ try {
     await ctxStage.locator('[data-role="play-all"]').click();
     const ttsCalls = await page.evaluate(() => window.__ttsCalls);
     assert.equal(ttsCalls.length, 4, 'the whole exchange is heard as one sequence');
+    assert.equal(await ctxStage.locator('.mission-primary:not([hidden])').count(), 0,
+      'audio alone is not enough — the name contract must be declared first');
+    await ctxStage.locator('[data-role="learner-name"]').fill('Linh');
     await ctxStage.locator('.mission-primary').click();
     await stage('gist').waitFor();
 
@@ -865,7 +868,8 @@ try {
     for (let i = 0; i < missionLesson.mission.retrieval.length; i++) {
       assert.match(await retrieve.locator('.mission-retrieve-card').textContent(), new RegExp(`Nhớ lại ${i + 1}/4`));
       if (i === 1) await retrieve.locator('[data-role="retrieve-hint"]').click(); // recorded aid
-      await retrieve.locator('.mission-input').fill(missionLesson.mission.retrieval[i].answer);
+      // <name> resolves to the captured learner name (Linh in this run).
+      await retrieve.locator('.mission-input').fill(missionLesson.mission.retrieval[i].answer.replaceAll('<name>', 'Linh'));
       await retrieve.locator('[data-role="retrieve-check"]').click();
       if (i < missionLesson.mission.retrieval.length - 1) await sleep(650); // item-advance defer
     }
@@ -876,7 +880,7 @@ try {
     const turns = missionLesson.mission.interact.turns;
     for (let t = 0; t < turns.length; t++) {
       const wb = interact.locator('.mission-interact-wb').last();
-      for (const word of turns[t].you.split(/\s+/).filter(Boolean)) {
+      for (const word of turns[t].you.replaceAll('<name>', 'Linh').split(/\s+/).filter(Boolean)) {
         await wb.locator(`.wb-bank .wb-chip[data-word="${word}"]`).first().click();
       }
       await wb.locator('.wb-check').click();
@@ -902,15 +906,19 @@ try {
     await stage('exit').locator('[data-role="exit-send"]:not([disabled])').click();
     await exit.locator('.mission-exit-feedback').waitFor();
 
-    // Feedback shows per-goal results + targeted hints — NO model yet.
+    // Feedback shows per-goal results + targeted hints — NO model yet,
+    // and NO "Xem kết quả": a failed mission cannot complete.
     assert.equal(await exit.locator('.exit-checks .check-met').count(), 2, 'greet + polite met; name + ask missed');
     assert.equal(await exit.locator('.exit-checks .check-missed').count(), 2);
     assert.equal(await exit.locator('[data-role="exit-model"] .en').count(), 0,
       'attempt-1 feedback shows hints, never the full model');
     assert.equal(await exit.locator('[data-role="exit-model-reveal"]').count(), 1,
       'explicit model reveal is available but not automatic');
+    assert.equal(await exit.locator('[data-role="exit-done"]').count(), 0,
+      'failed attempt must not offer the completion path');
 
-    // Attempt 1 recorded ONCE (restore did not duplicate), fully unaided.
+    // Attempt 1 recorded ONCE (restore did not duplicate), fully unaided,
+    // and explicitly NOT passed — the lesson is still unfinished.
     let exitEvents = await eventsOfKind('exit');
     assert.equal(exitEvents.length, 1, 'restored mid-attempt did not double-record');
     assert.equal(exitEvents[0].payload.attempt, 1);
@@ -919,12 +927,25 @@ try {
     assert.equal(exitEvents[0].support.hintViewed, false);
     assert.equal(exitEvents[0].support.modelRevealed, false);
     assert.equal(exitEvents[0].payload.correct, 2);
+    assert.equal(exitEvents[0].payload.passed, false, '2/4 is work, not a pass');
     assert.deepEqual(exitEvents[0].payload.responses[0].missed, ['name', 'ask'],
       'structured scorer: keyword soup fails name + ask');
 
-    // RETRY — attempt 2 sees the targeted hint under the input, still no
-    // model; its support provenance is hintViewed, not modelRevealed.
-    await exit.locator('[data-role="exit-retry"]').click();
+    // The failed mission shows as unfinished on the summary — no
+    // celebration, and the next action routes back to the exit task.
+    await goto(page, `${origin}app/?preview#/summary/${L1}`);
+    assert.equal(await page.locator('[data-role="celebration"]').count(), 0,
+      'no "Xong bài!" while the exit task is failed');
+    const retryLink = page.locator('.summary-steps a', { hasText: 'Cần làm lại' });
+    assert.equal(await retryLink.count(), 1, 'exit lists as retryable work, not done');
+    const retryNav = page.locator('.runner-nav a.btn-primary');
+    assert.match(await retryNav.textContent(), /Tự làm/, 'next action sends learner back to the exit');
+    await goto(page, `${origin}app/?preview#/lesson/${L1}/exit`);
+    await stage('exit').waitFor();
+
+    // RETRY — re-entering the stage after a failed attempt is the retry:
+    // the persisted support shows the targeted hint under the input,
+    // still no model; provenance is hintViewed, not modelRevealed.
     assert.equal(await stage('exit').locator('.exit-hint').count(), 1, 'hint shown for the turn that missed');
     assert.equal(await stage('exit').locator('text=Mẫu:').count(), 0, 'still no model on a hint retry');
     await stage('exit').locator('[aria-label="Lượt của bạn 1"]').fill('Hi, I’m Linh. What’s your name?');
@@ -943,6 +964,10 @@ try {
     assert.equal(exitEvents[1].support.hintViewed, true, 'hint-level aid recorded');
     assert.equal(exitEvents[1].support.modelRevealed, false, 'model never revealed for this attempt');
     assert.equal(exitEvents[1].payload.correct, 4);
+    assert.equal(exitEvents[1].payload.passed, true, 'aided but complete — the mission passes');
+    // Only now does the completion path exist.
+    assert.equal(await exit.locator('[data-role="exit-done"]').count(), 1,
+      '"Xem kết quả" appears only after a passed attempt');
 
     // Staged enrollment — only exercised modalities/chunks mint tasks.
     // Lesson 1 mints NO listening cards (issue #33 round 3): audio next
@@ -986,6 +1011,7 @@ try {
     assert.equal(contextEvents[0].payload.heardAll, true, 'the exchange was heard');
     assert.equal(contextEvents[0].payload.ttsUnavailable, false);
     assert.equal(contextEvents[0].payload.audioSkipped, false, 'audio path, not a skip');
+    assert.equal(contextEvents[0].payload.learnerName, 'Linh', 'the name contract is on record');
 
     // Summary shows can-do evidence from the exit task, not a mixed
     // "N câu đúng" counter — and no stage left undone.
@@ -1021,6 +1047,9 @@ try {
     // the click is recorded as ttsUnavailable — and mints NOTHING.
     assert.equal(await stage('context').locator('.translation:not([hidden])').count(), 4,
       'no-TTS fallback opens the text path');
+    assert.equal(await stage('context').locator('.mission-primary:not([hidden])').count(), 0,
+      'fallback alone is not enough — name still required');
+    await stage('context').locator('[data-role="learner-name"]').fill('Linh');
     await stage('context').locator('.mission-primary').click();
     await stage('gist').waitFor();
     await sleep(600); // debounced save
@@ -1064,6 +1093,7 @@ try {
     await stage('context').locator('[data-role="read-skip"]').click();
     assert.equal(await stage('context').locator('.translation:not([hidden])').count(), 4,
       'the skip opens the text path');
+    await stage('context').locator('[data-role="learner-name"]').fill('Linh');
     await stage('context').locator('.mission-primary').click();
     await stage('gist').waitFor();
     await sleep(600); // debounced save

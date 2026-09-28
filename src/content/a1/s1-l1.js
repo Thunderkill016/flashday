@@ -97,8 +97,10 @@ export default {
 
     // GUIDED RETRIEVAL: cue tiếng Việt → tự gõ lại cụm tiếng Anh.
     // answer là câu hoàn chỉnh để chấm; learner gõ, không chọn đáp án.
+    // `<name>` = tên learner nhập ở context stage — "nói tên mình" nghĩa
+    // là nói TÊN THẬT của họ, không phải đóng vai Linh (issue #33 round 4).
     retrieval: [
-      { chunkId: 'c1', cue: 'Chào và nói tên mình là Linh', answer: 'Hi, I’m Linh.' },
+      { chunkId: 'c1', cue: 'Chào và nói tên mình', answer: 'Hi, I’m <name>.' },
       { chunkId: 'c2', cue: 'Hỏi tên người kia', answer: 'What’s your name?' },
       { chunkId: 'c3', cue: 'Nói lời lịch sự: "rất vui được gặp bạn"', answer: 'Nice to meet you.' },
       { chunkId: 'c4', cue: 'Đáp lại: "mình cũng rất vui được gặp bạn"', answer: 'Nice to meet you too.' },
@@ -115,7 +117,7 @@ export default {
         {
           them: 'Hi! I’m Mia. What’s your name?',
           themVi: 'Chào! Mình là Mia. Tên bạn là gì?',
-          you: 'Hi, I’m Linh.',
+          you: 'Hi, I’m <name>.',
         },
         {
           them: 'Nice to meet you.',
@@ -141,7 +143,7 @@ export default {
         {
           them: 'Hi!',
           themVi: 'Chào!',
-          model: 'Hi, I’m Linh. What’s your name?',
+          model: 'Hi, I’m <name>. What’s your name?',
           produces: ['c1', 'c2'],
           checks: [
             {
@@ -153,11 +155,12 @@ export default {
             {
               key: 'name',
               label: 'Nói tên mình',
-              // Fixed role: trong nhiệm vụ này learner ĐÓNG VAI Linh —
-              // scorer đối chiếu với tên đã biết, không chấp nhận
-              // 'i am <bất cứ từ nào>'.
-              match: ['i am linh', 'my name is linh', 'call me linh'],
-              hint: 'Nói tên mình bằng "I’m Linh." — trong bài này tên bạn là Linh.',
+              // `<name>` resolves to the learner's OWN name, captured once
+              // in context — 'i am happy' / 'my name is student' can never
+              // satisfy it, and "I'm Hoang" passes only if Hoang is who
+              // the learner said they are.
+              match: ['i am <name>', 'my name is <name>', 'call me <name>'],
+              hint: 'Nói tên mình bằng "I’m <name>."',
             },
             {
               key: 'ask',

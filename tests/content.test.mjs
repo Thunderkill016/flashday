@@ -37,6 +37,12 @@ import lesson from '../src/content/a1/s1-l1.js';
   const noHint = JSON.parse(JSON.stringify(lesson));
   delete noHint.mission.exit.turns[0].checks[1].hint;
   assert(validateLesson(noHint).length > 0, 'every check needs a targeted hint');
+
+  // The name contract is declared in content: "Nói tên mình" matches the
+  // learner's own captured name via <name>, not a hidden persona.
+  const nameCheck = lesson.mission.exit.turns[0].checks.find((c) => c.key === 'name');
+  assert.ok(nameCheck.match.every((p) => p.includes('<name>')),
+    'name check must resolve against the learner-entered <name>');
 }
 
 {

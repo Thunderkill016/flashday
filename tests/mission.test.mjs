@@ -17,16 +17,29 @@ const turn2 = lesson.mission.exit.turns[1];
 const checkOf = (turn, key) => turn.checks.find((c) => c.key === key);
 const keys = (db) => Object.keys(db.fsrs || {}).sort();
 
+// Content declares `i am <name>` etc. — production resolves <name> with
+// the learner's own captured name before scoring (mission.js renderName).
+// The test does the same substitution to exercise the real patterns.
+const forName = (name) => {
+  const sub = (s) => String(s ?? '').replaceAll('<name>', name);
+  const resolveTurn = (turn) => ({
+    ...turn,
+    checks: turn.checks.map((c) => ({ ...c, match: c.match.map(sub), hint: sub(c.hint) }))
+  });
+  return { turn1: resolveTurn(turn1), turn2: resolveTurn(turn2), resolveTurn };
+};
+const asLinh = forName('Linh');
+
 // ── 1. The counterexample from review: keyword soup must NOT pass ──
 {
-  const scored = scoreExitTurn(turn1, 'Hi, I am your name');
+  const scored = scoreExitTurn(asLinh.turn1, 'Hi, I am your name');
   const byKey = Object.fromEntries(scored.checks.map((c) => [c.key, c.met]));
   assert.deepEqual(byKey, { greet: true, name: false, ask: false },
     '"Hi, I am your name" only greets — it neither names nor asks');
   assert.equal(scored.met, 1, '1/3, not 3/3');
 }
 
-// ── 2. Honest full answers still pass — the persona is Linh ───────
+// ── 2. Honest full answers still pass — learner said they're Linh ──
 {
   for (const response of [
     'Hi, I’m Linh. What’s your name?',
@@ -36,16 +49,16 @@ const keys = (db) => Object.keys(db.fsrs || {}).sort();
     'Hi I am Linh, your name please',
     'Hello, I’m Linh — tell me your name?'
   ]) {
-    const scored = scoreExitTurn(turn1, response);
+    const scored = scoreExitTurn(asLinh.turn1, response);
     assert.equal(scored.met, scored.total, `expected all checks met: "${response}" → ${JSON.stringify(scored.checks)}`);
   }
 }
 
-// ── 3. Round-3 false positives: a name CHECK, not a stem + word ────
+// ── 3. The name check compares the learner's OWN captured name ─────
+// (issue #33 round 4): no stem+word acceptance, and no hidden persona —
+// whoever the learner entered in context is the name that passes.
 {
-  const name = checkOf(turn1, 'name');
-  // Any old content word used to pass "I am ___" — it must not. The
-  // mission's learner persona is Linh, so the scorer checks that name.
+  const name = checkOf(asLinh.turn1, 'name');
   for (const sentence of [
     'Hi, I am happy.',
     'Hi, I am tired.',
@@ -56,16 +69,27 @@ const keys = (db) => Object.keys(db.fsrs || {}).sort();
     'i am your name'
   ]) {
     assert.equal(meetsCheck(sentence, name), false,
-      `"${sentence}" must not satisfy "Nói tên mình" — the role is Linh`);
+      `"${sentence}" must not satisfy "Nói tên mình" — learner is Linh`);
   }
   assert.equal(meetsCheck('i am linh', name), true);
   assert.equal(meetsCheck("I'm Linh", name), true, 'contraction canonicalizes');
   assert.equal(meetsCheck('call me linh', name), true);
+
+  // A different captured name switches the contract — "I'm Hoang" is a
+  // real self-introduction when the learner IS Hoang (the exact review
+  // counterexample), and "I'm Linh" is then wrong.
+  const hoangName = checkOf(forName('Hoang').turn1, 'name');
+  assert.equal(meetsCheck("Hi, I'm Hoang. What's your name?", hoangName), true,
+    'learner-named Hoang passes as Hoang');
+  assert.equal(meetsCheck('I am Linh', hoangName), false, '…and Linh no longer counts');
+  // Vietnamese names typed without diacritics still match.
+  const hoangDia = checkOf(forName('Hoàng').turn1, 'name');
+  assert.equal(meetsCheck("i'm hoang", hoangDia), true, 'diacritic-free typing matches "Hoàng"');
 }
 
 // ── 4. Structural strictness — order and boundaries matter ────────
 {
-  const ask = checkOf(turn1, 'ask');
+  const ask = checkOf(asLinh.turn1, 'ask');
   assert.equal(meetsCheck('what is your names', ask), false, 'word boundary: "names" is not the question form');
   assert.equal(meetsCheck('name your what is', ask), false, 'scrambled words are not the question form');
   assert.equal(meetsCheck('your name', ask), false, '"your name" alone is not an ask');
@@ -75,7 +99,7 @@ const keys = (db) => Object.keys(db.fsrs || {}).sort();
 
 // ── 5. Turn 2 politeness check ────────────────────────────────────
 {
-  const polite = checkOf(turn2, 'polite');
+  const polite = checkOf(asLinh.turn2, 'polite');
   assert.equal(meetsCheck('Nice to meet you too.', polite), true);
   assert.equal(meetsCheck('nice to meet you', polite), true, 'echoing the formula counts');
   assert.equal(meetsCheck('you too', polite), true, 'minimal reciprocal counts');
@@ -87,6 +111,8 @@ const keys = (db) => Object.keys(db.fsrs || {}).sort();
 {
   assert.equal(canonLine("Hi, I’m Linh. What’s your name?"), 'hi i am linh what is your name');
   assert.equal(canonLine('  HEY!!  '), 'hey');
+  assert.equal(canonLine('Hoàng'), 'hoang', 'diacritics normalize');
+  assert.equal(canonLine('Đức'), 'duc', 'đ is not a combining mark — needs the explicit map');
 }
 
 // ── 7. Enrollment honesty — the lesson-1 pool is 11, no listening ──

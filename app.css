@@ -507,6 +507,8 @@ textarea.write-area, textarea.speak-area {
 .mission-line .mission-input { flex: 1; }
 
 .mission-cue { font-size: 16px; font-weight: 600; margin: var(--space-3) 0; }
+.mission-name { margin: var(--space-3) 0; }
+.mission-name-label { display: block; font-size: 14px; font-weight: 600; margin-bottom: var(--space-2); }
 .mission-input {
   width: 100%; min-height: 44px; padding: 0 var(--space-3);
   border: 1px solid var(--border-strong); border-radius: var(--radius-md);

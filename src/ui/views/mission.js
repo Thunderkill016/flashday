@@ -123,7 +123,35 @@ function events() {
 }
 
 function stageDone(stage) {
-  return events().some((e) => e.lessonId === state.lesson.id && e.step === stage);
+  return events().some(
+    (e) =>
+      e.lessonId === state.lesson.id &&
+      e.step === stage &&
+      // A failed exit attempt is evidence, not completion — the stage is
+      // done only once an attempt meets every check (issue #33 round 4).
+      (stage !== 'exit' || e.payload?.passed === true)
+  );
+}
+
+// The learner's own name — captured once in context, substituted wherever
+// content carries `<name>`. "Nói tên mình" means THEIR name, so the exit
+// scorer compares against it instead of any stem + word (issue #33 r4).
+function learnerName() {
+  const raw = state.draft?.mission?.learnerName;
+  const name = typeof raw === 'string' ? raw.trim() : '';
+  return name || 'Linh'; // persona fallback for drafts pre-dating capture
+}
+
+function renderName(text) {
+  return String(text ?? '').replaceAll('<name>', learnerName());
+}
+
+function capitalizeName(value) {
+  return value
+    .trim()
+    .split(/\s+/)
+    .map((w) => (w ? w[0].toLocaleUpperCase('vi') + w.slice(1) : w))
+    .join(' ');
 }
 
 function firstIncomplete() {
@@ -325,7 +353,34 @@ const builders = {
     let armed = false;
 
     const nav = missionNav(null);
-    const gate = text('p', 'Nghe đoạn hội thoại — hoặc bấm "Đọc thay vì nghe" — để tiếp tục.', 'view-placeholder');
+    const gate = text('p',
+      'Nhập tên của bạn và nghe đoạn hội thoại — hoặc bấm "Đọc thay vì nghe" — để tiếp tục.',
+      'view-placeholder');
+
+    // The name contract is declared BEFORE any production attempt: the
+    // learner says their OWN name to Mia and Sam — no hidden "you are
+    // Linh" rule discovered only after a failed check (issue #33 r4).
+    const draftName = state.draft?.mission?.learnerName;
+    const nameWrap = document.createElement('div');
+    nameWrap.className = 'mission-name';
+    const nameLabel = document.createElement('label');
+    nameLabel.className = 'mission-name-label';
+    nameLabel.textContent = 'Bạn tên gì? — bạn sẽ nói "I’m …" khi gặp Mia và Sam.';
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.className = 'mission-input';
+    nameInput.dataset.role = 'learner-name';
+    nameInput.maxLength = 24;
+    nameInput.placeholder = 'Tên của bạn';
+    nameInput.setAttribute('aria-label', 'Tên của bạn');
+    nameInput.value = typeof draftName === 'string' ? draftName : '';
+    nameInput.addEventListener('input', () => {
+      patchMission({ learnerName: capitalizeName(nameInput.value) || null });
+      maybeArm();
+    });
+    nameLabel.htmlFor = '';
+    nameWrap.append(nameLabel, nameInput);
+    host.appendChild(nameWrap); // above the dialogue: name is the contract
 
     const showTranslations = () => {
       translationViewed = true;
@@ -420,7 +475,9 @@ const builders = {
     function maybeArm() {
       if (armed) return;
       const exposed = playedAll || playedLines.size > 0 || audioSkipped || ttsUnavailable;
-      if (!exposed) return;
+      // Continue needs BOTH halves of the contract: a real exposure AND
+      // the learner's name — the exit scorer will compare against it.
+      if (!exposed || !learnerNameIsSet()) return;
       armed = true;
       gate.hidden = true;
       armPrimary(nav, 'Hiểu đoạn này →', () => {
@@ -437,12 +494,17 @@ const builders = {
             heardAll: playedAll || linesHeard.length === m.lines.length,
             translationViewed,
             ttsUnavailable,
-            audioSkipped
+            audioSkipped,
+            learnerName: learnerName()
           },
           { translationViewed }
         );
         nextStage();
       });
+    }
+
+    function learnerNameIsSet() {
+      return Boolean(state.draft?.mission?.learnerName?.trim());
     }
   },
 
@@ -616,18 +678,19 @@ const builders = {
       row.append(check, hintBtn, answerBtn);
       card.append(input, row, out);
 
+      const expected = renderName(item.answer);
       const showScaffold = (level) => {
         out.hidden = false;
         if (level === 'hint') {
           record.usedHint = true;
-          const scaffold = item.answer
+          const scaffold = expected
             .split(' ')
             .map((w) => (w.length > 1 ? `${w[0]}${'·'.repeat(w.length - 1)}` : w))
             .join(' ');
           out.textContent = `Gợi ý: ${scaffold}`;
         } else {
           record.usedAnswer = true;
-          out.textContent = `Đáp án: ${item.answer} — gõ lại để qua.`;
+          out.textContent = `Đáp án: ${expected} — gõ lại để qua.`;
         }
       };
       hintBtn.addEventListener('click', () => showScaffold('hint'));
@@ -637,7 +700,7 @@ const builders = {
         const value = input.value.trim();
         if (!value) return;
         record.attempts += 1;
-        const match = matchSpeech(item.answer, value);
+        const match = matchSpeech(expected, value);
         if (match.score >= 0.9) {
           record.ok = true;
           results[index] = record;
@@ -691,8 +754,9 @@ const builders = {
       const wbHost = document.createElement('div');
       wbHost.className = 'mission-interact-wb';
       thread.appendChild(wbHost);
-      const words = turn.you.split(/\s+/).filter(Boolean);
-      mountWordBank(wbHost, [{ prompt: 'Bạn trả lời:', answer: turn.you, words, extra: turn.extra || [] }], {
+      const youText = renderName(turn.you); // learner says their own name
+      const words = youText.split(/\s+/).filter(Boolean);
+      mountWordBank(wbHost, [{ prompt: 'Bạn trả lời:', answer: youText, words, extra: turn.extra || [] }], {
         onDone: () => {
           record.ok = true;
           results[index] = record;
@@ -738,6 +802,18 @@ const builders = {
       ? { ...draftMission.exitSupport }
       : {};
 
+    // `<name>` in content resolves to the learner's own name — checks,
+    // hints and the model all speak it, so "Nói tên mình" is scored
+    // against who they said they are (captured in context).
+    const resolveTurn = (turn) => ({
+      ...turn,
+      checks: (turn?.checks || []).map((c) => ({
+        ...c,
+        match: (c.match || []).map(renderName),
+        hint: renderName(c.hint)
+      }))
+    });
+
     // Which goals the previous recorded attempt missed — rebuilt from the
     // durable event (not the draft) so per-turn hints survive a reload.
     const lastExit = events()
@@ -746,7 +822,7 @@ const builders = {
     const missedByTurn = new Map();
     for (const r of lastExit?.payload?.responses || []) {
       const missed = (r.missed || [])
-        .map((key) => ex.turns[r.turn]?.checks.find((c) => c.key === key))
+        .map((key) => resolveTurn(ex.turns[r.turn])?.checks.find((c) => c.key === key))
         .filter(Boolean);
       if (missed.length) missedByTurn.set(r.turn, missed);
     }
@@ -790,7 +866,12 @@ const builders = {
             score: r.score
           })),
           correct: met,
-          total
+          total,
+          // The mission is complete only when one attempt meets every
+          // check — a failed try is evidence of work, never a pass
+          // (issue #33 round 4). Aided passes count, and their support
+          // provenance stays on the event.
+          passed: total > 0 && met === total
         },
         {
           hintViewed: Boolean(attempt.support.hintViewed),
@@ -831,7 +912,7 @@ const builders = {
         const modelSlot = document.createElement('div');
         modelSlot.dataset.role = 'exit-model';
         if (modelShown) {
-          modelSlot.append(text('p', `Mẫu: ${turn.model}`, 'en'), playButton(turn.model));
+          modelSlot.append(text('p', `Mẫu: ${renderName(turn.model)}`, 'en'), playButton(renderName(turn.model)));
         }
         block.appendChild(modelSlot);
         modelSlots.push({ slot: modelSlot, turn });
@@ -862,7 +943,7 @@ const builders = {
           nextSupport.modelRevealed = true;
           patchMission({ exitSupport: nextSupport });
           for (const { slot, turn } of modelSlots) {
-            slot.append(text('p', `Mẫu: ${turn.model}`, 'en'), playButton(turn.model));
+            slot.append(text('p', `Mẫu: ${renderName(turn.model)}`, 'en'), playButton(renderName(turn.model)));
           }
           showModel.disabled = true;
         });
@@ -882,12 +963,17 @@ const builders = {
         attempt.no += 1;
         renderTurn(0);
       });
-      const done = document.createElement('a');
-      done.className = 'btn-primary';
-      done.dataset.role = 'exit-done';
-      done.href = `#/summary/${state.lesson.id}`;
-      done.textContent = 'Xem kết quả';
-      actions.append(retry, done);
+      actions.appendChild(retry);
+      // A failed mission cannot complete — "Xem kết quả" exists only once
+      // an attempt met every communicative check (issue #33 round 4).
+      if (totalMissed === 0) {
+        const done = document.createElement('a');
+        done.className = 'btn-primary';
+        done.dataset.role = 'exit-done';
+        done.href = `#/summary/${state.lesson.id}`;
+        done.textContent = 'Xem kết quả';
+        actions.appendChild(done);
+      }
       feedback.appendChild(actions);
       host.appendChild(feedback);
       feedback.querySelector('h3')?.focus?.();
@@ -918,7 +1004,7 @@ const builders = {
       // Aid under the input: the model when revealed, else only the hints
       // for goals this turn missed last time — never the full answer.
       if (attempt.support.modelRevealed) {
-        row.appendChild(text('p', `Mẫu: ${turn.model}`, 'view-placeholder'));
+        row.appendChild(text('p', `Mẫu: ${renderName(turn.model)}`, 'view-placeholder'));
       } else if (attempt.support.hintViewed) {
         const missed = attempt.missedByTurn?.get(turnIdx) || [];
         if (missed.length) {
@@ -934,7 +1020,7 @@ const builders = {
         if (!value) return;
         input.disabled = true;
         send.disabled = true;
-        const scored = scoreExitTurn(turn, value);
+        const scored = scoreExitTurn(resolveTurn(turn), value);
         attempt.responses[turnIdx] = { turn: turnIdx, response: value, ...scored };
         // Freeze-and-record happens once per whole exchange — the attempt
         // is only durable after the learner finishes all turns.

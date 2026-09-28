@@ -31,6 +31,7 @@ await shot('02-context-translation-support');
 // Headless has no English voice → the explicit no-TTS fallback path.
 await stage('context').locator('[data-role="play-all"]').click();
 await shot('03-context-no-tts-fallback');
+await stage('context').locator('[data-role="learner-name"]').fill('Linh');
 await stage('context').locator('.mission-primary').click();
 await stage('gist').waitFor();
 await shot('04-gist');
@@ -49,7 +50,7 @@ await stage('notice').locator('.mission-primary').click();
 await stage('retrieve').waitFor();
 await shot('07-retrieve');
 for (const item of missionLesson.mission.retrieval) {
-  await stage('retrieve').locator('.mission-input').fill(item.answer);
+  await stage('retrieve').locator('.mission-input').fill(item.answer.replaceAll('<name>', 'Linh'));
   await stage('retrieve').locator('[data-role="retrieve-check"]').click();
   await sleep(650);
 }
@@ -57,7 +58,7 @@ await stage('interact').waitFor();
 await shot('08-interact');
 for (const turn of missionLesson.mission.interact.turns) {
   const wb = stage('interact').locator('.mission-interact-wb').last();
-  for (const word of turn.you.split(/\s+/).filter(Boolean)) {
+  for (const word of turn.you.replaceAll('<name>', 'Linh').split(/\s+/).filter(Boolean)) {
     await wb.locator(`.wb-bank .wb-chip[data-word="${word}"]`).first().click();
   }
   await wb.locator('.wb-check').click();
