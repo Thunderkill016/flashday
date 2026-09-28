@@ -32,7 +32,7 @@
  *     change the projection; replay of the same event set is identical.
  */
 import { answerBearing, conditionsViolated } from './evidence.js';
-import { EVENT_TYPES_FOR_PURPOSE } from './contracts.js';
+import { effectiveAllowedSupport, verifyEventTask } from './contracts.js';
 
 export const CAPABILITY_STATES = [
   'NOT_SEEN',
@@ -94,23 +94,20 @@ const unionSupport = (a, b) => {
   };
 };
 
-// Observed, unaided, condition-valid, authority-backed success — the
-// only evidence that can carry a capability past SUPPORTED. The event
-// must also be contract-bound: `bindAttempt` is the only path that can
-// mint independent evidence, and the stamped purpose must agree with
-// the event type.
-const boundWell = (e) =>
-  e.binding != null &&
-  typeof e.binding.purpose === 'string' &&
-  (EVENT_TYPES_FOR_PURPOSE[e.binding.purpose] ?? []).includes(e.eventType);
-
-const isIndependent = (e, cap, support, allowed) =>
+// Observed, unaided, condition-valid, authority-backed success on an
+// event VERIFIED against the registered task contract — the only
+// evidence that can carry a capability past SUPPORTED. A binder stamp
+// is not trusted on its own: verifyEventTask re-derives purpose,
+// family, context, evaluator and effective support from the registry
+// task, so a forged `binding` on a raw makeEvent() cannot mint
+// independent evidence.
+const isIndependent = (e, cap, support, task) =>
   isSuccess(e) &&
   e.attempt?.observed === true &&
   !answerBearing(support) &&
-  !conditionsViolated(support, allowed) &&
+  !conditionsViolated(support, effectiveAllowedSupport(cap, task)) &&
   INDEPENDENT_AUTHORITIES.has(e.evaluation?.authority) &&
-  boundWell(e);
+  verifyEventTask(e, task, cap);
 
 function emptyCapability() {
   return {
@@ -132,12 +129,20 @@ function emptyCapability() {
   };
 }
 
-export function projectLearnerState(learnerId, events, capabilities, { retentionDelayMs = RETENTION_DELAY_MS } = {}) {
+export function projectLearnerState(learnerId, events, capabilities, tasks, { retentionDelayMs = RETENTION_DELAY_MS } = {}) {
   // A projection is always for exactly one learner — a log mixing
   // learners must never merge into one state.
   if (typeof learnerId !== 'string' || !learnerId) {
     throw new Error('projectLearnerState requires a learnerId');
   }
+  // The task registry is the trust boundary for independent credit:
+  // events whose taskId does not resolve to a registered contract, or
+  // whose stamped semantics disagree with it, are still recorded
+  // (EXPOSED/SUPPORTED) but can never prove independence.
+  if (!Array.isArray(tasks)) {
+    throw new Error('projectLearnerState requires the registered task list');
+  }
+  const taskById = new Map(tasks.map((t) => [t.id, t]));
   const byId = new Map(capabilities.map((c) => [c.id, c]));
   const byCapability = new Map(capabilities.map((c) => [c.id, emptyCapability()]));
 
@@ -198,11 +203,7 @@ export function projectLearnerState(learnerId, events, capabilities, { retention
     slot.lastAttemptOutcome = e.attempt.outcome;
     if (!isSuccess(e)) continue;
 
-    // Task-derived effective policy travels with the bound event;
-    // unbound events still obey the capability's own conditions.
-    const allowed = e.binding?.effectiveSupportAllowed ?? cap.conditions?.supportAllowed ?? [];
-
-    if (!isIndependent(e, cap, effSupport, allowed)) {
+    if (!isIndependent(e, cap, effSupport, taskById.get(e.taskId))) {
       slot.milestones.supported = true;
       continue;
     }

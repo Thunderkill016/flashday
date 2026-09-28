@@ -36,6 +36,11 @@ let seq = 0;
 
 const taskById = (id) => [...TASKS_MEET_PERSON, ...TASKS_ORDER_DRINK].find((t) => t.id === id);
 
+/* The registry is the projection's trust boundary — every task a test
+ * binds against must be registered or its events cannot verify. */
+const REGISTRY = [...TASKS_MEET_PERSON, ...TASKS_ORDER_DRINK];
+const register = (t) => { REGISTRY.push(t); return t; };
+
 function attemptOn(taskId, over = {}) {
   const task = taskById(taskId);
   return bindAttempt(task, capabilityById(task.capabilityId), {
@@ -54,7 +59,7 @@ function attemptOn(taskId, over = {}) {
   });
 }
 
-const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES).byCapability.get(id);
+const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES, REGISTRY).byCapability.get(id);
 
 // ── 1. Fixtures validate clean under the contracts ───────────
 {
@@ -75,11 +80,12 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES).byC
 // ── 2. Task support may narrow but never broaden capability ──
 {
   const cap = capabilityById('interact.greet'); // supportAllowed: []
-  const narrow = makeTask({
+  const narrow = register(makeTask({
     id: 't.narrow', missionId: 'm.x', capabilityId: cap.id, modality: cap.modality,
     purpose: 'interaction', promptFamily: 'p.x',
-    supportPolicy: { allowed: ['repeat'], revealModelAfterAttempt: false }
-  });
+    supportPolicy: { allowed: ['repeat'], revealModelAfterAttempt: false },
+    evaluation: { authority: 'deterministic', contractId: 'eval.narrow.v1' }
+  }));
   assert.deepEqual(effectiveAllowedSupport(cap, narrow), [],
     'task allowed:repeat cannot broaden a capability that allows nothing');
 
@@ -144,6 +150,7 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES).byC
     promptFamily: 'meet.ask_name.practice.v1', // SAME family the lesson taught
     freshness: { required: true, familyClass: 'fresh_assessment' },
     supportPolicy: { allowed: [], revealModelAfterAttempt: false },
+    evaluation: { authority: 'deterministic', contractId: 'eval.leaky.v1' },
     assessment: { capabilitySample: ['interact.ask_name'], allowedLanguageRange: 'declared_target_range', answerRevealDuringAttempt: false }
   });
   // The leaky task must be DECLARED for the collision check — an
@@ -170,6 +177,7 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES).byC
     id: 't.tr.bad', missionId: 'mission.meet_new_person', capabilityId: 'interact.ask_name',
     modality: 'spoken_interaction', purpose: 'transfer', promptFamily: 'x.v1',
     freshness: { required: true, familyClass: 'fresh_transfer' },
+    evaluation: { authority: 'deterministic', contractId: 'eval.trbad.v1' },
     transfer: { changedDimensions: [] }
   }), /changed dimension/);
 
@@ -178,6 +186,7 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES).byC
     id: 't.tr.bad2', missionId: 'mission.meet_new_person', capabilityId: 'interact.ask_name',
     modality: 'spoken_interaction', purpose: 'transfer', promptFamily: 'x.v1',
     freshness: { required: true, familyClass: 'fresh_transfer' },
+    evaluation: { authority: 'deterministic', contractId: 'eval.trbad.v1' },
     transfer: { changedDimensions: ['font_size'] }
   }), /unknown transfer dimension/);
 
@@ -187,13 +196,14 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES).byC
     attemptOn('task.meet.interaction.unaided'),                                       // independent on practiced family
     attemptOn('task.meet.interaction.unaided', { occurredAt: T0 + 50 * HOUR }),       // retained
     (() => {
-      const t = makeTask({
+      const t = register(makeTask({
         id: 'task.meet.transfer.sneaky', missionId: 'mission.meet_new_person',
         capabilityId: 'interact.ask_name', modality: 'spoken_interaction', purpose: 'transfer',
         promptFamily: 'meet.ask_name.practice.v1', // rehearsed family!
         freshness: { required: true, familyClass: 'fresh_transfer' },
+        evaluation: { authority: 'deterministic', contractId: 'eval.sneaky.v1' },
         transfer: { changedDimensions: ['partner'] }
-      });
+      }));
       return bindAttempt(t, capabilityById('interact.ask_name'), {
         id: `c${++seq}`, learnerId: LEARNER, occurredAt: T0 + 52 * HOUR,
         attempt: { observed: true, outcome: 'success', response: 'ok', latencyMs: 800, attemptId: 'aS' }
@@ -246,7 +256,11 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES).byC
   const base = taskById('task.meet.interaction.unaided');
   const cap = capabilityById(base.capabilityId);
   const on = (authority) => {
-    const t = { ...base, evaluation: { authority, contractId: 'eval.test.v1' } };
+    const t = register(makeTask({
+      id: `t.auth.${authority}`, missionId: 'm.x', capabilityId: cap.id, modality: cap.modality,
+      purpose: 'interaction', promptFamily: `p.auth.${authority}`,
+      evaluation: { authority, contractId: `eval.auth.${authority}.v1` }
+    }));
     return stateOf([
       bindAttempt(t, cap, {
         id: `au${++seq}`, learnerId: LEARNER, occurredAt: T0,
@@ -282,6 +296,7 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES).byC
     modality: 'spoken_interaction',
     purpose: 'interaction',
     promptFamily: 'drink.smuggler.v1',
+    evaluation: { authority: 'deterministic', contractId: 'eval.smuggler.v1' },
     language: { requiredChunks: ['If I had known earlier'], requiredVocabulary: ['quintessential'], requiredConstructions: ['past_subjunctive'] }
   });
   const problems = validateMissionContent(
@@ -423,14 +438,14 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES).byC
     id: 'foreign1', learnerId: 'someone-else', occurredAt: at(0),
     attempt: { observed: true, outcome: 'success', response: 'ok', latencyMs: 100, attemptId: 'f1' }
   });
-  const mine = projectLearnerState(LEARNER, [...log, foreign], CAPABILITIES);
+  const mine = projectLearnerState(LEARNER, [...log, foreign], CAPABILITIES, REGISTRY);
   assert.equal(mine.generatedFrom, log.length, 'foreign events never enter my projection');
 
   // Replay determinism with bound events.
   const shuffled = [...log].reverse();
   assert.deepEqual(
-    projectLearnerState(LEARNER, shuffled, CAPABILITIES),
-    projectLearnerState(LEARNER, log, CAPABILITIES),
+    projectLearnerState(LEARNER, shuffled, CAPABILITIES, REGISTRY),
+    projectLearnerState(LEARNER, log, CAPABILITIES, REGISTRY),
     'bound events replay identically regardless of arrival order'
   );
   console.log('✓ fixture B: drink mission drives the same contract chain; isolation + determinism hold');
@@ -454,10 +469,10 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES).byC
     'caller cannot upgrade deterministic → human'
   );
   // A task authored for ASR cannot be reported as human either.
-  const asrTask = makeTask({
+  const asrTask = register(makeTask({
     id: 't.asr', missionId: 'm.x', capabilityId: 'interact.greet', modality: 'spoken_interaction',
     purpose: 'interaction', promptFamily: 'p.asr', evaluation: { authority: 'asr', contractId: 'eval.asr.v1' }
-  });
+  }));
   assert.throws(
     () => bindAttempt(asrTask, greetCap, {
       id: 'auth2', learnerId: LEARNER, occurredAt: T0,
@@ -507,7 +522,8 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES).byC
   const ghost = makeTask({
     id: 'task.meet.ghost', missionId: 'mission.meet_new_person',
     capabilityId: 'interact.greet', modality: 'spoken_interaction',
-    purpose: 'interaction', promptFamily: 'meet.ghost.v1'
+    purpose: 'interaction', promptFamily: 'meet.ghost.v1',
+    evaluation: { authority: 'deterministic', contractId: 'eval.ghost.v1' }
   });
   const mProblems = validateMission(MISSION_MEET_PERSON, [...TASKS_MEET_PERSON, ghost], CAPABILITIES);
   assert.ok(mProblems.some((x) => /not declared in taskIds/.test(x)), mProblems.join(' | '));
@@ -524,6 +540,7 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES).byC
     id: 'task.meet.greedy', missionId: 'mission.meet_new_person',
     capabilityId: 'listen.greeting_basic', modality: 'listening',
     purpose: 'retrieval', promptFamily: 'meet.greedy.v1',
+    evaluation: { authority: 'deterministic', contractId: 'eval.greedy.v1' },
     language: { requiredChunks: ['Good morning'], requiredVocabulary: [], requiredConstructions: [] }
   });
   const cProblems = validateMissionContent(MISSION_MEET_PERSON, [...TASKS_MEET_PERSON, greedy], CAPABILITIES, {});
@@ -551,4 +568,68 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES).byC
   assert.equal(sSticky.state, 'INDEPENDENT',
     'support on task A attempt "shared.id" does not leak into task B attempt "shared.id"');
   console.log('✓ round-2 blockers: authority derived, assessment≠transfer, binder-only independence, taskIds scope, declared language, task-scoped sticky');
+}
+
+// ── 13. Trust boundary: forged binding + evaluator contract ──
+{
+  // a. A raw makeEvent() that self-stamps a valid-looking binding must
+  //    not earn INDEPENDENT — the projection re-verifies every semantic
+  //    field against the registered task, not the stamp.
+  const real = taskById('task.meet.interaction.unaided'); // purpose: interaction
+  const forged = makeEventRaw({
+    id: 'forge.1', learnerId: LEARNER, capabilityId: 'interact.ask_name',
+    taskId: real.id, taskRevision: real.revision,
+    eventType: 'transfer_attempt', // interaction tasks cannot emit this
+    modality: 'spoken_interaction', occurredAt: T0,
+    context: { missionId: 'mission.meet_new_person', practicedOrTransfer: 'transfer', promptFamily: 'p.forged', partnerType: 'stranger' },
+    attempt: { observed: true, outcome: 'success', response: 'ok', latencyMs: 100, attemptId: 'fg.1' },
+    evaluation: { authority: 'deterministic', contractId: real.evaluation.contractId },
+    binding: { purpose: 'transfer', familyClass: 'fresh_transfer', freshnessRequired: true, effectiveSupportAllowed: [] }
+  });
+  const sForge = stateOf([forged], 'interact.ask_name');
+  assert.equal(sForge.milestones.independent, false, 'a forged binding does not verify against the registry task');
+  assert.equal(sForge.milestones.transferred, false, 'forged transfer context earns no transfer credit');
+  assert.equal(sForge.state, 'SUPPORTED', 'forgery is recorded honestly but never credited');
+
+  // A subtler forgery: the right eventType and purpose, but the caller
+  // upgraded the evaluator past what the task declares.
+  const forgedEval = makeEventRaw({
+    id: 'forge.2', learnerId: LEARNER, capabilityId: 'interact.ask_name',
+    taskId: real.id, taskRevision: real.revision, eventType: 'interaction_turn',
+    modality: 'spoken_interaction', occurredAt: T0,
+    context: { missionId: real.missionId, practicedOrTransfer: 'practiced', promptFamily: real.promptFamily, partnerType: null },
+    attempt: { observed: true, outcome: 'success', response: 'ok', latencyMs: 100, attemptId: 'fg.2' },
+    evaluation: { authority: 'human', contractId: real.evaluation.contractId }, // task declares deterministic
+    binding: { purpose: 'interaction', familyClass: 'practiced', freshnessRequired: false, effectiveSupportAllowed: [] }
+  });
+  assert.equal(stateOf([forgedEval], 'interact.ask_name').milestones.independent, false,
+    'authority inflated past the task contract fails verification');
+
+  // b. Eliciting purposes require a real evaluator contract id — a
+  //    task without one cannot be constructed via makeTask…
+  assert.throws(() => makeTask({
+    id: 't.nocid', missionId: 'm.x', capabilityId: 'interact.greet', modality: 'spoken_interaction',
+    purpose: 'retrieval', promptFamily: 'p.x' // evaluation.contractId stays null
+  }), /contractId/);
+
+  // …and a hand-rolled registry task without one still cannot mint
+  // independent evidence, even when every event field matches it.
+  const rawTask = {
+    id: 't.raw', revision: 1, missionId: 'm.x', capabilityId: 'interact.greet',
+    modality: 'spoken_interaction', purpose: 'retrieval', promptFamily: 'p.x',
+    freshness: { required: false, familyClass: 'practiced' },
+    supportPolicy: { allowed: [] }, evaluation: { authority: 'deterministic', contractId: null }
+  };
+  const rawBound = makeEventRaw({
+    id: 'raw.1', learnerId: LEARNER, capabilityId: 'interact.greet', taskId: 't.raw', taskRevision: 1,
+    eventType: 'recall_attempt', modality: 'spoken_interaction', occurredAt: T0,
+    context: { missionId: 'm.x', practicedOrTransfer: 'practiced', promptFamily: 'p.x', partnerType: null },
+    attempt: { observed: true, outcome: 'success', response: 'ok', latencyMs: 100, attemptId: 'r.1' },
+    evaluation: { authority: 'deterministic', contractId: null },
+    binding: { purpose: 'retrieval', familyClass: 'practiced', freshnessRequired: false, effectiveSupportAllowed: [] }
+  });
+  const sRaw = projectLearnerState(LEARNER, [rawBound], CAPABILITIES, [rawTask]).byCapability.get('interact.greet');
+  assert.equal(sRaw.milestones.independent, false,
+    'an eliciting task without evaluator contractId cannot mint independent evidence, however shaped');
+  console.log('✓ trust boundary: forged bindings fail registry verification; eliciting tasks require a real evaluator contract');
 }

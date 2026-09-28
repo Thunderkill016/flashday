@@ -19,7 +19,12 @@
  * it violated the effective conditions. Recording ≠ crediting.
  */
 import { makeEvent } from './evidence.js';
-import { ELICITING_PURPOSES, EVENT_TYPES_FOR_PURPOSE, effectiveAllowedSupport } from './contracts.js';
+import {
+  CONTEXT_FOR_FAMILY,
+  ELICITING_PURPOSES,
+  EVENT_TYPES_FOR_PURPOSE,
+  effectiveAllowedSupport
+} from './contracts.js';
 
 /* Non-attempt observation records — exposure/support/feedback carry no
  * outcome credit, so any purpose may file them honestly. */
@@ -35,14 +40,6 @@ const checkForgery = (raw) => {
   for (const k of FORGED_FIELDS) {
     if (raw?.[k] != null) throw new Error(`bindAttempt: caller may not author '${k}' — it comes from the Task contract`);
   }
-};
-
-/* Family class → context kind. 'assessment' is NOT 'transfer' — a fresh
- * assessment samples ability, it does not earn transfer credit. */
-const CONTEXT_FOR_FAMILY = {
-  practiced: 'practiced',
-  fresh_transfer: 'transfer',
-  fresh_assessment: 'assessment'
 };
 
 const derivedContext = (task, raw) => ({

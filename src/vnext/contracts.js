@@ -17,6 +17,7 @@
  * mission whose teaching items leak into assessment, fails validation
  * before a single learner touches it.
  */
+import { EVALUATION_AUTHORITIES } from './evidence.js';
 
 export const TASK_PURPOSES = [
   'diagnostic',
@@ -76,6 +77,16 @@ export const TRANSFER_DIMENSIONS = [
 
 export const FAMILY_CLASSES = ['practiced', 'fresh_transfer', 'fresh_assessment'];
 
+/* Family class → evidence context kind. 'assessment' is NOT 'transfer' —
+ * a fresh assessment samples ability, it does not earn transfer credit.
+ * The projection re-derives this from the registry task; the stamped
+ * context kind is only trusted when it matches. */
+export const CONTEXT_FOR_FAMILY = {
+  practiced: 'practiced',
+  fresh_transfer: 'transfer',
+  fresh_assessment: 'assessment'
+};
+
 // Support kinds that may appear in conditions/supportPolicy lists.
 export const SUPPORT_CONDITION_KINDS = [
   'hint',
@@ -98,6 +109,55 @@ export function effectiveAllowedSupport(capability, task) {
 
 const isStr = (v) => typeof v === 'string' && v.length > 0;
 const isStrList = (v) => Array.isArray(v) && v.every(isStr);
+
+const sameStringSet = (a, b) =>
+  Array.isArray(a) && Array.isArray(b) &&
+  a.length === b.length && a.every((x) => b.includes(x));
+
+/* An event earns independent credit ONLY if it verifies against the
+ * registered Task contract — the binder stamp alone is data, not proof.
+ * Every semantic field is re-derived from the task in the registry:
+ *
+ *   taskId + revision  — the exact contract version that produced it
+ *   capabilityId       — the capability the task belongs to
+ *   modality           — the modality the task declares
+ *   purpose↔eventType  — the event type must be one the task's purpose
+ *                        may emit (a retrieval task never mints a
+ *                        transfer_attempt)
+ *   promptFamily       — the family comes from the task, not the caller
+ *   context            — missionId and the context kind derived from
+ *                        the task's family class
+ *   evaluation         — authority AND contractId identical to the
+ *                        task's declared evaluator contract
+ *   binding            — the stamped provenance must agree with the
+ *                        task: purpose, familyClass, freshnessRequired,
+ *                        and the effective support policy recomputed
+ *                        from capability ∩ task — never the stamped list
+ *
+ * Plus: an eliciting task without a real evaluator contractId can never
+ * verify, even if a caller hand-built a "task" object to match.
+ *
+ * An event that fails verification is still recorded faithfully — it
+ * can mark EXPOSED/SUPPORTED — but it can never mint INDEPENDENT. */
+export function verifyEventTask(event, task, capability) {
+  if (!task || !capability) return false;
+  const e = event;
+  if (e.taskRevision !== task.revision) return false;
+  if (e.capabilityId !== task.capabilityId || task.capabilityId !== capability.id) return false;
+  if (e.modality !== task.modality || task.modality !== capability.modality) return false;
+  if (!(EVENT_TYPES_FOR_PURPOSE[task.purpose] ?? []).includes(e.eventType)) return false;
+  if (e.context?.missionId !== task.missionId) return false;
+  if (e.context?.promptFamily !== task.promptFamily) return false;
+  if (e.context?.practicedOrTransfer !== CONTEXT_FOR_FAMILY[task.freshness?.familyClass ?? 'practiced']) return false;
+  if (e.evaluation?.authority !== (task.evaluation?.authority ?? 'deterministic')) return false;
+  if (e.evaluation?.contractId !== (task.evaluation?.contractId ?? null)) return false;
+  if (e.binding?.purpose !== task.purpose) return false;
+  if (e.binding?.familyClass !== (task.freshness?.familyClass ?? 'practiced')) return false;
+  if (e.binding?.freshnessRequired !== (task.freshness?.required === true)) return false;
+  if (!sameStringSet(e.binding?.effectiveSupportAllowed, effectiveAllowedSupport(capability, task))) return false;
+  if (ELICITING_PURPOSES.has(task.purpose) && !isStr(task.evaluation?.contractId)) return false;
+  return true;
+}
 
 /* ── TaskContract ─────────────────────────────────────────── */
 
@@ -139,6 +199,17 @@ export function validateTask(task) {
 
   for (const k of task?.supportPolicy?.allowed ?? []) {
     if (!SUPPORT_CONDITION_KINDS.includes(k)) p.push(`unknown support condition '${k}'`);
+  }
+
+  /* Evaluator provenance is mandatory for anything that can elicit a
+   * response: a declared authority AND a real evaluator contract id.
+   * `authority: deterministic, contractId: null` is not an evaluator —
+   * it is an unnamed opinion, and it must never mint evidence. */
+  if (!EVALUATION_AUTHORITIES.includes(task?.evaluation?.authority)) {
+    p.push(`unknown evaluation authority '${task?.evaluation?.authority}'`);
+  }
+  if (ELICITING_PURPOSES.has(task?.purpose) && !isStr(task?.evaluation?.contractId)) {
+    p.push(`purpose '${task?.purpose}' requires evaluation.contractId — evidence needs a named evaluator contract`);
   }
 
   if (task?.purpose === 'fluency') {

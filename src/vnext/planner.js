@@ -19,8 +19,8 @@
 import { RETENTION_DELAY_MS, projectLearnerState } from './projection.js';
 import { priorById } from './risk-priors.js';
 
-export function planNext(learnerId, events, { capabilities, riskPriors = [], now, retentionDelayMs = RETENTION_DELAY_MS }) {
-  const { byCapability } = projectLearnerState(learnerId, events, capabilities, { retentionDelayMs });
+export function planNext(learnerId, events, { capabilities, tasks = [], riskPriors = [], now, retentionDelayMs = RETENTION_DELAY_MS }) {
+  const { byCapability } = projectLearnerState(learnerId, events, capabilities, tasks, { retentionDelayMs });
   const priorMap = new Map(riskPriors.map((p) => [p.id, p]));
 
   /* 1. Resume in-flight work: the encounter started but no attempt
