@@ -1,9 +1,10 @@
 /*
- * Mission regression suite (issue #33 round 2): the two things the review
- * caught — a keyword-bag scorer that accepted nonsense, and enrollment that
- * minted tasks for modalities never exercised. These tests pin the honest
- * contract: structured checks, and `enrollTasks` restricted to the chunks
- * the learner actually used.
+ * Mission regression suite (issue #33 rounds 2–3): the things review
+ * caught — a keyword-bag scorer that accepted nonsense, enrollment that
+ * minted tasks for modalities never exercised, and a name check that
+ * accepted ANY content word after "I am". These tests pin the honest
+ * contract: ordered-phrase checks against a fixed learner persona, and
+ * `enrollTasks` restricted to the chunks the learner actually used.
  */
 import assert from 'node:assert/strict';
 import { meetsCheck, scoreExitTurn, canonLine } from '../src/core/mission-checks.js';
@@ -25,13 +26,13 @@ const keys = (db) => Object.keys(db.fsrs || {}).sort();
   assert.equal(scored.met, 1, '1/3, not 3/3');
 }
 
-// ── 2. Honest full answers still pass ─────────────────────────────
+// ── 2. Honest full answers still pass — the persona is Linh ───────
 {
   for (const response of [
     'Hi, I’m Linh. What’s your name?',
-    "Hello, I am Nam. What's your name?",
-    'hi my name is binh and your name',
-    'Hey! Call me Mai. What about you?',
+    'Hello, I am Linh — what is your name?',
+    'hi my name is linh and your name',
+    'Hey! Call me Linh. What about you?',
     'Hi I am Linh, your name please',
     'Hello, I’m Linh — tell me your name?'
   ]) {
@@ -40,24 +41,39 @@ const keys = (db) => Object.keys(db.fsrs || {}).sort();
   }
 }
 
-// ── 3. Structural strictness — order and boundaries matter ────────
+// ── 3. Round-3 false positives: a name CHECK, not a stem + word ────
+{
+  const name = checkOf(turn1, 'name');
+  // Any old content word used to pass "I am ___" — it must not. The
+  // mission's learner persona is Linh, so the scorer checks that name.
+  for (const sentence of [
+    'Hi, I am happy.',
+    'Hi, I am tired.',
+    'My name is student.',
+    'I am Nam.',
+    'I’m Mai.',
+    'i am',
+    'i am your name'
+  ]) {
+    assert.equal(meetsCheck(sentence, name), false,
+      `"${sentence}" must not satisfy "Nói tên mình" — the role is Linh`);
+  }
+  assert.equal(meetsCheck('i am linh', name), true);
+  assert.equal(meetsCheck("I'm Linh", name), true, 'contraction canonicalizes');
+  assert.equal(meetsCheck('call me linh', name), true);
+}
+
+// ── 4. Structural strictness — order and boundaries matter ────────
 {
   const ask = checkOf(turn1, 'ask');
-  const name = checkOf(turn1, 'name');
   assert.equal(meetsCheck('what is your names', ask), false, 'word boundary: "names" is not the question form');
   assert.equal(meetsCheck('name your what is', ask), false, 'scrambled words are not the question form');
   assert.equal(meetsCheck('your name', ask), false, '"your name" alone is not an ask');
-  assert.equal(meetsCheck('i am', name), false, 'stem without a slot value is not a name');
-  assert.equal(meetsCheck('i am not sure', name), false, 'glue word after stem is not a name');
-  assert.equal(meetsCheck('i am your name', name), false, 'the P0 false positive stays pinned');
   assert.equal(meetsCheck('and your name', ask), true, 'reciprocal "and your name" is a real ask');
   assert.equal(meetsCheck('whats your name', ask), true, 'contraction-free variant canonicalizes');
-  assert.equal(meetsCheck('my name is linh', name), true);
-  assert.equal(meetsCheck("i'm an", name), false, 'lowercase article after stem is not a name');
-  assert.equal(meetsCheck("i'm An", name), true, 'capitalised proper noun fills the slot (learner named An)');
 }
 
-// ── 4. Turn 2 politeness check ────────────────────────────────────
+// ── 5. Turn 2 politeness check ────────────────────────────────────
 {
   const polite = checkOf(turn2, 'polite');
   assert.equal(meetsCheck('Nice to meet you too.', polite), true);
@@ -67,36 +83,40 @@ const keys = (db) => Object.keys(db.fsrs || {}).sort();
   assert.equal(meetsCheck('thank you', polite), false);
 }
 
-// ── 5. canonLine keeps pattern semantics intact ───────────────────
+// ── 6. canonLine keeps pattern semantics intact ───────────────────
 {
   assert.equal(canonLine("Hi, I’m Linh. What’s your name?"), 'hi i am linh what is your name');
   assert.equal(canonLine('  HEY!!  '), 'hey');
 }
 
-// ── 6. Enrollment honesty — only exercised chunks mint tasks ──────
+// ── 7. Enrollment honesty — the lesson-1 pool is 11, no listening ──
+// PM decision (issue #33 round 3): lesson 1 mints NO listening cards —
+// playing audio while its text is visible is exposure, not retrieval.
+// Honest pool: 4 form (notice) + 4 meaning (retrieve) + 3 production
+// (exit produces; c3 is Sam's line). enrollTasks' chunkIds filter is
+// the mechanism that keeps subsets honest.
 {
   const db = createInitialDb();
-  // Context where only two lines played (covers c1, c2) — nothing else mints.
-  enrollTasks(db, lesson, ['listening_recognition'], 1000, ['c1', 'c2']);
-  assert.equal(keys(db).length, 2, 'only heard chunks mint listening tasks');
-  assert(keys(db).every((k) => k.includes('listening_recognition')));
-  assert(!keys(db).some((k) => k.startsWith('a1-s1-l1:c3')), 'c3 was never heard → no card');
-  // A second stage enrolling a different subset doesn't duplicate or inflate.
-  enrollTasks(db, lesson, ['listening_recognition'], 2000, ['c3', 'c4']);
-  enrollTasks(db, lesson, ['form_recognition'], 3000, ['c1', 'c2', 'c3', 'c4']);
-  assert.equal(keys(db).length, 8, '4 listening + 4 form after honest subsets');
+  // Subset filtering is real: asking for 2 of 4 chunks mints exactly 2.
+  enrollTasks(db, lesson, ['form_recognition'], 1000, ['c1', 'c2']);
+  assert.equal(keys(db).length, 2, 'only the seen subset mints');
+  enrollTasks(db, lesson, ['form_recognition'], 2000, ['c3', 'c4']);
+  assert.equal(keys(db).filter((k) => k.includes('form_recognition')).length, 4);
+  // Meaning recall mints where recall actually happens (retrieve).
+  enrollTasks(db, lesson, ['meaning_recall'], 3000, ['c1', 'c2', 'c3', 'c4']);
+  assert.equal(keys(db).filter((k) => k.includes('meaning_recall')).length, 4);
   // Exit production: only produced chunks — c3 (Sam's line) never enrolls.
   enrollTasks(db, lesson, ['cued_production'], 4000, ['c1', 'c2', 'c4']);
   assert.equal(keys(db).filter((k) => k.includes('cued_production')).length, 3);
   assert(!keys(db).some((k) => k.startsWith('a1-s1-l1:c3@') && k.includes('cued_production')),
     'production card must not exist for a phrase the learner never says');
-  assert.equal(keys(db).length, 11, 'honest total: no idle-modality inflation');
+  // The honest total for lesson 1 — and zero listening cards anywhere.
+  assert.equal(keys(db).length, 11, '4 form + 4 meaning + 3 production = 11');
+  assert(!keys(db).some((k) => k.includes('listening_recognition')),
+    'lesson 1 has no audio→meaning retrieval stage → no listening cards');
   // Empty subset is a no-op, not "all chunks".
   assert.deepEqual(enrollTasks(db, lesson, ['meaning_recall'], 5000, []), []);
   assert.equal(keys(db).length, 11);
-  // Meaning recall mints where recall actually happens (retrieve).
-  enrollTasks(db, lesson, ['meaning_recall'], 6000, ['c1', 'c2', 'c3', 'c4']);
-  assert.equal(keys(db).filter((k) => k.includes('meaning_recall')).length, 4);
 }
 
-console.log('FlashDay mission checks: 6 groups passed');
+console.log('FlashDay mission checks: 7 groups passed');

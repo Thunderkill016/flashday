@@ -1,16 +1,17 @@
 /*
  * Deterministic communicative-goal matching for mission exit checks
- * (issue #33 round 2). NOT a keyword bag — each `match` entry is one of:
+ * (issue #33). Each `match` entry is one of:
  *
- *   'stem *'        — stem phrase followed by a real content word. The slot
- *                     word must not be a function word ("i am *" misses
- *                     "i am your name" because 'your' is not a name), but a
- *                     capitalised raw token always counts ("I'm An" works —
- *                     proper nouns like An collide with articles otherwise).
  *   'two or more'   — an ordered phrase, matched on word boundaries. A
  *                     question form only counts when the whole form is
- *                     present: 'your name' alone is not an ask.
+ *                     present: 'your name' alone is not an ask, and
+ *                     'i am your name' is not 'i am linh'.
  *   'word'          — one exact token (greeting forms like 'hi').
+ *
+ * Name checks match the learner's persona phrase for the mission — the
+ * vertical slice plays a fixed role ("you are Linh"), so 'i am linh' is
+ * the honest expected utterance, not any stem + word. No keyword bags,
+ * no blacklists.
  *
  * Everything is pure text — no DOM — so the unit tests pin the
  * counterexamples without a browser.
@@ -36,10 +37,6 @@ const EXPANSIONS = {
   "won't": ['will', 'not']
 };
 
-function expandWord(word) {
-  return EXPANSIONS[word] || [word];
-}
-
 export function canonLine(value) {
   const flat = String(value || '')
     .toLowerCase()
@@ -47,40 +44,11 @@ export function canonLine(value) {
     .replace(/[.,!?…;:()"“”«»]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
-  return flat.split(' ').filter(Boolean).flatMap(expandWord).join(' ');
-}
-
-// Tokens that can follow a stem without being the learner-filled slot value.
-// "i am your name" must NOT satisfy the name check — 'your' is grammar glue,
-// not a name. Articles stay excluded; capitalised raw tokens bypass the list
-// so a learner named An writing "I'm An" still counts.
-const SLOT_GLUE = new Set([
-  'a', 'an', 'the', 'i', 'you', 'he', 'she', 'it', 'we', 'they',
-  'am', 'is', 'are', 'was', 'were', 'do', 'does', 'did', 'not',
-  'my', 'your', 'his', 'her', 'our', 'their', 'its',
-  'me', 'him', 'us', 'them', 'name', 'names',
-  'to', 'too', 'and', 'or', 'of', 'in', 'on', 'at', 'from', 'for', 'with',
-  'what', 'where', 'who', 'how', 'when', 'why',
-  'meet', 'nice', 'please', 'very', 'so', 'much', 'this', 'that', 'here', 'there'
-]);
-
-// One response analysed once: canon tokens + the raw casing of each source
-// token, so slot checks can see "An" was written as a name.
-function analyze(response) {
-  const rawTokens = String(response || '')
-    .replace(/[’‘]/g, "'")
-    .replace(/[.,!?…;:()"“”«»]/g, ' ')
-    .split(/\s+/)
-    .filter(Boolean);
-  const canonWords = [];
-  const rawIndex = [];
-  rawTokens.forEach((token, i) => {
-    for (const word of expandWord(token.toLowerCase())) {
-      canonWords.push(word);
-      rawIndex.push(i);
-    }
-  });
-  return { canon: canonWords.join(' '), canonWords, rawTokens, rawIndex };
+  return flat
+    .split(' ')
+    .filter(Boolean)
+    .flatMap((word) => EXPANSIONS[word] || [word])
+    .join(' ');
 }
 
 // Ordered phrase match on word boundaries — indexOf alone would accept
@@ -97,34 +65,14 @@ function phraseAt(canon, phrase) {
   return false;
 }
 
-function stemMet(a, stem) {
-  const words = stem.split(' ');
-  const n = words.length;
-  for (let i = 0; i + n <= a.canonWords.length; i++) {
-    if (!words.every((w, j) => a.canonWords[i + j] === w)) continue;
-    const slotIdx = i + n;
-    const slot = a.canonWords[slotIdx];
-    if (!slot) continue; // stem at the end with no value — nothing produced
-    if (!SLOT_GLUE.has(slot)) return true;
-    // Function word in the slot — except when the raw token is capitalised,
-    // which marks a proper noun the glue list can't know about ("I'm An").
-    const raw = a.rawTokens[a.rawIndex[slotIdx]] || '';
-    if (/^\p{Lu}/u.test(raw)) return true;
-  }
-  return false;
-}
-
-function patternMet(a, rawPattern) {
-  const p = canonLine(rawPattern);
-  if (!p) return false;
-  if (p.endsWith(' *')) return stemMet(a, p.slice(0, -2));
-  if (p.includes(' ')) return phraseAt(a.canon, p);
-  return a.canonWords.includes(p);
-}
-
 export function meetsCheck(response, check) {
-  const a = analyze(response);
-  return (Array.isArray(check?.match) ? check.match : []).some((pattern) => patternMet(a, pattern));
+  const canon = canonLine(response);
+  const tokens = new Set(canon.split(' ').filter(Boolean));
+  return (Array.isArray(check?.match) ? check.match : []).some((pattern) => {
+    const p = canonLine(pattern);
+    if (!p) return false;
+    return p.includes(' ') ? phraseAt(canon, p) : tokens.has(p);
+  });
 }
 
 export function scoreExitTurn(turn, response) {

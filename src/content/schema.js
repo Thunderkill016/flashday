@@ -141,12 +141,6 @@ function validateMission(lesson, errors, p) {
       checkText(errors, `${lp}.speaker`, line.speaker);
       checkText(errors, `${lp}.en`, line.en);
       checkText(errors, `${lp}.vi`, line.vi);
-      // covers = which chunks this line actually voices — listening tasks
-      // mint only for heard chunks, so coverage must be explicit.
-      if (!Array.isArray(line.covers)) return fail(errors, `${lp}.covers`, 'expected array of chunk ids');
-      line.covers.forEach((id, j) => {
-        if (!chunkIds.has(id)) fail(errors, `${lp}.covers[${j}]`, 'unknown chunk');
-      });
     });
   }
   checkQuestions(errors, `${p}.mission.gist`, m.gist, MISSION_BOUNDS.gist);

@@ -54,33 +54,27 @@ export default {
     scene:
       'Buổi học tiếng Anh đầu tiên của bạn. Bạn ngồi xuống cạnh một bạn ' +
       'tên Mia — bạn ấy quay sang chào bạn. Nghe và đọc đoạn hội thoại này.',
-    // `covers` là chunk nào thực sự vang lên trong câu — listening task chỉ
-    // được mint cho chunk đã nghe, không phải mọi chunk của bài.
     lines: [
       {
         speaker: 'Mia',
         en: 'Hi! I’m Mia. What’s your name?',
         vi: 'Chào! Mình là Mia. Tên bạn là gì?',
-        covers: ['c1', 'c2'],
       },
       {
         speaker: 'Linh',
         en: 'Hi, I’m Linh.',
         vi: 'Chào, mình là Linh.',
-        covers: ['c1'],
         you: true,
       },
       {
         speaker: 'Mia',
         en: 'Nice to meet you.',
         vi: 'Rất vui được gặp bạn.',
-        covers: ['c3'],
       },
       {
         speaker: 'Linh',
         en: 'Nice to meet you too.',
         vi: 'Mình cũng rất vui được gặp bạn.',
-        covers: ['c4'],
         you: true,
       },
     ],
@@ -159,8 +153,11 @@ export default {
             {
               key: 'name',
               label: 'Nói tên mình',
-              match: ['i am *', 'my name is *', 'call me *'],
-              hint: 'Nói tên mình bằng "I’m <tên>." — ví dụ "I’m Linh."',
+              // Fixed role: trong nhiệm vụ này learner ĐÓNG VAI Linh —
+              // scorer đối chiếu với tên đã biết, không chấp nhận
+              // 'i am <bất cứ từ nào>'.
+              match: ['i am linh', 'my name is linh', 'call me linh'],
+              hint: 'Nói tên mình bằng "I’m Linh." — trong bài này tên bạn là Linh.',
             },
             {
               key: 'ask',

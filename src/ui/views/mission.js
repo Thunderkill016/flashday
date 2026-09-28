@@ -174,9 +174,11 @@ function nextStage() {
 
 // taskPlan = [{ kinds, chunkIds }] — enrollment is computed per stage from
 // what the learner ACTUALLY exercised, never "every chunk × every kind":
-// context mints listening only for heard chunks, notice mints recognition
-// for seen chunks, retrieve mints recall for attempted items, exit mints
-// production only for chunks the turn's `produces` declares.
+// notice mints recognition for seen chunks, retrieve mints recall for
+// attempted items, exit mints production only for chunks the turn's
+// `produces` declares. Lesson 1 mints NO listening cards: playing audio
+// while the text is visible is exposure, not audio→meaning retrieval
+// (issue #33 round 3).
 function recordStage(stage, payload, support, taskPlan = []) {
   const { ctx, lesson } = state;
   ctx.store.transact((db) => {
@@ -303,23 +305,32 @@ function speakSequence(texts, { rate = LEARNER_SPEECH_RATE, onend } = {}) {
 const builders = {
   // 1. SEE THE SITUATION — the whole exchange first, translation on demand.
   // Completion requires ONE real exposure action: hearing the exchange
-  // (play-all or a line), or opening the translations. A silent click-
-  // through mints nothing and cannot continue — issue #33 round 2.
+  // (play-all or a line), the explicit no-TTS fallback, or the explicit
+  // "read instead" skip — translations alone are support, not exposure,
+  // and a silent click-through mints nothing — issue #33 round 2/3.
   context(host) {
     const m = state.lesson.mission;
     host.appendChild(text('h2', `${STEP_LABELS.context} — ${m.title}`));
     host.appendChild(text('p', m.scene, 'mission-scene'));
 
-    const heard = new Set(); // chunk ids genuinely played
     const playedLines = new Set();
     const degradedLines = new Set();
     let playedAll = false;
     let ttsUnavailable = false;
     let translationViewed = false;
+    // audioSkipped = the learner explicitly chose text over audio — an
+    // accessibility path recorded as its own provenance, distinct from
+    // a broken-voice fallback.
+    let audioSkipped = false;
     let armed = false;
 
     const nav = missionNav(null);
-    const gate = text('p', 'Nghe đoạn hội thoại — hoặc mở nghĩa — để tiếp tục.', 'view-placeholder');
+    const gate = text('p', 'Nghe đoạn hội thoại — hoặc bấm "Đọc thay vì nghe" — để tiếp tục.', 'view-placeholder');
+
+    const showTranslations = () => {
+      translationViewed = true;
+      for (const viEl of lines.querySelectorAll('.translation')) viEl.hidden = false;
+    };
 
     const lines = document.createElement('div');
     lines.className = 'mission-dialogue';
@@ -330,18 +341,16 @@ const builders = {
           you: Boolean(line.you),
           onPlay: () => {
             // playButton's handler ran first: only count the play as
-            // listening exposure when the speech actually fired.
+            // exposure when the speech actually fired.
             if (degradedLines.has(i)) return;
             playedLines.add(i);
-            for (const id of line.covers || []) heard.add(id);
             maybeArm();
           },
           onPlayDegraded: () => {
             degradedLines.add(i);
             ttsUnavailable = true;
             // Explicit fallback: no voice → the text path is the exposure.
-            for (const viEl of lines.querySelectorAll('.translation')) viEl.hidden = false;
-            translationViewed = true;
+            showTranslations();
             maybeArm();
           }
         })
@@ -351,18 +360,35 @@ const builders = {
     for (const viEl of lines.querySelectorAll('.translation')) viEl.hidden = true;
     host.appendChild(lines);
 
+    // "Hiện nghĩa" is support only — it reveals the text but does NOT
+    // complete exposure when a voice exists (issue #33 round 3).
     const translateBtn = document.createElement('button');
     translateBtn.type = 'button';
     translateBtn.className = 'btn-secondary';
     translateBtn.dataset.role = 'translation-toggle';
     translateBtn.textContent = 'Hiện nghĩa';
     translateBtn.addEventListener('click', () => {
-      translationViewed = true;
-      for (const viEl of lines.querySelectorAll('.translation')) viEl.hidden = false;
+      showTranslations();
       translateBtn.disabled = true;
-      maybeArm();
     });
     host.appendChild(translateBtn);
+
+    // The deliberate audio skip: an explicit action for learners who
+    // can't/don't want audio — arms the gate and is recorded as its own
+    // provenance (audioSkipped), never laundered into a play.
+    const skipAudio = document.createElement('button');
+    skipAudio.type = 'button';
+    skipAudio.className = 'btn-secondary';
+    skipAudio.dataset.role = 'read-skip';
+    skipAudio.textContent = 'Đọc thay vì nghe';
+    skipAudio.addEventListener('click', () => {
+      audioSkipped = true;
+      showTranslations();
+      translateBtn.disabled = true;
+      skipAudio.disabled = true;
+      maybeArm();
+    });
+    host.appendChild(skipAudio);
 
     const voiceStatus = text('p', '', 'runner-notice');
     voiceStatus.setAttribute('aria-live', 'polite');
@@ -377,29 +403,31 @@ const builders = {
         // Explicit no-TTS fallback: the text path IS the exposure — show
         // the translations and record that audio never happened.
         ttsUnavailable = true;
-        for (const viEl of lines.querySelectorAll('.translation')) viEl.hidden = false;
-        translationViewed = true;
+        showTranslations();
         voiceStatus.textContent =
           'Thiết bị không có giọng đọc tiếng Anh — hãy đọc lời thoại kèm nghĩa bên dưới.';
         translateBtn.disabled = true;
+        skipAudio.disabled = true;
         playAll.disabled = true;
         maybeArm();
         return;
       }
       playedAll = true;
-      m.lines.forEach((line) => (line.covers || []).forEach((id) => heard.add(id)));
       maybeArm();
     });
     host.append(playAll, voiceStatus, gate, nav);
 
     function maybeArm() {
       if (armed) return;
-      const exposed = playedAll || playedLines.size > 0 || translationViewed;
+      const exposed = playedAll || playedLines.size > 0 || audioSkipped || ttsUnavailable;
       if (!exposed) return;
       armed = true;
       gate.hidden = true;
       armPrimary(nav, 'Hiểu đoạn này →', () => {
         const linesHeard = [...playedLines].filter((i) => !degradedLines.has(i));
+        // Context is exposure only — it mints NO tasks. Listening cards
+        // would be dishonest here: the learner saw the text while audio
+        // played, which is not audio→meaning retrieval.
         recordStage(
           'context',
           {
@@ -408,10 +436,10 @@ const builders = {
             linesHeard,
             heardAll: playedAll || linesHeard.length === m.lines.length,
             translationViewed,
-            ttsUnavailable
+            ttsUnavailable,
+            audioSkipped
           },
-          { translationViewed },
-          heard.size ? [{ kinds: ['listening_recognition'], chunkIds: [...heard] }] : []
+          { translationViewed }
         );
         nextStage();
       });
@@ -483,8 +511,9 @@ const builders = {
       sayCheck.button.addEventListener('click', () => {
         speakAttempts += 1;
       });
-      // A chunk mints a listening task only if its audio actually fired —
-      // the degraded fallback is reading, not listening.
+      // Play clicks go into the payload as activity evidence only —
+      // lesson 1 mints no listening tasks (issue #33 round 3): audio
+      // played next to its own text is exposure, not retrieval.
       const play = playButton(chunk.example, {
         onDegraded: () => degradedChunks.add(chunk.id)
       });
@@ -498,17 +527,14 @@ const builders = {
       next.disabled = cursor === chunks.length - 1;
       if (seen.size === chunks.length && !continueBtn) {
         continueBtn = armPrimary(navRow, 'Nhớ lại các cụm →', () => {
-          // Saw the chunk→meaning pair = form recognition introduced;
-          // heard the chunk = listening. Meaning→English recall has NOT
-          // happened yet — that mints at retrieve.
+          // Saw the chunk→meaning pair = form recognition introduced.
+          // Meaning→English recall has NOT happened yet — that mints at
+          // retrieve. Audio plays mint nothing (exposure, not retrieval).
           recordStage(
             'notice',
             { chunks: chunks.length, viewed: [...seen], heard: [...heard], speakAttempts },
             {},
-            [
-              { kinds: ['form_recognition'], chunkIds: [...seen] },
-              { kinds: ['listening_recognition'], chunkIds: [...heard] }
-            ]
+            [{ kinds: ['form_recognition'], chunkIds: [...seen] }]
           );
           nextStage();
         });

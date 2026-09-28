@@ -825,17 +825,20 @@ try {
     assert.equal(await page.locator('[data-role="roleplay"]').count(), 0, 'no AI affordance inside the mission');
 
     // CONTEXT — one exchange; the continue action exists only AFTER a real
-    // exposure (play or translation), not on arrival.
+    // exposure. "Hiện nghĩa" is support only — it reveals text but must
+    // NOT arm the gate when a voice exists (issue #33 round 3).
     const ctxStage = stage('context');
     assert.equal(await ctxStage.locator('.mission-line').count(), 4, 'one four-line exchange');
     assert.equal(await ctxStage.locator('.translation:not([hidden])').count(), 0, 'translations hidden by default');
     assert.equal(await ctxStage.locator('.mission-primary:not([hidden])').count(), 0,
       'no continue before a real exposure action');
+    await ctxStage.locator('[data-role="translation-toggle"]').click();
+    assert.equal(await ctxStage.locator('.translation:not([hidden])').count(), 4);
+    assert.equal(await ctxStage.locator('.mission-primary:not([hidden])').count(), 0,
+      'opening translations alone must NOT bypass the audio gate');
     await ctxStage.locator('[data-role="play-all"]').click();
     const ttsCalls = await page.evaluate(() => window.__ttsCalls);
     assert.equal(ttsCalls.length, 4, 'the whole exchange is heard as one sequence');
-    await ctxStage.locator('[data-role="translation-toggle"]').click();
-    assert.equal(await ctxStage.locator('.translation:not([hidden])').count(), 4);
     await ctxStage.locator('.mission-primary').click();
     await stage('gist').waitFor();
 
@@ -941,10 +944,11 @@ try {
     assert.equal(exitEvents[1].support.modelRevealed, false, 'model never revealed for this attempt');
     assert.equal(exitEvents[1].payload.correct, 4);
 
-    // Staged enrollment — only exercised modalities/chunks mint tasks:
-    // context (heard all 4) → listening 4; notice (seen all) → form 4;
-    // retrieve (attempted all) → meaning 4; exit produces c1,c2,c4 → 3 —
-    // c3 is Sam's line and must NOT mint a production card.
+    // Staged enrollment — only exercised modalities/chunks mint tasks.
+    // Lesson 1 mints NO listening cards (issue #33 round 3): audio next
+    // to its own text is exposure, not retrieval. Pool: notice (seen) →
+    // form 4; retrieve (attempted) → meaning 4; exit produces c1,c2,c4
+    // → 3 — c3 is Sam's line and must NOT mint a production card.
     const taskCounts = await page.evaluate((key) => {
       const db = JSON.parse(localStorage.getItem(key) || '{}');
       const keys = Object.keys(db.fsrs || {}).filter((k) => k.startsWith('a1-s1-l1:'));
@@ -955,13 +959,17 @@ try {
       }
       return { keys, byKind };
     }, DB_KEY);
-    assert.equal(taskCounts.keys.length, 15, `15 honest tasks minted, got ${taskCounts.keys.length}`);
+    assert.equal(taskCounts.keys.length, 11, `11 honest tasks minted, got ${taskCounts.keys.length}`);
     assert.deepEqual(taskCounts.byKind, {
-      listening_recognition: 4,
       form_recognition: 4,
       meaning_recall: 4,
       cued_production: 3
     }, 'task kinds match modalities actually exercised');
+    assert.equal(
+      taskCounts.keys.filter((k) => k.endsWith(':listening_recognition')).length,
+      0,
+      'no listening cards — lesson 1 has no audio→meaning retrieval'
+    );
     assert.equal(
       taskCounts.keys.filter((k) => k.startsWith('a1-s1-l1:c3@') && k.endsWith(':cued_production')).length,
       0,
@@ -977,6 +985,7 @@ try {
     const contextEvents = await eventsOfKind('context');
     assert.equal(contextEvents[0].payload.heardAll, true, 'the exchange was heard');
     assert.equal(contextEvents[0].payload.ttsUnavailable, false);
+    assert.equal(contextEvents[0].payload.audioSkipped, false, 'audio path, not a skip');
 
     // Summary shows can-do evidence from the exit task, not a mixed
     // "N câu đúng" counter — and no stage left undone.
@@ -1027,6 +1036,51 @@ try {
     assert.equal(after.ctx?.payload?.heardAll, false);
     await context.close();
     check('no-TTS context falls back explicitly and mints zero tasks');
+  }
+
+  // ── 19. Deliberate audio skip: "Đọc thay vì nghe" is an explicit
+  //        action with its own provenance — support ≠ silent bypass ──
+  {
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+    });
+    await context.addInitScript(() => {
+      window.__ttsCalls = [];
+      Object.defineProperty(window, 'speechSynthesis', {
+        value: {
+          getVoices: () => [{ name: 'Mock en-US', lang: 'en-US' }],
+          cancel: () => {},
+          speak: (u) => { window.__ttsCalls.push(u.text); u.onend?.(); },
+          addEventListener: () => {},
+        },
+      });
+    });
+    const page = await context.newPage();
+    const stage = (name) => page.locator(`.mission-stage[data-stage="${name}"]`);
+    await goto(page, `${origin}app/?preview#/lesson/${L1}/context`);
+    await stage('context').waitFor();
+    assert.equal(await stage('context').locator('.mission-primary:not([hidden])').count(), 0);
+    // TTS works, but the learner chooses the text path explicitly.
+    await stage('context').locator('[data-role="read-skip"]').click();
+    assert.equal(await stage('context').locator('.translation:not([hidden])').count(), 4,
+      'the skip opens the text path');
+    await stage('context').locator('.mission-primary').click();
+    await stage('gist').waitFor();
+    await sleep(600); // debounced save
+    const after = await page.evaluate((key) => {
+      const db = JSON.parse(localStorage.getItem(key) || '{}');
+      return {
+        tasks: Object.keys(db.fsrs || {}).filter((k) => k.startsWith('a1-s1-l1:')),
+        ctx: (db.lessonEvents || []).find((e) => e.kind === 'context'),
+      };
+    }, DB_KEY);
+    assert.equal((await page.evaluate(() => window.__ttsCalls)).length, 0, 'no audio was played');
+    assert.equal(after.ctx?.payload?.audioSkipped, true, 'deliberate skip recorded as its own provenance');
+    assert.equal(after.ctx?.payload?.heardAll, false);
+    assert.equal(after.ctx?.payload?.ttsUnavailable, false, 'a choice, not a failure');
+    assert.equal(after.tasks.length, 0, 'reading instead of listening mints nothing');
+    await context.close();
+    check('explicit "Đọc thay vì nghe" skip is recorded and mints nothing');
   }
 
   // ── 18. Old lessons still load — the five-pane runner is intact for the
