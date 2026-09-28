@@ -54,6 +54,10 @@ export const EXPOSURE_PURPOSES = new Set(['input', 'notice']);
  * an event type it does not own — a retrieval task cannot mint a
  * transfer_attempt. The projection re-checks this on bound events. */
 export const EVENT_TYPES_FOR_PURPOSE = {
+  /* input/notice are exposure-phase tasks — they can only ever mint
+   * observation events, never an attempt outcome. */
+  input: ['exposure', 'support_use', 'feedback'],
+  notice: ['exposure', 'support_use', 'feedback'],
   diagnostic: ['recognition_attempt', 'recall_attempt', 'production_attempt', 'interaction_turn'],
   retrieval: ['recognition_attempt', 'recall_attempt', 'retry'],
   production: ['production_attempt', 'retry'],
