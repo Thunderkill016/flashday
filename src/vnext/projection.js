@@ -59,14 +59,48 @@ const ATTEMPT_TYPES = new Set([
 ]);
 
 const isSuccess = (e) => e.attempt?.outcome === 'success';
-// Observed, unaided success — the only evidence that can carry a
-// capability past SUPPORTED. "Unaided" means no answer-bearing support
-// AND every support actually used was permitted by the capability's
-// declared conditions — an attempt that violates its own conditions is
-// not valid evidence of independence.
-const isIndependent = (e, cap) =>
-  isSuccess(e) && e.attempt?.observed === true && !answerBearing(e.support) &&
-  !conditionsViolated(e.support, cap);
+
+/* Only a deterministic evaluator or an observed human judgment can
+ * award independent ability in v0:
+ *   self_report — the learner's own claim is not observation;
+ *   asr         — transcript recognition proves what was detected, not
+ *                 pronunciation or intelligibility;
+ *   ai_llm      — feedback/secondary signal only, never proficiency;
+ *   absent      — no evaluator provenance = no credit.
+ */
+const INDEPENDENT_AUTHORITIES = new Set(['deterministic', 'human']);
+
+/* Support revealed during an attempt belongs permanently to that
+ * attempt — a retry inside the same attemptId cannot launder itself
+ * back into "unaided" by resetting UI flags. unionSupport accumulates
+ * flags across events sharing an attemptId (canonical order); a replay
+ * reported without a count poisons the merged count so 'repeat_once'
+ * can never be satisfied by uncounted provenance. */
+const unionSupport = (a, b) => {
+  if (!a) return b ?? null;
+  if (!b) return a;
+  const uncounted = (a.repeat && a.repeatCount == null) || (b.repeat && b.repeatCount == null);
+  const repeatCount = uncounted
+    ? null
+    : ((a.repeatCount ?? 0) + (b.repeatCount ?? 0)) || null;
+  return {
+    hint: a.hint || b.hint,
+    translation: a.translation || b.translation,
+    transcript: a.transcript || b.transcript,
+    modelAnswer: a.modelAnswer || b.modelAnswer,
+    repeat: a.repeat || (a.repeatCount ?? 0) > 0 || b.repeat || (b.repeatCount ?? 0) > 0,
+    repeatCount
+  };
+};
+
+// Observed, unaided, condition-valid, authority-backed success — the
+// only evidence that can carry a capability past SUPPORTED.
+const isIndependent = (e, cap, support, allowed) =>
+  isSuccess(e) &&
+  e.attempt?.observed === true &&
+  !answerBearing(support) &&
+  !conditionsViolated(support, allowed) &&
+  INDEPENDENT_AUTHORITIES.has(e.evaluation?.authority);
 
 function emptyCapability() {
   return {
@@ -110,6 +144,10 @@ export function projectLearnerState(learnerId, events, capabilities, { retention
   }
   mine.sort((a, b) => a.occurredAt - b.occurredAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
+  // Support sticks to an attempt boundary: the union of every flag seen
+  // so far on this attemptId applies to all later events on it.
+  const supportByAttempt = new Map();
+
   for (const e of mine) {
     const cap = byId.get(e.capabilityId);
     const slot = byCapability.get(e.capabilityId);
@@ -130,12 +168,28 @@ export function projectLearnerState(learnerId, events, capabilities, { retention
       }
     }
 
+    // Attempt-boundary accumulation happens for EVERY event kind — a
+    // support_use/feedback record on this attemptId is part of its
+    // support history, not only attempt outcomes.
+    const aid = e.attempt?.attemptId;
+    let effSupport = e.support;
+    if (aid) {
+      const prior = supportByAttempt.get(aid) ?? null;
+      effSupport = unionSupport(prior, e.support);
+      supportByAttempt.set(aid, effSupport);
+    }
+
     // Non-attempt events may carry an outcome field; it is context, not
     // performance, and must not advance state.
     if (!ATTEMPT_TYPES.has(e.eventType) || e.attempt?.outcome == null) continue;
     slot.lastAttemptOutcome = e.attempt.outcome;
     if (!isSuccess(e)) continue;
-    if (!isIndependent(e, cap)) {
+
+    // Task-derived effective policy travels with the bound event;
+    // unbound events still obey the capability's own conditions.
+    const allowed = e.binding?.effectiveSupportAllowed ?? cap.conditions?.supportAllowed ?? [];
+
+    if (!isIndependent(e, cap, effSupport, allowed)) {
       slot.milestones.supported = true;
       continue;
     }

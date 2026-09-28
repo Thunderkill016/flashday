@@ -24,6 +24,11 @@ export const EVENT_TYPES = [
 export const OUTCOMES = ['success', 'partial', 'fail'];
 export const CONTEXT_KINDS = ['practiced', 'transfer'];
 
+/* Evaluation authority v0 (#45 §10): how the outcome was determined is
+ * provenance, not decoration — conservative rules live in projection:
+ * self_report/asr/ai_llm can never award independent ability. */
+export const EVALUATION_AUTHORITIES = ['deterministic', 'human', 'asr', 'ai_llm', 'self_report'];
+
 const defaultSupport = () => ({
   hint: false,
   translation: false,
@@ -56,9 +61,8 @@ export function answerBearing(support) {
  *                     distinguish once from many, so it fails here
  * Answer-bearing aids are handled separately — listing them in
  * supportAllowed can never launder a hinted answer into independence. */
-export function conditionsViolated(support, capability) {
+export function conditionsViolated(support, allowed) {
   if (!support) return false;
-  const allowed = capability?.conditions?.supportAllowed ?? [];
   const kinds = [];
   if (support.hint) kinds.push('hint');
   if (support.translation) kinds.push('translation');
@@ -94,6 +98,12 @@ export function validateEvent(e) {
   if (e.support?.repeatCount != null && (!Number.isInteger(e.support.repeatCount) || e.support.repeatCount < 0)) {
     problems.push('repeatCount must be a non-negative integer or null');
   }
+  if (e.attempt?.attemptId != null && typeof e.attempt.attemptId !== 'string') {
+    problems.push('attempt.attemptId must be a string when present');
+  }
+  if (e.evaluation?.authority != null && !EVALUATION_AUTHORITIES.includes(e.evaluation.authority)) {
+    problems.push(`unknown evaluation authority ${e.evaluation.authority}`);
+  }
   if (!Number.isFinite(e.occurredAt)) problems.push('occurredAt must be a timestamp');
   return problems;
 }
@@ -104,14 +114,19 @@ export function validateEvent(e) {
 export function makeEvent(fields) {
   const e = {
     context: { missionId: null, practicedOrTransfer: 'practiced', promptFamily: null, partnerType: null },
-    attempt: { observed: true, outcome: null, response: null, latencyMs: null },
+    attempt: { observed: true, outcome: null, response: null, latencyMs: null, attemptId: null },
     support: defaultSupport(),
     feedback: { given: false, target: null },
+    evaluation: { authority: null, contractId: null, evaluator: null, version: null },
+    // Binder-stamped provenance (#45): which task contract produced this
+    // event. Null only for events built outside the binder (tests/tools).
+    binding: null,
     ...fields,
     context: { missionId: null, practicedOrTransfer: 'practiced', promptFamily: null, partnerType: null, ...(fields?.context || {}) },
-    attempt: { observed: true, outcome: null, response: null, latencyMs: null, ...(fields?.attempt || {}) },
+    attempt: { observed: true, outcome: null, response: null, latencyMs: null, attemptId: null, ...(fields?.attempt || {}) },
     support: { ...defaultSupport(), ...(fields?.support || {}) },
-    feedback: { given: false, target: null, ...(fields?.feedback || {}) }
+    feedback: { given: false, target: null, ...(fields?.feedback || {}) },
+    evaluation: { authority: null, contractId: null, evaluator: null, version: null, ...(fields?.evaluation || {}) }
   };
   const problems = validateEvent(e);
   if (problems.length) throw new Error(`invalid EvidenceEvent: ${problems.join('; ')}`);

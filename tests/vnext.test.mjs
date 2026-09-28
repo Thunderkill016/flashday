@@ -46,6 +46,7 @@ function ev(capabilityId, over = {}) {
       partnerType: 'tutor'
     },
     attempt: { observed: true, outcome: 'success', response: 'ok', latencyMs: 900 },
+    evaluation: { authority: 'deterministic', contractId: 'test.eval.v1' },
     ...over
   });
 }
