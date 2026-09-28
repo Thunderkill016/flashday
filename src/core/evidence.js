@@ -9,7 +9,13 @@ import { rebuildFsrsFromLog } from './scheduler.js';
 // task state is rebuilt from it (docs/adr/learning-core-v3.md).
 export const DB_VERSION = 3;
 
-export const LESSON_EVENT_KINDS = Object.freeze(['drill', 'read', 'listen', 'write', 'speak']);
+// Old-format step kinds plus the mission-format stage kinds (issue #33).
+// The mission names are deliberately distinct — a 'gist' comprehension
+// check must never be misread as a five-pane 'read' submission.
+export const LESSON_EVENT_KINDS = Object.freeze([
+  'drill', 'read', 'listen', 'write', 'speak',
+  'context', 'gist', 'notice', 'retrieve', 'interact', 'exit'
+]);
 
 export function createInitialDb() {
   return { version: DB_VERSION, lessonEvents: [], fsrs: {}, reviewLog: [], profile: {} };

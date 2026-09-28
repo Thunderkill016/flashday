@@ -76,7 +76,12 @@ generated frozen ledger of pre-fingerprint revisions; regenerate it with
 Enrollment is staged by step (`STEP_TASKS`); `reviewLog` is the durable
 truth and the ONLY path to task state — `hydrateDb` sets
 `fsrs = rebuildFsrsFromLog(reviewLog)` and never consults the stored
-cache, so devices converge byte-equivalent. Rev-less legacy keys resolve
+cache, so devices converge byte-equivalent. Lesson 1 runs `format:
+'mission'` (issue #33, `src/ui/views/mission.js`): one guided flow
+context → gist → notice → retrieve → interact → unaided-exit →
+hint/model → aided retry — stage events project through the same
+`STEP_TASKS` modality map, and `app.js` dispatches runner vs mission by
+`lesson.format`; the five-pane runner still serves lessons 2–30. Rev-less legacy keys resolve
 ONLY when the ledger proves a single revision (`unambiguousRev`); on
 multi-revision slots they PARK as rev-less `ambiguous` cards — kept,
 counted, never presented. Replay is timestamp-deterministic: corrupt `at`

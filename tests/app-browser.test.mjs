@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
-import lesson from '../src/content/a1/s1-l1.js';
+import missionLesson from '../src/content/a1/s1-l1.js';
+import lesson from '../src/content/a1/s1-l2.js';
 
 // Isolated preview: no login, no production writes, fresh storage per context.
 const server = await createServer({ server: { host: '127.0.0.1', port: 0 } });
@@ -14,7 +15,10 @@ const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || (exist
 const DB_KEY = 'flashday-a1';
 const SESSION_KEY = 'flashday-a1:lesson-session';
 const OWNER_KEY = 'flashday:db-owner';
+// L1 is the mission-format vertical slice (issue #33); the five-pane runner
+// tests exercise lesson 2, which still loads through the old path.
 const L1 = 'a1-s1-l1';
+const L2 = 'a1-s1-l2';
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // With the lazy app bundle, view mount is async — wait for real content inside
@@ -63,9 +67,9 @@ try {
     assert.equal(await h1('Hôm nay').textContent(), 'Hôm nay');
     await goto(page, `${origin}app/?preview#/path`);
     assert.equal(await h1('Lộ trình').textContent(), 'Lộ trình');
-    await goto(page, `${origin}app/?preview#/summary/${L1}`);
+    await goto(page, `${origin}app/?preview#/summary/${L2}`);
     assert.equal(await h1('Kết quả buổi học').textContent(), 'Kết quả buổi học');
-    await goto(page, `${origin}app/?preview#/lesson/${L1}/listen`);
+    await goto(page, `${origin}app/?preview#/lesson/${L2}/listen`);
     assert.equal(await page.locator('.runner-pane[data-step]').count(), 5);
     let visible = 0;
     for (let i = 0; i < 5; i++) if (await page.locator('.runner-pane[data-step]').nth(i).isVisible()) visible++;
@@ -83,12 +87,12 @@ try {
       viewport: { width: 390, height: 844 },
     });
     const page = await context.newPage();
-    await goto(page, `${origin}app/?preview#/lesson/${L1}/write`);
-    await page.locator('.runner-pane[data-step="write"] .write-area').fill('I am Linh from Hue.');
+    await goto(page, `${origin}app/?preview#/lesson/${L2}/write`);
+    await page.locator('.runner-pane[data-step="write"] .write-area').fill('It is Linh, L-I-N-H.');
     await sleep(1200); // debounced draft save
     await reload(page);
     await page.waitForSelector('.runner-pane[data-step="write"]:not([hidden])');
-    assert.equal(await page.locator('.runner-pane[data-step="write"] .write-area').inputValue(), 'I am Linh from Hue.');
+    assert.equal(await page.locator('.runner-pane[data-step="write"] .write-area').inputValue(), 'It is Linh, L-I-N-H.');
     await context.close();
     check('write draft survives reload');
   }
@@ -99,19 +103,19 @@ try {
       viewport: { width: 390, height: 844 },
     });
     const page = await context.newPage();
-    await goto(page, `${origin}app/?preview#/lesson/${L1}/read`);
+    await goto(page, `${origin}app/?preview#/lesson/${L2}/read`);
     const readPane = page.locator('.runner-pane[data-step="read"]');
     const stamp = await readPane.locator('.quiz').getAttribute('data-quiz-mount');
     await readPane.locator('.quiz-question').nth(0).locator('.quiz-option').nth(0).click();
     await readPane.locator('.quiz-question').nth(1).locator('.quiz-option').nth(1).click();
     await sleep(1200);
-    await page.evaluate(() => {
-      window.location.hash = `#/lesson/${'a1-s1-l1'}/listen`;
-    });
+    await page.evaluate((lessonId) => {
+      window.location.hash = `#/lesson/${lessonId}/listen`;
+    }, L2);
     await page.waitForSelector('.runner-pane[data-step="listen"]:not([hidden])');
-    await page.evaluate(() => {
-      window.location.hash = `#/lesson/${'a1-s1-l1'}/read`;
-    });
+    await page.evaluate((lessonId) => {
+      window.location.hash = `#/lesson/${lessonId}/read`;
+    }, L2);
     await page.waitForSelector('.runner-pane[data-step="read"]:not([hidden])');
     const pane = page.locator('.runner-pane[data-step="read"]');
     assert.equal(await pane.locator('.quiz').getAttribute('data-quiz-mount'), stamp, 'quiz DOM must be the same mounted node');
@@ -127,11 +131,11 @@ try {
       viewport: { width: 390, height: 844 },
     });
     const page = await context.newPage();
-    await goto(page, `${origin}app/?preview#/lesson/${L1}/read`);
+    await goto(page, `${origin}app/?preview#/lesson/${L2}/read`);
     const pane = page.locator('.runner-pane[data-step="read"]');
-    // s1-l1 read answers are [0, 1, 0] — pick all-wrong first.
-    await pane.locator('.quiz-question').nth(0).locator('.quiz-option').nth(1).click();
-    await pane.locator('.quiz-question').nth(1).locator('.quiz-option').nth(0).click();
+    // s1-l2 read answers are [1, 0, 0] — pick all-wrong first.
+    await pane.locator('.quiz-question').nth(0).locator('.quiz-option').nth(0).click();
+    await pane.locator('.quiz-question').nth(1).locator('.quiz-option').nth(1).click();
     await pane.locator('.quiz-question').nth(2).locator('.quiz-option').nth(1).click();
     await pane.locator('.quiz-submit').click();
     assert.equal(await pane.locator('.quiz-hint:not([hidden])').count(), 3, 'hints show for wrong answers');
@@ -139,8 +143,8 @@ try {
     await pane.locator('.quiz-retry').click();
     assert.equal(await pane.locator('.quiz-question').nth(0).locator('input').nth(0).isEnabled(), true, 'options re-enabled');
     // answer correctly
-    await pane.locator('.quiz-question').nth(0).locator('.quiz-option').nth(0).click();
-    await pane.locator('.quiz-question').nth(1).locator('.quiz-option').nth(1).click();
+    await pane.locator('.quiz-question').nth(0).locator('.quiz-option').nth(1).click();
+    await pane.locator('.quiz-question').nth(1).locator('.quiz-option').nth(0).click();
     await pane.locator('.quiz-question').nth(2).locator('.quiz-option').nth(0).click();
     await pane.locator('.quiz-submit').click();
     assert.match(await pane.locator('.quiz-feedback').textContent(), /Đúng 3\/3/);
@@ -159,7 +163,7 @@ try {
       viewport: { width: 390, height: 844 },
     });
     const page = await context.newPage();
-    await goto(page, `${origin}app/?preview#/lesson/${L1}/write`);
+    await goto(page, `${origin}app/?preview#/lesson/${L2}/write`);
     await page.locator('.runner-pane[data-step="write"] .write-area').fill('old draft text');
     await sleep(1200);
     await page.evaluate(
@@ -168,7 +172,7 @@ try {
         session.drafts[lessonId].contentVersion = 99;
         localStorage.setItem(key, JSON.stringify(session));
       },
-      { key: SESSION_KEY, lessonId: L1 },
+      { key: SESSION_KEY, lessonId: L2 },
     );
     await reload(page);
     await page.waitForSelector('[data-role="stale-notice"]');
@@ -183,7 +187,7 @@ try {
       viewport: { width: 390, height: 844 },
     });
     const page = await context.newPage();
-    await goto(page, `${origin}app/?preview#/lesson/${L1}/write`);
+    await goto(page, `${origin}app/?preview#/lesson/${L2}/write`);
     await page.locator('.runner-pane[data-step="write"] .write-area').fill('alice draft');
     await sleep(1200);
     // claimDbNamespace semantics: owner marker routes reads to the uid slot.
@@ -196,7 +200,7 @@ try {
     }
     // Also assert the session record under the guest key still holds it (not leaked).
     const guest = await page.evaluate((key) => JSON.parse(localStorage.getItem(key) || '{}'), SESSION_KEY);
-    assert.equal(guest.drafts?.[L1]?.write?.[L1]?.responseText, 'alice draft');
+    assert.equal(guest.drafts?.[L2]?.write?.[L2]?.responseText, 'alice draft');
     await context.close();
     check('account switch hides the other namespace draft');
   }
@@ -207,9 +211,9 @@ try {
       viewport: { width: 390, height: 844 },
     });
     const page = await context.newPage();
-    await goto(page, `${origin}app/?preview#/lesson/${L1}/write`);
+    await goto(page, `${origin}app/?preview#/lesson/${L2}/write`);
     const pane = page.locator('.runner-pane[data-step="write"]');
-    await pane.locator('.write-area').fill('Hi I am Linh from Hue');
+    await pane.locator('.write-area').fill('My name is Linh Pham');
     assert.equal(await pane.locator('[data-role="model-toggle"]').isEnabled(), true, 'Xem mẫu enabled at ≥3 words');
     await pane.locator('[data-role="model-toggle"]').click();
     const save = pane.locator('[data-role="write-save"]');
@@ -256,19 +260,19 @@ try {
       viewport: { width: 390, height: 844 },
     });
     const page = await context.newPage();
-    await goto(page, `${origin}app/?preview#/lesson/${L1}/read`);
+    await goto(page, `${origin}app/?preview#/lesson/${L2}/read`);
     const readPane = page.locator('.runner-pane[data-step="read"]');
     assert.equal(await readPane.locator('.quiz-retry').isVisible(), false, 'Làm lại must be hidden before submit');
     // submit → retry visible
-    await readPane.locator('.quiz-question').nth(0).locator('.quiz-option').nth(0).click();
-    await readPane.locator('.quiz-question').nth(1).locator('.quiz-option').nth(1).click();
+    await readPane.locator('.quiz-question').nth(0).locator('.quiz-option').nth(1).click();
+    await readPane.locator('.quiz-question').nth(1).locator('.quiz-option').nth(0).click();
     await readPane.locator('.quiz-question').nth(2).locator('.quiz-option').nth(0).click();
     await readPane.locator('.quiz-submit').click();
     assert.equal(await readPane.locator('.quiz-retry').isVisible(), true);
 
-    await page.evaluate(() => {
-      window.location.hash = '#/lesson/a1-s1-l1/write';
-    });
+    await page.evaluate((lessonId) => {
+      window.location.hash = `#/lesson/${lessonId}/write`;
+    }, L2);
     const writePane = page.locator('.runner-pane[data-step="write"]');
     assert.equal(await writePane.locator('[data-role="write-save"]').isVisible(), false, 'Lưu lần thử hidden before Xem mẫu');
     // empty text → Xem mẫu stays disabled
@@ -297,8 +301,8 @@ try {
     const page = await context.newPage();
     await goto(page, `${origin}app/?preview#/today`);
     assert.match(await page.locator('#view').textContent(), /Chưa có thẻ đến hạn/);
-    // submit drills on s1-l1 (answers: drills 1-4 correct = 0,2,0,0 — any answers enroll chunks)
-    await goto(page, `${origin}app/?preview#/lesson/${L1}/prepare`);
+    // submit drills on s1-l2 (old-format lesson; any answers enroll chunks)
+    await goto(page, `${origin}app/?preview#/lesson/${L2}/prepare`);
     const pane = page.locator('.runner-pane[data-step="prepare"]');
     for (let q = 0; q < 4; q++) {
       await pane.locator('.quiz-question').nth(q).locator('.quiz-option').nth(0).click();
@@ -308,17 +312,17 @@ try {
       const db = JSON.parse(localStorage.getItem(key) || '{}');
       return Object.keys(db.fsrs || {}).length;
     }, DB_KEY);
-    assert.equal(enrolled, 16, 'drill submit enrolls prepare tasks for all 8 chunks');
+    assert.equal(enrolled, 14, 'drill submit enrolls prepare tasks for all 7 chunks');
     await goto(page, `${origin}app/?preview#/today`);
     const todayText = await page.locator('#view').textContent();
     assert.match(todayText, /Chưa có thẻ đến hạn/, 'brand-new tasks are introductions, not due review');
-    assert.match(todayText, /16 thẻ mới chờ làm quen/, 'new-task pool counted separately');
-    // path pill for s1-l1 shows step progress after the drill submit
+    assert.match(todayText, /14 thẻ mới chờ làm quen/, 'new-task pool counted separately');
+    // path pill for s1-l2 shows step progress after the drill submit
     await goto(page, `${origin}app/?preview#/path`);
-    const pill = page.locator('.path-lessons li', { hasText: 'Chào hỏi và giới thiệu' }).locator('.path-status');
+    const pill = page.locator('.path-lessons li', { hasText: 'Đánh vần, số điện thoại và email' }).locator('.path-status');
     assert.equal(await pill.textContent(), '1/5 bước');
     // summary: untouched steps show "Chưa làm" links
-    await goto(page, `${origin}app/?preview#/summary/${L1}`);
+    await goto(page, `${origin}app/?preview#/summary/${L2}`);
     const todoLinks = page.locator('.summary-steps a', { hasText: 'Chưa làm' });
     assert.equal(await todoLinks.count(), 4, 'read/listen/write/speak untouched');
     await context.close();
@@ -332,7 +336,7 @@ try {
     });
     const page = await context.newPage();
     // enroll via drills first
-    await goto(page, `${origin}app/?preview#/lesson/${L1}/prepare`);
+    await goto(page, `${origin}app/?preview#/lesson/${L2}/prepare`);
     const pane = page.locator('.runner-pane[data-step="prepare"]');
     for (let q = 0; q < 4; q++) {
       await pane.locator('.quiz-question').nth(q).locator('.quiz-option').nth(0).click();
@@ -340,9 +344,9 @@ try {
     await pane.locator('.quiz-submit').click();
 
     await goto(page, `${origin}app/?preview#/review`);
-    // Bounded introduction: 16 new tasks exist but the session is capped —
-    // one new task per component, at most NEW_TASK_BUDGET per mount.
-    assert.equal(await page.locator('.review-counter').textContent(), '1/8');
+    // Bounded introduction: 14 new tasks exist but the session is capped —
+    // one new task per component (7 chunks → 7 cards).
+    assert.equal(await page.locator('.review-counter').textContent(), '1/7');
     assert.equal(await page.locator('[data-role="fresh-badge"]').count(), 1, 'new card flagged as introduction');
     assert.equal(await page.locator('.review-target').isVisible(), false, 'answer hidden before reveal');
     // Task-graded cards: sibling bury serves the recognition ability first —
@@ -359,7 +363,7 @@ try {
       return (db.reviewLog || []).filter((e) => e.kind === 'rate').length;
     }, DB_KEY);
     assert.equal(ratesAfterPreKey, 0, 'keyboard grade before reveal writes nothing');
-    assert.equal(await page.locator('.review-counter').textContent(), '1/8', 'still on card 1');
+    assert.equal(await page.locator('.review-counter').textContent(), '1/7', 'still on card 1');
     // typed production recall → diff score + suggested grade on reveal
     await page.locator('.review-card .write-area').fill('Hello, I’m …');
     await page.locator('[data-role="reveal"]').click();
@@ -367,7 +371,7 @@ try {
     assert.match(await page.locator('.review-suggestion').textContent(), /gợi ý chấm/);
     assert.equal(await page.locator('.grade-btn.suggested').count(), 1, 'one grade lights up');
     await page.locator('[data-grade="3"]').click(); // Nhớ
-    assert.equal(await page.locator('.review-counter').textContent(), '2/8');
+    assert.equal(await page.locator('.review-counter').textContent(), '2/7');
     // Sibling bury: the next card is c2's recognition task, not c1's
     // meaning_recall sibling — one ability per component per session.
     assert.equal(await page.locator('[data-task-kind]').textContent(), 'Nhìn hiểu');
@@ -375,7 +379,7 @@ try {
       const db = JSON.parse(localStorage.getItem(key) || '{}');
       return (db.reviewLog || []).filter((e) => e.kind === 'rate');
     }, DB_KEY);
-    assert.match(rateEntries[0].taskKey, /^a1-s1-l1:c1@[0-9a-f]{8}:form_recognition$/,
+    assert.match(rateEntries[0].taskKey, /^a1-s1-l2:c1@[0-9a-f]{8}:form_recognition$/,
       'rate lands on the revision-carrying task key');
     // Provenance: observable pre-reveal attempt → unaided; the attempt text
     // is frozen at reveal and both facts are durable.
@@ -396,7 +400,7 @@ try {
     await reload(page);
     // Remount: c1's remaining sibling (meaning_recall) is now c1's next
     // introduction — the queue is a fresh bounded snapshot, not a leak.
-    assert.equal(await page.locator('.review-counter').textContent(), '1/8', 'graded card no longer in queue');
+    assert.equal(await page.locator('.review-counter').textContent(), '1/7', 'graded card no longer in queue');
     assert.equal(await page.locator('[data-task-kind]').textContent(), 'Nhớ cụm từ',
       'c1’s next pending ability surfaces after reload');
     await context.close();
@@ -413,15 +417,15 @@ try {
     page.on('pageerror', (error) => errors.push(error.message));
     // Type then leave within the 400ms debounce window — before the fix the
     // pending patchDraft read torn-down `state` and threw on the next page.
-    await goto(page, `${origin}app/?preview#/lesson/${L1}/write`);
+    await goto(page, `${origin}app/?preview#/lesson/${L2}/write`);
     await page.locator('.runner-pane[data-step="write"] .write-area').fill('mid-typing draft');
     await goto(page, `${origin}app/?preview#/review`);
     await sleep(800);
     assert.deepEqual(errors, [], `pageerrors: ${errors.join(' | ')}`);
     // Same race across a remount: type, jump to a SECOND lesson's runner.
-    await goto(page, `${origin}app/?preview#/lesson/${L1}/speak`);
+    await goto(page, `${origin}app/?preview#/lesson/${L2}/speak`);
     await page.locator('.runner-pane[data-step="speak"] .speak-area').fill('stale debounce source');
-    await goto(page, `${origin}app/?preview#/lesson/a1-s1-l2/write`);
+    await goto(page, `${origin}app/?preview#/lesson/a1-s1-l3/write`);
     await sleep(800);
     assert.deepEqual(errors, [], `pageerrors after remount: ${errors.join(' | ')}`);
     await context.close();
@@ -454,18 +458,18 @@ try {
     });
     const page = await context.newPage();
     // prepare: chunk play buttons
-    await goto(page, `${origin}app/?preview#/lesson/${L1}/prepare`);
+    await goto(page, `${origin}app/?preview#/lesson/${L2}/prepare`);
     const plays = page.locator('.runner-pane[data-step="prepare"] .chunk-list [data-role="play-target"]');
-    assert.equal(await plays.count(), 8, 'every taught chunk gets a play button');
+    assert.equal(await plays.count(), lesson.chunks.length, 'every taught chunk gets a play button');
     await plays.first().click();
     // read: dialogue line play buttons
-    await goto(page, `${origin}app/?preview#/lesson/${L1}/read`);
+    await goto(page, `${origin}app/?preview#/lesson/${L2}/read`);
     const linePlays = page.locator('.runner-pane[data-step="read"] .dialogue-lines [data-role="play-target"]');
     assert.equal(await linePlays.count(), lesson.dialogue.lines.length, 'every dialogue line gets a play button');
     await linePlays.first().click();
     const calls = await page.evaluate(() => window.__ttsCalls);
     assert.equal(calls.length, 2, `expected 2 TTS calls, got ${calls.length}`);
-    assert.ok(calls[0].length > 0 && calls[1].startsWith('Tom:'), `calls: ${JSON.stringify(calls)}`);
+    assert.ok(calls[0].length > 0 && calls[1].startsWith('Staff:'), `calls: ${JSON.stringify(calls)}`);
     await context.close();
     check('chunk + dialogue play buttons speak the target');
   }
@@ -476,9 +480,9 @@ try {
       viewport: { width: 390, height: 844 },
     });
     const page = await context.newPage();
-    await goto(page, `${origin}app/?preview#/lesson/${L1}/write`);
+    await goto(page, `${origin}app/?preview#/lesson/${L2}/write`);
     const pane = page.locator('.runner-pane[data-step="write"]');
-    await pane.locator('.write-area').fill('Hi I am Linh from Hue. Nice to meet you.');
+    await pane.locator('.write-area').fill('My name is Linh Pham, P-H-A-M.');
     await pane.locator('[data-role="model-toggle"]').click();
     await pane.locator('[data-role="write-save"]').click();
     assert.equal(await pane.locator('.attempt-compare:not([hidden])').count(), 1, 'compare shown after save');
@@ -550,7 +554,7 @@ try {
     const page = await context.newPage();
 
     // Explain my answer: wrong drill answer → AI button → explanation text
-    await goto(page, `${origin}app/?preview#/lesson/${L1}/prepare`);
+    await goto(page, `${origin}app/?preview#/lesson/${L2}/prepare`);
     const preparePane = page.locator('.runner-pane[data-step="prepare"]');
     for (let i = 0; i < 4; i++) {
       await preparePane.locator('.quiz-question').nth(i).locator('.quiz-option').nth(2).click();
@@ -578,7 +582,7 @@ try {
     assert.equal(remEvents.length, 1, 'remediation attempt recorded');
 
     // Write review: save → AI feedback with error + suggestion
-    await goto(page, `${origin}app/?preview#/lesson/${L1}/write`);
+    await goto(page, `${origin}app/?preview#/lesson/${L2}/write`);
     const writePane = page.locator('.runner-pane[data-step="write"]');
     await writePane.locator('.write-area').fill('i am linh. i from hue.');
     await writePane.locator('[data-role="model-toggle"]').click();
@@ -589,7 +593,7 @@ try {
     assert.match(reviewText, /I’m Linh/);
 
     // Roleplay: start → partner opener → learner turn → AI graded checklist
-    await goto(page, `${origin}app/?preview#/lesson/${L1}/speak`);
+    await goto(page, `${origin}app/?preview#/lesson/${L2}/speak`);
     const speakPane = page.locator('.runner-pane[data-step="speak"]');
     await speakPane.locator('[data-role="roleplay-start"]').click();
     await speakPane.locator('.roleplay-msg.roleplay-partner').waitFor();
@@ -614,7 +618,7 @@ try {
     );
 
     // Vary context: AI-written dialogue + its own comprehension quiz
-    await goto(page, `${origin}app/?preview#/lesson/${L1}/read`);
+    await goto(page, `${origin}app/?preview#/lesson/${L2}/read`);
     const readPane = page.locator('.runner-pane[data-step="read"]');
     await readPane.locator('[data-role="variant"]').click();
     await readPane.locator('.variant .dialogue-lines li').first().waitFor();
@@ -626,7 +630,7 @@ try {
     );
 
     // Dictation: type back the heard sentence → word-diff feedback
-    await goto(page, `${origin}app/?preview#/lesson/${L1}/listen`);
+    await goto(page, `${origin}app/?preview#/lesson/${L2}/listen`);
     const listenPane = page.locator('.runner-pane[data-step="listen"]');
     const dictRow = listenPane.locator('.dictation-row').first();
     await dictRow.locator('.dictation-input').fill('Hello, my name is Anna.');
@@ -647,14 +651,14 @@ try {
       window.__FLASHDAY_TUTOR__ = { available: false };
     });
     const page = await context.newPage();
-    await goto(page, `${origin}app/?preview#/lesson/${L1}/prepare`);
+    await goto(page, `${origin}app/?preview#/lesson/${L2}/prepare`);
     const preparePane = page.locator('.runner-pane[data-step="prepare"]');
     for (let i = 0; i < 4; i++) {
       await preparePane.locator('.quiz-question').nth(i).locator('.quiz-option').nth(2).click();
     }
     await preparePane.locator('.quiz-submit').click();
     assert.equal(await preparePane.locator('.quiz-explain-btn').count(), 0, 'no AI button without tutor');
-    await goto(page, `${origin}app/?preview#/lesson/${L1}/speak`);
+    await goto(page, `${origin}app/?preview#/lesson/${L2}/speak`);
     assert.equal(await page.locator('[data-role="roleplay"]').count(), 0, 'no roleplay block without tutor');
     assert.equal(await page.locator('[data-role="spoke"]').isVisible(), true, 'self-report flow still present');
     await context.close();
@@ -671,13 +675,13 @@ try {
       window.__FLASHDAY_TUTOR__ = { available: false };
     });
     const page = await context.newPage();
-    await goto(page, `${origin}app/?preview#/lesson/${L1}/prepare`);
+    await goto(page, `${origin}app/?preview#/lesson/${L2}/prepare`);
     const prep = page.locator('.runner-pane[data-step="prepare"]');
 
     // Chunk pager: one card at a time, nav moves through all chunks
     assert.equal(await prep.locator('.chunk-card:visible').count(), 1, 'pager shows one chunk');
     await prep.locator('[data-role="chunk-next"]').click();
-    assert.match(await prep.locator('.chunk-counter').textContent(), /Cụm 2\/8/);
+    assert.match(await prep.locator('.chunk-counter').textContent(), /Cụm 2\/7/);
 
     // Match pairs: click EN chip then its VI counterpart → all lock
     for (let i = 0; i < 4; i++) {
@@ -711,7 +715,7 @@ try {
     assert.equal(width, '20%', `progress bar ${width} after 1/5 steps`);
 
     // Finish the remaining four steps → celebration + streak
-    await goto(page, `${origin}app/?preview#/lesson/${L1}/read`);
+    await goto(page, `${origin}app/?preview#/lesson/${L2}/read`);
     const read = page.locator('.runner-pane[data-step="read"]');
     const rq = read.locator('.quiz-question');
     for (let i = 0; i < await rq.count(); i++) {
@@ -719,7 +723,7 @@ try {
     }
     await read.locator('.quiz-submit').click();
 
-    await goto(page, `${origin}app/?preview#/lesson/${L1}/listen`);
+    await goto(page, `${origin}app/?preview#/lesson/${L2}/listen`);
     const lis = page.locator('.runner-pane[data-step="listen"]');
     const lq = lis.locator('.quiz-question');
     for (let i = 0; i < await lq.count(); i++) {
@@ -727,32 +731,33 @@ try {
     }
     await lis.locator('.quiz-submit').click();
 
-    await goto(page, `${origin}app/?preview#/lesson/${L1}/write`);
+    await goto(page, `${origin}app/?preview#/lesson/${L2}/write`);
     const write = page.locator('.runner-pane[data-step="write"]');
-    await write.locator('.write-area').fill('I am Linh from Hue.');
+    await write.locator('.write-area').fill('My name is Linh Pham, P-H-A-M.');
     await write.locator('[data-role="model-toggle"]').click();
     const wChecks = write.locator('[data-check]');
     for (let i = 0; i < await wChecks.count(); i++) await wChecks.nth(i).check();
     await write.locator('[data-role="write-save"]').click();
 
-    await goto(page, `${origin}app/?preview#/lesson/${L1}/speak`);
+    await goto(page, `${origin}app/?preview#/lesson/${L2}/speak`);
     const speak = page.locator('.runner-pane[data-step="speak"]');
-    await speak.locator('.speak-area').fill('Hi I am Linh. I am from Hue.');
+    await speak.locator('.speak-area').fill('It is Linh Pham, P-H-A-M. My number is 0908.');
     await speak.locator('[data-role="spoke"]').check();
     await speak.locator('[data-role="model-toggle"]').click();
     const sChecks = speak.locator('[data-check]');
     for (let i = 0; i < await sChecks.count(); i++) await sChecks.nth(i).check();
     await speak.locator('[data-role="speak-save"]').click();
 
-    await goto(page, `${origin}app/?preview#/summary/${L1}`);
+    await goto(page, `${origin}app/?preview#/summary/${L2}`);
     assert.equal(await page.locator('[data-role="celebration"]').count(), 1, 'celebration banner after all steps');
     await goto(page, `${origin}app/?preview`);
     assert.match(await page.locator('[data-role="streak"]').textContent(), /ngày liên tiếp/);
 
-    // Path visuals: stage + lesson progress bars reflect submitted steps
+    // Path visuals: stage + lesson progress bars reflect submitted steps —
+    // the L2 row's bar fills (L1 is the mission lesson, untouched here).
     await goto(page, `${origin}app/?preview#/path`);
-    const firstBar = page.locator('.path-stage').first().locator('.path-lessons .path-bar i').first();
-    assert.equal(await firstBar.evaluate((el) => el.style.width), '100%', 'lesson 1 bar full');
+    const l2Bar = page.locator('.path-stage').first().locator('.path-lessons li', { hasText: 'Đánh vần, số điện thoại và email' }).locator('.path-bar i');
+    assert.equal(await l2Bar.evaluate((el) => el.style.width), '100%', 'lesson 2 bar full');
     const stageBarWidth = await page.locator('.path-stage-progress .path-bar i').first().evaluate((el) => el.style.width);
     assert.equal(stageBarWidth, '20%', `stage bar ${stageBarWidth} after 1/5 lessons`);
     assert.ok((await page.locator('.path-lesson-icon').count()) >= 5, 'lesson icons present');
@@ -771,6 +776,182 @@ try {
     assert.match(await page.locator('[data-role="review-recap"]').textContent(), /Nhớ \d+/);
     await context.close();
     check('engagement layer: pager + match pairs + word bank + banner + progress + celebration + streak + path bars + review recap');
+  }
+
+  // ── 17. Mission acceptance (issue #33): context → gist → notice → retrieve
+  //        → interact → unaided exit → retry aided; no AI, mobile width ──
+  {
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+    });
+    const errors = [];
+    const page = await context.newPage();
+    page.on('pageerror', (error) => errors.push(error.message));
+    const stage = (name) => page.locator(`.mission-stage[data-stage="${name}"]`);
+    const eventsOfKind = async (kind) => page.evaluate(
+      ({ key, kind }) => {
+        const db = JSON.parse(localStorage.getItem(key) || '{}');
+        return (db.lessonEvents || []).filter((e) => e.kind === kind);
+      },
+      { key: DB_KEY, kind },
+    );
+
+    // A deep link to the exit task must NOT skip scaffolding — the route
+    // clamps forward jumps to the first unfinished stage.
+    await goto(page, `${origin}app/?preview#/lesson/${L1}/exit`);
+    await stage('context').waitFor();
+    assert.equal(await page.locator('.runner-pane').count(), 0, 'mission lesson never mounts the five panes');
+    assert.equal(await page.locator('.step-pill').count(), 0, 'no step-tab navigation to bypass the flow');
+    assert.equal(await page.locator('[data-role="roleplay"]').count(), 0, 'no AI affordance inside the mission');
+
+    // CONTEXT — one exchange, translations on demand (recorded support).
+    assert.equal(await stage('context').locator('.mission-line').count(), 4, 'one four-line exchange');
+    assert.equal(await stage('context').locator('.translation:not([hidden])').count(), 0, 'translations hidden by default');
+    await stage('context').locator('[data-role="translation-toggle"]').click();
+    assert.equal(await stage('context').locator('.translation:not([hidden])').count(), 4);
+    // One primary action only — no forward link exists before this stage's
+    // record is written.
+    await stage('context').locator('.mission-primary').click();
+    await stage('gist').waitFor();
+
+    // GIST — two meaning checks about what just happened.
+    const gist = stage('gist');
+    await gist.locator('.quiz-question').nth(0).locator('.quiz-option').nth(missionLesson.mission.gist[0].answer).click();
+    await gist.locator('.quiz-question').nth(1).locator('.quiz-option').nth(missionLesson.mission.gist[1].answer).click();
+    await gist.locator('.quiz-submit').click();
+    await gist.locator('.mission-primary').click();
+    await stage('notice').waitFor();
+
+    // NOTICE — page through all four chunks, then continue is armed.
+    const notice = stage('notice');
+    assert.match(await notice.locator('.chunk-pager-nav').textContent(), /Cụm 1\/4/);
+    assert.equal(await notice.locator('.mission-primary:not([hidden])').count(), 0, 'continue stays armed only after all chunks seen');
+    for (let i = 0; i < 3; i++) await notice.locator('button', { hasText: 'Cụm tiếp' }).click();
+    assert.match(await notice.locator('.chunk-pager-nav').textContent(), /Cụm 4\/4/);
+    await notice.locator('.mission-primary').click();
+    await stage('retrieve').waitFor();
+
+    // RETRIEVE — VI cue → type the English. Hint once (recorded support);
+    // every item must be produced, not chosen.
+    const retrieve = stage('retrieve');
+    for (let i = 0; i < missionLesson.mission.retrieval.length; i++) {
+      assert.match(await retrieve.locator('.mission-retrieve-card').textContent(), new RegExp(`Nhớ lại ${i + 1}/4`));
+      if (i === 1) await retrieve.locator('[data-role="retrieve-hint"]').click(); // recorded aid
+      await retrieve.locator('.mission-input').fill(missionLesson.mission.retrieval[i].answer);
+      await retrieve.locator('[data-role="retrieve-check"]').click();
+      if (i < missionLesson.mission.retrieval.length - 1) await sleep(650); // item-advance defer
+    }
+    await stage('interact').waitFor({ timeout: 5000 });
+
+    // INTERACT — Mia speaks; each reply is assembled from a word bank.
+    const interact = stage('interact');
+    const turns = missionLesson.mission.interact.turns;
+    for (let t = 0; t < turns.length; t++) {
+      const wb = interact.locator('.mission-interact-wb').last();
+      for (const word of turns[t].you.split(/\s+/).filter(Boolean)) {
+        await wb.locator(`.wb-bank .wb-chip[data-word="${word}"]`).first().click();
+      }
+      await wb.locator('.wb-check').click();
+      if (t < turns.length - 1) await sleep(700);
+    }
+    await interact.locator('.mission-primary').click();
+    await stage('exit').waitFor();
+
+    // EXIT — attempt 1 is frozen BEFORE any model is revealed. Reload mid-
+    // attempt proves the frozen response survives (draft restore).
+    const exit = stage('exit');
+    await exit.locator('[aria-label="Lượt của bạn 1"]').fill('Hi, I’m Linh. What’s your name?');
+    await exit.locator('[data-role="exit-send"]:not([disabled])').click();
+    await sleep(600); // draft persistence is debounced ~400ms
+    await reload(page);
+    await stage('exit').waitFor();
+    assert.equal(await stage('exit').locator('[aria-label="Lượt của bạn 2"]').count(), 1,
+      'frozen turn survives reload; the next turn still asks');
+    assert.match(await stage('exit').textContent(), /Hi, I’m Linh/, 'restored frozen response on screen');
+    await stage('exit').locator('[aria-label="Lượt của bạn 2"]').fill('Nice to meet you too.');
+    await stage('exit').locator('[data-role="exit-send"]:not([disabled])').click();
+    await exit.locator('.mission-exit-feedback').waitFor();
+    assert.equal(await exit.locator('.exit-checks .check-met').count(), 4, 'all four communicative checks met');
+
+    // Attempt 1 recorded ONCE (restore did not duplicate), unaided, model
+    // not yet revealed.
+    let exitEvents = await eventsOfKind('exit');
+    assert.equal(exitEvents.length, 1, 'restored mid-attempt did not double-record');
+    assert.equal(exitEvents[0].payload.attempt, 1);
+    assert.equal(exitEvents[0].payload.unaidedFirst, true, 'attempt 1 frozen before any model');
+    assert.equal(exitEvents[0].support.modelRevealed, false);
+    assert.equal(exitEvents[0].payload.correct, 4);
+
+    // RETRY — the model is now on screen; attempt 2 is a separate aided record.
+    await exit.locator('[data-role="exit-retry"]').click();
+    await stage('exit').locator('[aria-label="Lượt của bạn 1"]').fill('Hello'); // partial on purpose
+    await stage('exit').locator('[data-role="exit-send"]:not([disabled])').click();
+    await stage('exit').locator('[aria-label="Lượt của bạn 2"]').fill('Nice to meet you too.');
+    await stage('exit').locator('[data-role="exit-send"]:not([disabled])').click();
+    await exit.locator('.mission-exit-feedback').waitFor();
+    exitEvents = await eventsOfKind('exit');
+    assert.equal(exitEvents.length, 2, 'retry is a separate durable record');
+    assert.equal(exitEvents[1].payload.attempt, 2);
+    assert.equal(exitEvents[1].payload.unaidedFirst, false, 'post-model retry is not unaided');
+    assert.equal(exitEvents[1].support.modelRevealed, true, 'model was visible for attempt 2');
+    assert(exitEvents[1].payload.correct < 4, 'partial retry scores partial');
+
+    // Staged enrollment — only exercised modalities mint tasks:
+    // context → listening 4, notice → form+meaning 8, exit → production 4.
+    const taskCounts = await page.evaluate((key) => {
+      const db = JSON.parse(localStorage.getItem(key) || '{}');
+      const keys = Object.keys(db.fsrs || {}).filter((k) => k.startsWith('a1-s1-l1:'));
+      const byKind = {};
+      for (const k of keys) {
+        const kind = k.split(':').pop();
+        byKind[kind] = (byKind[kind] || 0) + 1;
+      }
+      return { keys: keys.length, byKind };
+    }, DB_KEY);
+    assert.equal(taskCounts.keys, 16, `16 tasks minted, got ${taskCounts.keys}`);
+    assert.deepEqual(taskCounts.byKind, {
+      listening_recognition: 4,
+      form_recognition: 4,
+      meaning_recall: 4,
+      cued_production: 4
+    }, 'one task of each exercised kind per chunk');
+
+    // Every stage event exists exactly once except exit (two attempts).
+    for (const kind of ['context', 'gist', 'notice', 'retrieve', 'interact']) {
+      assert.equal((await eventsOfKind(kind)).length, 1, `${kind} recorded once`);
+    }
+    const retrieveEvents = await eventsOfKind('retrieve');
+    assert.equal(retrieveEvents[0].support.hintViewed, true, 'hint use is recorded support');
+
+    // Summary sees the mission stages, not the five panes; completion is
+    // activity-complete, not a mastery claim.
+    await goto(page, `${origin}app/?preview#/summary/${L1}`);
+    assert.equal(await page.locator('[data-role="celebration"]').count(), 1, 'all six stages attempted → celebration');
+    assert.match(await page.locator('.summary-steps').textContent(), /Tự làm/);
+    assert.match(await page.locator('.summary-steps').textContent(), /Xem tình huống/);
+    assert.equal(await page.locator('.summary-steps a', { hasText: 'Chưa làm' }).count(), 0, 'no stage left undone');
+    assert.deepEqual(errors, [], `pageerrors: ${errors.join(' | ')}`);
+    await context.close();
+    check('mission: context→gist→notice→retrieve→interact→unaided exit→aided retry (mobile, no AI)');
+  }
+
+  // ── 18. Old lessons still load — the five-pane runner is intact for the
+  //        29 untouched lessons ──
+  {
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+    });
+    const page = await context.newPage();
+    const errors = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    await goto(page, `${origin}app/?preview#/lesson/${L2}/prepare`);
+    assert.equal(await page.locator('.runner-pane[data-step]').count(), 5, 'old lesson keeps five panes');
+    assert.equal(await page.locator('.step-pill').count(), 5);
+    await goto(page, `${origin}app/?preview#/lesson/a1-s6-l5/read`);
+    assert.equal(await page.locator('.runner-pane[data-step]').count(), 4, 'stage-6 checkpoint keeps four panes');
+    assert.deepEqual(errors, [], `pageerrors: ${errors.join(' | ')}`);
+    await context.close();
+    check('old lessons 2–30 still load via the five-pane runner');
   }
 
   console.log(`FlashDay app browser tests: ${passed} groups passed`);

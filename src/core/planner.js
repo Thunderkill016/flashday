@@ -31,15 +31,20 @@ function draftHasContent(draft) {
   if (Object.values(answers).some((step) => step && Object.keys(step).length > 0)) return true;
   if (Object.keys(draft.write || {}).length > 0) return true;
   if (Object.keys(draft.speak || {}).length > 0) return true;
+  // Mission-format drafts keep in-flight stage work under `mission`.
+  if (draft.mission && typeof draft.mission === 'object' && Object.keys(draft.mission).length > 0) return true;
   return false;
 }
 
-// Latest outcome per (lesson, step) over quiz events — a retry that fixes a
-// weak step retires it as a remediation candidate.
+// Latest outcome per (lesson, step) over scored events — a retry that
+// fixes a weak step retires it as a remediation candidate. Mission stages
+// with graded payloads (gist/retrieve/interact/exit) count the same way.
+const SCORED_KINDS = ['drill', 'read', 'listen', 'gist', 'retrieve', 'interact', 'exit'];
+
 function weakSteps(db) {
   const latest = new Map();
   const ordered = [...(Array.isArray(db?.lessonEvents) ? db.lessonEvents : [])]
-    .filter((e) => ['drill', 'read', 'listen'].includes(e?.kind))
+    .filter((e) => SCORED_KINDS.includes(e?.kind))
     .sort((a, b) => (Number(a.submittedAt) || 0) - (Number(b.submittedAt) || 0)
       || String(a.id || '').localeCompare(String(b.id || '')));
   for (const event of ordered) {

@@ -64,7 +64,16 @@ export const STEP_TASKS = Object.freeze({
   read: [],
   listen: ['listening_recognition'],
   write: ['cued_production'],
-  speak: []
+  speak: [],
+  // Mission-format stages (issue #33): the same honest modality staging —
+  // heard the exchange → listening; saw+imitated the phrase → recognition
+  // and recall; produced it unaided at the exit → cued production.
+  context: ['listening_recognition'],
+  gist: [],
+  notice: ['form_recognition', 'meaning_recall'],
+  retrieve: [],
+  interact: [],
+  exit: ['cued_production']
 });
 
 // Legacy reviewLog keys (`lesson:chunk`) were graded on a VI→EN recall card.

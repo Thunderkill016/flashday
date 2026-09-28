@@ -1,21 +1,14 @@
 // Kết quả buổi học — per-step activity table from the lesson's own events.
-import { computeStreak, stepsForLesson } from '../../core/progress.js';
+import { computeStreak, stepsForLesson, STEP_LABELS } from '../../core/progress.js';
 import { dueTasks } from '../../core/scheduler.js';
 import { LESSONS, lessonById, nextLesson } from '../../content/a1/index.js';
 import { playFeedback } from '../sound.js';
 
-const STEP_LABELS = {
-  prepare: 'Hiểu mẫu',
-  read: 'Đọc',
-  listen: 'Nghe',
-  write: 'Viết',
-  speak: 'Nói'
-};
-
 const SUPPORT_LABELS = {
   translationViewed: 'có xem nghĩa',
   transcriptViewed: 'có xem lời',
-  modelRevealed: 'có xem mẫu'
+  modelRevealed: 'có xem mẫu',
+  hintViewed: 'có dùng gợi ý'
 };
 
 export function mount(root, ctx) {
@@ -82,14 +75,19 @@ export function mount(root, ctx) {
       li.appendChild(link);
     } else {
       li.appendChild(el('span', `${STEP_LABELS[step]} — `, 'summary-label'));
+      const scored = stepEvents.filter(
+        (e) => Number.isFinite(Number(e.payload?.correct)) && Number.isFinite(Number(e.payload?.total))
+      );
       if (step === 'write' || step === 'speak') {
         li.appendChild(el('span', `Đã lưu ${stepEvents.length} lần thử · tự đối chiếu`));
-      } else {
-        const best = Math.max(...stepEvents.map((e) => Number(e.payload?.correct) || 0));
-        const latest = stepEvents[stepEvents.length - 1];
-        const latestTxt = `lần thử ${latest.payload?.correct}/${latest.payload?.total} đúng`;
+      } else if (scored.length) {
+        const best = Math.max(...scored.map((e) => Number(e.payload.correct)));
+        const latest = scored[scored.length - 1];
+        const latestTxt = `lần thử ${latest.payload.correct}/${latest.payload.total} đúng`;
         li.appendChild(el('span',
-          stepEvents.length > 1 ? `${latestTxt}, tốt nhất ${best}/${latest.payload?.total}` : `${latestTxt}`));
+          scored.length > 1 ? `${latestTxt}, tốt nhất ${best}/${latest.payload.total}` : latestTxt));
+      } else {
+        li.appendChild(el('span', `Đã xong ${stepEvents.length > 1 ? `${stepEvents.length} lần` : ''}`));
       }
       const support = supportText(stepEvents[stepEvents.length - 1]);
       if (support) li.appendChild(el('span', ` · ${support}`, 'view-placeholder'));
