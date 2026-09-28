@@ -1,0 +1,490 @@
+/*
+ * vNext headless engine — capability graph, evidence model, projection,
+ * Vietnamese risk priors, deterministic planner (issue #42).
+ *
+ * These tests pin the non-negotiable distinctions from the spec:
+ *   aided success        != independent success
+ *   immediate success    != retention
+ *   same-prompt repeat   != transfer
+ *   modality A evidence  != modality B learned
+ *   population risk      != individual weakness
+ *   replay               == same learner state
+ */
+import assert from 'node:assert/strict';
+import {
+  CAPABILITIES,
+  capabilityById,
+  validateGraph
+} from '../src/vnext/capabilities.js';
+import { makeEvent } from '../src/vnext/evidence.js';
+import {
+  RETENTION_DELAY_MS,
+  projectLearnerState
+} from '../src/vnext/projection.js';
+import { RISK_PRIORS } from '../src/vnext/risk-priors.js';
+import { planNext } from '../src/vnext/planner.js';
+
+const T0 = Date.parse('2026-01-05T09:00:00Z');
+const HOUR = 3600_000;
+const LEARNER = 'learner-test';
+let seq = 0;
+
+function ev(capabilityId, over = {}) {
+  return makeEvent({
+    id: `e${++seq}`,
+    learnerId: LEARNER,
+    capabilityId,
+    taskId: `t.${capabilityId}`,
+    taskRevision: 1,
+    eventType: 'production_attempt',
+    modality: capabilityById(capabilityId).modality,
+    occurredAt: T0 + seq * 1000,
+    context: {
+      missionId: 'm.baseline',
+      practicedOrTransfer: 'practiced',
+      promptFamily: 'p.practiced',
+      partnerType: 'tutor'
+    },
+    attempt: { observed: true, outcome: 'success', response: 'ok', latencyMs: 900 },
+    ...over
+  });
+}
+
+const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES).byCapability.get(id);
+const planFor = (log, opts) => planNext(LEARNER, log, opts);
+
+// ── Graph sanity ─────────────────────────────────────────────
+{
+  const problems = validateGraph(CAPABILITIES);
+  assert.deepEqual(problems, [], `graph must be valid: ${problems.join(' | ')}`);
+  assert.ok(CAPABILITIES.length >= 12, 'spec asks for 12+ capabilities');
+  const modalities = new Set(CAPABILITIES.map((c) => c.modality));
+  for (const m of ['listening', 'spoken_interaction', 'spoken_production', 'reading', 'writing']) {
+    assert.ok(modalities.has(m), `modality covered: ${m}`);
+  }
+  console.log('✓ graph: 12+ capabilities, all modalities, acyclic prerequisites');
+}
+
+// ── 1. Aided success can never become INDEPENDENT ────────────
+{
+  const cap = 'interact.greet';
+  const hinted = stateOf([
+    ev(cap, { eventType: 'exposure', attempt: { observed: true, outcome: null, response: null, latencyMs: null } }),
+    ev(cap, {
+      support: { hint: true, translation: false, transcript: false, modelAnswer: false, repeat: false }
+    })
+  ], cap);
+  assert.equal(hinted.state, 'SUPPORTED', 'hint-aided success is supported work');
+  assert.equal(hinted.milestones.independent, false);
+
+  for (const flag of ['translation', 'transcript', 'modelAnswer']) {
+    const s = stateOf([
+      ev(cap, { support: { hint: false, translation: false, transcript: false, modelAnswer: false, repeat: false, [flag]: true } })
+    ], cap);
+    assert.equal(s.state, 'SUPPORTED', `${flag}-aided success stays SUPPORTED`);
+  }
+
+  // repeat does not hand over the answer, but interact.greet declares
+  // supportAllowed: [] — using a replay still violates its conditions,
+  // so it cannot pass as an unaided independent attempt (see §9g for the
+  // positive repeat_once case).
+  const repeatOnly = stateOf([
+    ev(cap, { support: { repeat: true, repeatCount: 1 } })
+  ], cap);
+  assert.equal(repeatOnly.state, 'SUPPORTED', 'a replayed prompt is support unless the capability allows it');
+
+  // self-reported (unobserved) success cannot prove independence.
+  const selfReported = stateOf([ev(cap, { attempt: { observed: false, outcome: 'success', response: 'x', latencyMs: null } })], cap);
+  assert.equal(selfReported.milestones.independent, false, 'unobserved success is not independent evidence');
+  console.log('✓ aided/self-reported success cannot become INDEPENDENT');
+}
+
+// ── 2. Immediate success can never become RETAINED ───────────
+{
+  const cap = 'speak.say_own_name';
+  const log = [
+    ev(cap, { eventType: 'exposure', attempt: { observed: true, outcome: null, response: null, latencyMs: null } }),
+    ev(cap, { occurredAt: T0 + HOUR }),
+    ev(cap, { occurredAt: T0 + 2 * HOUR }) // two successes, one hour apart
+  ];
+  const s = stateOf(log, cap);
+  assert.equal(s.milestones.independent, true);
+  assert.equal(s.milestones.retained, false, 'same-session success is not retention');
+  assert.equal(s.state, 'INDEPENDENT');
+
+  const retained = stateOf([
+    ...log,
+    ev(cap, { eventType: 'delayed_retrieval', occurredAt: T0 + HOUR + RETENTION_DELAY_MS })
+  ], cap);
+  assert.equal(retained.milestones.retained, true, 'success after the delay earns RETAINED');
+  assert.equal(retained.state, 'RETAINED');
+  console.log('✓ immediate success cannot become RETAINED; delayed success can');
+}
+
+// ── 3. Same-prompt repetition is not TRANSFERRED ─────────────
+{
+  const cap = 'interact.greet';
+  // Flagged 'transfer' but the SAME promptFamily as the practiced one —
+  // replaying the rehearsed prompt must not count as transfer.
+  const s = stateOf([
+    ev(cap),
+    ev(cap, { occurredAt: T0 + 50 * HOUR }),
+    ev(cap, {
+      eventType: 'transfer_attempt',
+      occurredAt: T0 + 52 * HOUR,
+      context: { missionId: 'm.cafe', practicedOrTransfer: 'transfer', promptFamily: 'p.practiced', partnerType: 'stranger' }
+    })
+  ], cap);
+  assert.equal(s.milestones.retained, true);
+  assert.equal(s.milestones.transferred, false, 'replaying the practiced prompt is not transfer');
+  assert.equal(s.state, 'RETAINED');
+
+  const transferred = stateOf([
+    ev(cap),
+    ev(cap, { occurredAt: T0 + 50 * HOUR }), // retained first
+    ev(cap, {
+      eventType: 'transfer_attempt',
+      occurredAt: T0 + 52 * HOUR,
+      context: { missionId: 'm.cafe', practicedOrTransfer: 'transfer', promptFamily: 'p.novel', partnerType: 'stranger' }
+    })
+  ], cap);
+  assert.equal(transferred.milestones.transferred, true, 'novel context/prompt is real transfer evidence');
+  assert.equal(transferred.state, 'TRANSFERRED');
+  console.log('✓ same-prompt repeat is not TRANSFERRED; changed context is');
+}
+
+// ── 4. One modality cannot mark another as learned ───────────
+{
+  // A spoken-production event filed against a listening capability gets
+  // zero credit — the modality must match the capability's declared one.
+  const wrongModality = stateOf([
+    ev('listen.identity_question_basic', { modality: 'spoken_production' })
+  ], 'listen.identity_question_basic');
+  assert.equal(wrongModality.state, 'NOT_SEEN', 'a speaking event cannot teach listening');
+
+  // Evidence is per-capability: learning to say your name does not make
+  // you able to hear the question.
+  const log = [
+    ev('speak.say_own_name', { eventType: 'exposure', attempt: { observed: true, outcome: null, response: null, latencyMs: null } }),
+    ev('speak.say_own_name'),
+    ev('speak.say_own_name', { occurredAt: T0 + 30 * HOUR })
+  ];
+  const projection = projectLearnerState(LEARNER, log, CAPABILITIES);
+  assert.equal(projection.byCapability.get('speak.say_own_name').state, 'RETAINED');
+  assert.equal(projection.byCapability.get('listen.identity_question_basic').state, 'NOT_SEEN',
+    'producing the answer never marks the listening prerequisite known');
+  console.log('✓ modality isolation: speaking evidence cannot mark listening learned');
+}
+
+// ── 5. Population priors cannot mutate learner state ─────────
+{
+  const empty = projectLearnerState(LEARNER, [], CAPABILITIES);
+  const before = empty.byCapability.get('interact.ask_name');
+  assert.equal(before.state, 'NOT_SEEN');
+  assert.deepEqual(before.milestones.independent, false);
+
+  // Priors are diagnostic hints: they may schedule probes via the planner
+  // but a fresh learner's evidence state is untouched by them.
+  for (const prior of RISK_PRIORS) {
+    assert.equal(prior.learnerStateEffect, 'none_without_observed_evidence');
+  }
+  const plan = planFor([], { capabilities: CAPABILITIES, riskPriors: RISK_PRIORS, now: T0 });
+  assert.notEqual(plan.kind, 'remediate', 'no remediation without evidence of failure');
+  assert.ok(['diagnostic_probe', 'expose'].includes(plan.kind), `fresh learner gets input or a probe, got ${plan.kind}`);
+  console.log('✓ risk priors schedule diagnostics only — never mark weakness');
+}
+
+// ── 6. Replay determinism ────────────────────────────────────
+{
+  const cap = 'interact.greet';
+  const log = [
+    ev(cap, { eventType: 'exposure', attempt: { observed: true, outcome: null, response: null, latencyMs: null } }),
+    ev(cap, { support: { hint: true, translation: false, transcript: false, modelAnswer: false, repeat: false } }),
+    ev(cap),
+    ev(cap, { eventType: 'delayed_retrieval', occurredAt: T0 + 40 * HOUR }),
+    ev(cap, {
+      eventType: 'transfer_attempt',
+      occurredAt: T0 + 60 * HOUR,
+      context: { missionId: 'm2', practicedOrTransfer: 'transfer', promptFamily: 'p.novel', partnerType: 'stranger' }
+    })
+  ];
+  const a = projectLearnerState(LEARNER, log, CAPABILITIES);
+  const b = projectLearnerState(LEARNER, log, CAPABILITIES);
+  assert.deepEqual(a, b, 'same log → identical projection');
+  // A prefix replay reproduces the intermediate state exactly.
+  const prefix = projectLearnerState(LEARNER, log.slice(0, 3), CAPABILITIES);
+  assert.equal(prefix.byCapability.get(cap).state, 'INDEPENDENT');
+  const full = projectLearnerState(LEARNER, [...log.slice(0, 3), ...log.slice(3)], CAPABILITIES);
+  assert.equal(full.byCapability.get(cap).state, 'TRANSFERRED');
+  console.log('✓ replay is deterministic; prefixes reproduce intermediate states');
+}
+
+// ── 7. Vertical slice: baseline fail → input → retrieval → supported
+//        interaction → feedback → retry → independent → delayed →
+//        changed-context transfer — planner routes every step ──
+{
+  const cap = 'interact.greet';
+  const pre = 'listen.greeting_basic';
+  const opts = { capabilities: CAPABILITIES, riskPriors: RISK_PRIORS, now: T0 };
+  const log = [];
+  const at = (offsetMs) => T0 + offsetMs;
+
+  // Baseline probe: cold attempt fails. A failed baseline is diagnostic —
+  // the planner must route to TEACHING (the unmet prerequisite), not to
+  // retrying something that was never taught.
+  log.push(ev(cap, {
+    eventType: 'interaction_turn',
+    occurredAt: at(0),
+    attempt: { observed: true, outcome: 'fail', response: '...', latencyMs: 4000 }
+  }));
+  assert.equal(stateOf(log, cap).state, 'EXPOSED', 'a baseline fail still means the capability was encountered');
+  let plan = planFor(log, opts);
+  assert.equal(plan.capabilityId, pre, 'planner walks to the unmet prerequisite');
+  assert.ok(['diagnostic_probe', 'expose'].includes(plan.kind), `teach the prereq, got ${plan.kind}`);
+  assert.equal(stateOf(log, pre).state, 'NOT_SEEN');
+
+  // Meaningful input on the prerequisite.
+  log.push(ev(pre, {
+    eventType: 'exposure',
+    occurredAt: at(1_000),
+    attempt: { observed: true, outcome: null, response: null, latencyMs: null }
+  }));
+  assert.equal(stateOf(log, pre).state, 'EXPOSED');
+  assert.equal(planFor(log, opts).kind, 'resume', 'an open encounter resumes before anything else');
+
+  // Guided retrieval with a hint — supported, not independent.
+  log.push(ev(pre, {
+    eventType: 'recall_attempt',
+    occurredAt: at(2_000),
+    support: { hint: true, translation: false, transcript: false, modelAnswer: false, repeat: false }
+  }));
+  assert.equal(stateOf(log, pre).state, 'SUPPORTED');
+  assert.equal(planFor(log, opts).kind, 'independent_attempt', 'supported work earns an unaided run');
+
+  // Unaided recall — prerequisite is now INDEPENDENT.
+  log.push(ev(pre, { eventType: 'recall_attempt', occurredAt: at(3_000) }));
+  assert.equal(stateOf(log, pre).state, 'INDEPENDENT');
+  plan = planFor(log, opts);
+  assert.equal(plan.capabilityId, cap, 'prereq learned → target capability becomes eligible');
+  assert.ok(['diagnostic_probe', 'expose'].includes(plan.kind), `introduce the target, got ${plan.kind}`);
+
+  // Supported interaction on the target capability.
+  log.push(ev(cap, {
+    eventType: 'interaction_turn',
+    occurredAt: at(4_000),
+    support: { hint: false, translation: false, transcript: false, modelAnswer: true, repeat: false }
+  }));
+  assert.equal(stateOf(log, cap).state, 'SUPPORTED', 'model-aided turn is supported work');
+  assert.equal(planFor(log, opts).capabilityId, cap);
+
+  // Feedback lands as its own event; the retry is unaided and clean.
+  log.push(ev(cap, {
+    eventType: 'feedback',
+    occurredAt: at(5_000),
+    attempt: { observed: true, outcome: null, response: null, latencyMs: null },
+    feedback: { given: true, target: 'stress on greeting' }
+  }));
+  log.push(ev(cap, { eventType: 'interaction_turn', occurredAt: at(6_000) }));
+  assert.equal(stateOf(log, cap).state, 'INDEPENDENT', 'unaided retry earns INDEPENDENT');
+
+  // Once the retention window opens, the delayed check is the next work.
+  // Earliest-due wins: the prerequisite learned first is due first.
+  plan = planFor(log, { ...opts, now: at(6_000) + RETENTION_DELAY_MS });
+  assert.equal(plan.kind, 'delayed_retrieval', 'after independence the next work is a delayed check');
+  assert.equal(plan.capabilityId, pre, 'the earlier-learned capability is due first');
+
+  // Both due capabilities re-test and survive the delay.
+  log.push(ev(pre, { eventType: 'delayed_retrieval', occurredAt: at(6_000) + RETENTION_DELAY_MS }));
+  log.push(ev(cap, {
+    eventType: 'delayed_retrieval',
+    occurredAt: at(6_000) + RETENTION_DELAY_MS + 1000
+  }));
+  assert.equal(stateOf(log, cap).state, 'RETAINED', 'survived the delay');
+  assert.equal(stateOf(log, pre).state, 'RETAINED');
+
+  // Retained abilities get sent into changed contexts — pre first.
+  plan = planFor(log, { ...opts, now: at(6_000) + RETENTION_DELAY_MS + HOUR });
+  assert.equal(plan.kind, 'transfer', 'retained ability is sent into a changed context');
+  assert.equal(plan.capabilityId, pre);
+
+  log.push(ev(pre, {
+    eventType: 'transfer_attempt',
+    occurredAt: at(6_000) + RETENTION_DELAY_MS + HOUR,
+    context: { missionId: 'm.street', practicedOrTransfer: 'transfer', promptFamily: 'p.street', partnerType: 'stranger' }
+  }));
+  assert.equal(stateOf(log, pre).state, 'TRANSFERRED');
+
+  // Changed-context success for the target: new mission, new prompt
+  // family, a stranger — ability used outside the practiced prompt.
+  plan = planFor(log, { ...opts, now: at(6_000) + RETENTION_DELAY_MS + 2 * HOUR });
+  assert.equal(plan.kind, 'transfer');
+  assert.equal(plan.capabilityId, cap);
+  log.push(ev(cap, {
+    eventType: 'transfer_attempt',
+    occurredAt: at(6_000) + RETENTION_DELAY_MS + 2 * HOUR,
+    context: { missionId: 'm.street', practicedOrTransfer: 'transfer', promptFamily: 'p.street', partnerType: 'stranger' }
+  }));
+  assert.equal(stateOf(log, cap).state, 'TRANSFERRED', 'ability used outside the practiced prompt');
+
+  // A second novel context widens transfer — and TRANSFERRED is the v0
+  // ceiling. FLUENT is reserved: hesitation + intelligibility + repairs +
+  // stability need a dedicated contract, not a latency threshold.
+  log.push(ev(cap, {
+    eventType: 'transfer_attempt',
+    occurredAt: at(6_000) + RETENTION_DELAY_MS + 3 * HOUR,
+    context: { missionId: 'm.shop', practicedOrTransfer: 'transfer', promptFamily: 'p.shop', partnerType: 'clerk' }
+  }));
+  assert.equal(stateOf(log, cap).state, 'TRANSFERRED', 'transfer count alone never promotes to FLUENT');
+  assert.equal(stateOf(log, pre).state, 'TRANSFERRED', 'per-capability granularity — pre lacks a second context');
+  console.log('✓ vertical slice: baseline fail → input → retrieval → supported → feedback → retry → INDEPENDENT → RETAINED → TRANSFERRED');
+}
+
+// ── 8. Planner gates introductions on prerequisites ──────────
+{
+  // interact.ask_name requires listen.identity_question_basic +
+  // speak.say_own_name — with a fresh learner the planner must walk the
+  // prereq first, never jump to the unmet capability.
+  const log = [
+    ev('listen.identity_question_basic', { eventType: 'exposure', attempt: { observed: true, outcome: null, response: null, latencyMs: null } }),
+    ev('listen.identity_question_basic')
+  ];
+  const plan = planFor(log, { capabilities: CAPABILITIES, riskPriors: RISK_PRIORS, now: T0 + HOUR });
+  assert.notEqual(plan.capabilityId, 'interact.ask_name', 'unmet prerequisites block introduction');
+  assert.ok(
+    ['delayed_retrieval', 'transfer', 'expose', 'diagnostic_probe', 'independent_attempt', 'resume', 'retry'].includes(plan.kind),
+    `planner emits a known action kind, got ${plan.kind}`
+  );
+  console.log('✓ planner: prerequisites gate introductions');
+}
+
+// ── 9. Architect-review invariants (PR #43 blockers) ──────────
+{
+  // a. A non-attempt event may carry an outcome field — it is context,
+  //    not performance, and must never advance state.
+  for (const type of ['exposure', 'support_use', 'feedback']) {
+    const s = stateOf([
+      ev('interact.greet', { eventType: type })
+    ], 'interact.greet');
+    assert.equal(s.state, 'EXPOSED', `${type} with outcome:success is contact, not INDEPENDENT`);
+    assert.equal(s.milestones.independent, false);
+  }
+
+  // b. Canonical order is (occurredAt, id) — arrival order of the same
+  //    event set can never change the projection or the plan.
+  const eFail = ev('interact.greet', {
+    id: 'zz-fail',
+    occurredAt: T0,
+    eventType: 'interaction_turn',
+    attempt: { observed: true, outcome: 'fail', response: 'x', latencyMs: 100 }
+  });
+  const eOk = ev('interact.greet', { id: 'aa-ok', occurredAt: T0, eventType: 'interaction_turn' });
+  const optsB = { capabilities: CAPABILITIES, riskPriors: RISK_PRIORS, now: T0 };
+  assert.deepEqual(
+    projectLearnerState(LEARNER, [eFail, eOk], CAPABILITIES),
+    projectLearnerState(LEARNER, [eOk, eFail], CAPABILITIES),
+    'same-timestamp events replay identically regardless of arrival order'
+  );
+  assert.deepEqual(planFor([eFail, eOk], optsB), planFor([eOk, eFail], optsB));
+
+  // c. A projection is always scoped to one learner — foreign events are
+  //    dropped, never merged.
+  const mixed = [
+    ev('interact.greet'),
+    ev('interact.greet', { learnerId: 'learner-other', eventType: 'delayed_retrieval', occurredAt: T0 + 50 * HOUR })
+  ];
+  const mine = projectLearnerState(LEARNER, mixed, CAPABILITIES);
+  assert.equal(mine.generatedFrom, 1, 'foreign learner events do not enter the projection');
+  assert.equal(mine.byCapability.get('interact.greet').state, 'INDEPENDENT',
+    "another learner's delayed success cannot inflate my retention");
+
+  // d. A failed due check is remediation, not another due check — the
+  //    planner must not reschedule delayed_retrieval forever.
+  const failedCheck = [
+    ev('interact.greet'),
+    ev('interact.greet', {
+      eventType: 'delayed_retrieval',
+      occurredAt: T0 + 50 * HOUR,
+      attempt: { observed: true, outcome: 'fail', response: 'x', latencyMs: 1200 }
+    })
+  ];
+  const afterFail = planFor(failedCheck, { capabilities: CAPABILITIES, riskPriors: RISK_PRIORS, now: T0 + 60 * HOUR });
+  assert.equal(afterFail.kind, 'retry', 'failed delayed retrieval routes to remediation');
+  assert.equal(afterFail.capabilityId, 'interact.greet');
+
+  // e. FLUENT is reserved — v0 has no fluency rule. Even two novel
+  //    transfers answered faster than the independent baseline cannot
+  //    auto-promote: "responded quicker" is not hesitation +
+  //    intelligibility + repairs + stability evidence.
+  const fastTransfers = [
+    ev('interact.greet'),
+    ev('interact.greet', { occurredAt: T0 + 50 * HOUR }),
+    ev('interact.greet', {
+      eventType: 'transfer_attempt',
+      occurredAt: T0 + 52 * HOUR,
+      attempt: { observed: true, outcome: 'success', response: 'ok', latencyMs: 100 },
+      context: { missionId: 'm1', practicedOrTransfer: 'transfer', promptFamily: 'p.new1', partnerType: 'stranger' }
+    }),
+    ev('interact.greet', {
+      eventType: 'transfer_attempt',
+      occurredAt: T0 + 54 * HOUR,
+      attempt: { observed: true, outcome: 'success', response: 'ok', latencyMs: 80 },
+      context: { missionId: 'm2', practicedOrTransfer: 'transfer', promptFamily: 'p.new2', partnerType: 'clerk' }
+    })
+  ];
+  const sFast = stateOf(fastTransfers, 'interact.greet');
+  assert.equal(sFast.state, 'TRANSFERRED', 'no automatic path into FLUENT exists');
+  assert.equal(sFast.milestones.fluent, false);
+  assert.deepEqual(sFast.transferPromptFamilies, ['p.new1', 'p.new2'], 'the transfers are still recorded');
+
+  // f. A family rehearsed WITH support is still rehearsed — a later
+  //    'transfer' attempt on it cannot be re-sold as a novel context.
+  const aidedPractice = [
+    ev('interact.greet', {
+      support: { hint: true, translation: false, transcript: false, modelAnswer: false, repeat: false },
+      context: { missionId: 'm.baseline', practicedOrTransfer: 'practiced', promptFamily: 'p.aided', partnerType: 'tutor' }
+    }),
+    ev('interact.greet'),
+    ev('interact.greet', {
+      eventType: 'transfer_attempt',
+      occurredAt: T0 + 50 * HOUR,
+      context: { missionId: 'm.cafe', practicedOrTransfer: 'transfer', promptFamily: 'p.aided', partnerType: 'stranger' }
+    })
+  ];
+  const sAided = stateOf(aidedPractice, 'interact.greet');
+  assert.equal(sAided.milestones.transferred, false,
+    'a support-rehearsed prompt family is not novel transfer context');
+  console.log('✓ review invariants: attempt-only credit, order-free replay, learner isolation, no due-loop, honest fluency, practiced ≠ novel');
+}
+
+// ── 10. Support conditions are enforced, not decorative ──────
+{
+  // g. interact.greet allows no support at all — a replayed prompt is a
+  //    condition violation, so the success can only reach SUPPORTED.
+  const violated = stateOf([
+    ev('interact.greet', { support: { repeat: true, repeatCount: 1 } })
+  ], 'interact.greet');
+  assert.equal(violated.state, 'SUPPORTED', 'repeat on a no-support capability is not independent evidence');
+
+  // h. A capability that declares repeat_once accepts ONE recorded replay
+  //    — and only with provenance. A bare repeat flag or a count of two
+  //    fails the declared condition.
+  const repeatOnceCap = {
+    ...capabilityById('interact.greet'),
+    id: 'test.repeat_once_allowed',
+    prerequisites: [],
+    conditions: { partnerCooperative: true, topicFamiliar: true, speechRate: 'slow_clear', supportAllowed: ['repeat_once'] }
+  };
+  const projR = (log) => projectLearnerState(LEARNER, log, [repeatOnceCap]).byCapability.get('test.repeat_once_allowed');
+  const evR = (over) => ev('interact.greet', { ...over, capabilityId: 'test.repeat_once_allowed' });
+
+  assert.equal(projR([evR({})]).state, 'INDEPENDENT', 'clean unaided success still earns INDEPENDENT');
+  assert.equal(projR([evR({ support: { repeat: true, repeatCount: 1 } })]).state, 'INDEPENDENT',
+    'one recorded replay satisfies repeat_once');
+  assert.equal(projR([evR({ support: { repeat: true } })]).state, 'SUPPORTED',
+    'a bare repeat flag cannot prove "once" — provenance required');
+  assert.equal(projR([evR({ support: { repeat: true, repeatCount: 2 } })]).state, 'SUPPORTED',
+    'two replays exceed repeat_once');
+  console.log('✓ support conditions enforced: violated conditions cap at SUPPORTED; repeat_once needs counted provenance');
+}
+
+console.log('vNext headless engine: all checks passed');
