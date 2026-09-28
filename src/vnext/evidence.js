@@ -29,15 +29,51 @@ const defaultSupport = () => ({
   translation: false,
   transcript: false,
   modelAnswer: false,
-  repeat: false
+  repeat: false,
+  // Provenance for how many times the prompt was replayed. `repeat` alone
+  // cannot distinguish one replay from many — conditions like
+  // 'repeat_once' are only satisfiable when this count is recorded.
+  repeatCount: null
 });
 
 /* Hints, model answers, translations and transcripts hand the learner
  * the answer — success under them is SUPPORTED work, never INDEPENDENT.
- * `repeat` only replays the prompt: it does not supply the answer. */
+ * `repeat` only replays the prompt: it does not supply the answer, but
+ * it is still support — whether it is allowed is the capability's
+ * conditions' call, not this function's. */
 export function answerBearing(support) {
   if (!support) return false;
   return Boolean(support.hint || support.modelAnswer || support.translation || support.transcript);
+}
+
+/* Conditions check: an independent attempt must run under the
+ * capability's declared conditions. `conditions.supportAllowed` lists
+ * which non-answer-bearing aids are permitted:
+ *   []              — no support at all; any flag used disqualifies
+ *   'repeat'        — prompt replays allowed, uncounted
+ *   'repeat_once'   — at most one replay, and the event must prove it
+ *                     (repeatCount === 1); a bare `repeat:true` cannot
+ *                     distinguish once from many, so it fails here
+ * Answer-bearing aids are handled separately — listing them in
+ * supportAllowed can never launder a hinted answer into independence. */
+export function conditionsViolated(support, capability) {
+  if (!support) return false;
+  const allowed = capability?.conditions?.supportAllowed ?? [];
+  const kinds = [];
+  if (support.hint) kinds.push('hint');
+  if (support.translation) kinds.push('translation');
+  if (support.transcript) kinds.push('transcript');
+  if (support.modelAnswer) kinds.push('modelAnswer');
+  if (support.repeat || (support.repeatCount ?? 0) > 0) kinds.push('repeat');
+  for (const kind of kinds) {
+    if (kind === 'repeat') {
+      const onceOk = allowed.includes('repeat_once') && support.repeatCount === 1;
+      if (!onceOk && !allowed.includes('repeat')) return true;
+    } else if (!allowed.includes(kind)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export function validateEvent(e) {
@@ -54,6 +90,9 @@ export function validateEvent(e) {
   }
   if (e.context?.practicedOrTransfer != null && !CONTEXT_KINDS.includes(e.context.practicedOrTransfer)) {
     problems.push(`unknown practicedOrTransfer ${e.context.practicedOrTransfer}`);
+  }
+  if (e.support?.repeatCount != null && (!Number.isInteger(e.support.repeatCount) || e.support.repeatCount < 0)) {
+    problems.push('repeatCount must be a non-negative integer or null');
   }
   if (!Number.isFinite(e.occurredAt)) problems.push('occurredAt must be a timestamp');
   return problems;

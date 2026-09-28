@@ -84,11 +84,14 @@ const planFor = (log, opts) => planNext(LEARNER, log, opts);
     assert.equal(s.state, 'SUPPORTED', `${flag}-aided success stays SUPPORTED`);
   }
 
-  // repeat-only support does not supply the answer — unaided in spirit.
+  // repeat does not hand over the answer, but interact.greet declares
+  // supportAllowed: [] — using a replay still violates its conditions,
+  // so it cannot pass as an unaided independent attempt (see §9g for the
+  // positive repeat_once case).
   const repeatOnly = stateOf([
-    ev(cap, { support: { hint: false, translation: false, transcript: false, modelAnswer: false, repeat: true } })
+    ev(cap, { support: { repeat: true, repeatCount: 1 } })
   ], cap);
-  assert.equal(repeatOnly.state, 'INDEPENDENT', 'a repeated prompt is not answer-bearing support');
+  assert.equal(repeatOnly.state, 'SUPPORTED', 'a replayed prompt is support unless the capability allows it');
 
   // self-reported (unobserved) success cannot prove independence.
   const selfReported = stateOf([ev(cap, { attempt: { observed: false, outcome: 'success', response: 'x', latencyMs: null } })], cap);
@@ -319,22 +322,21 @@ const planFor = (log, opts) => planNext(LEARNER, log, opts);
   log.push(ev(cap, {
     eventType: 'transfer_attempt',
     occurredAt: at(6_000) + RETENTION_DELAY_MS + 2 * HOUR,
-    attempt: { observed: true, outcome: 'success', response: 'ok', latencyMs: 700 },
     context: { missionId: 'm.street', practicedOrTransfer: 'transfer', promptFamily: 'p.street', partnerType: 'stranger' }
   }));
   assert.equal(stateOf(log, cap).state, 'TRANSFERRED', 'ability used outside the practiced prompt');
 
-  // A second novel context with measurably lower hesitation than the
-  // 900ms independent baseline (≤ FLUENCY_LATENCY_RATIO) earns FLUENT.
+  // A second novel context widens transfer — and TRANSFERRED is the v0
+  // ceiling. FLUENT is reserved: hesitation + intelligibility + repairs +
+  // stability need a dedicated contract, not a latency threshold.
   log.push(ev(cap, {
     eventType: 'transfer_attempt',
     occurredAt: at(6_000) + RETENTION_DELAY_MS + 3 * HOUR,
-    attempt: { observed: true, outcome: 'success', response: 'ok', latencyMs: 650 },
     context: { missionId: 'm.shop', practicedOrTransfer: 'transfer', promptFamily: 'p.shop', partnerType: 'clerk' }
   }));
-  assert.equal(stateOf(log, cap).state, 'FLUENT', 'two novel transfers, both faster than baseline, earn fluency');
+  assert.equal(stateOf(log, cap).state, 'TRANSFERRED', 'transfer count alone never promotes to FLUENT');
   assert.equal(stateOf(log, pre).state, 'TRANSFERRED', 'per-capability granularity — pre lacks a second context');
-  console.log('✓ vertical slice: baseline fail → input → retrieval → supported → feedback → retry → INDEPENDENT → RETAINED → TRANSFERRED → FLUENT');
+  console.log('✓ vertical slice: baseline fail → input → retrieval → supported → feedback → retry → INDEPENDENT → RETAINED → TRANSFERRED');
 }
 
 // ── 8. Planner gates introductions on prerequisites ──────────
@@ -409,27 +411,30 @@ const planFor = (log, opts) => planNext(LEARNER, log, opts);
   assert.equal(afterFail.kind, 'retry', 'failed delayed retrieval routes to remediation');
   assert.equal(afterFail.capabilityId, 'interact.greet');
 
-  // e. Two transfer wins alone prove breadth, not fluency — FLUENT needs
-  //    measurably lower hesitation than the independent baseline (900ms,
-  //    ratio 0.8 → qualifying ceiling 720ms).
-  const slowTransfers = [
+  // e. FLUENT is reserved — v0 has no fluency rule. Even two novel
+  //    transfers answered faster than the independent baseline cannot
+  //    auto-promote: "responded quicker" is not hesitation +
+  //    intelligibility + repairs + stability evidence.
+  const fastTransfers = [
     ev('interact.greet'),
     ev('interact.greet', { occurredAt: T0 + 50 * HOUR }),
     ev('interact.greet', {
       eventType: 'transfer_attempt',
       occurredAt: T0 + 52 * HOUR,
-      attempt: { observed: true, outcome: 'success', response: 'ok', latencyMs: 5000 },
+      attempt: { observed: true, outcome: 'success', response: 'ok', latencyMs: 100 },
       context: { missionId: 'm1', practicedOrTransfer: 'transfer', promptFamily: 'p.new1', partnerType: 'stranger' }
     }),
     ev('interact.greet', {
       eventType: 'transfer_attempt',
       occurredAt: T0 + 54 * HOUR,
-      attempt: { observed: true, outcome: 'success', response: 'ok', latencyMs: 6000 },
+      attempt: { observed: true, outcome: 'success', response: 'ok', latencyMs: 80 },
       context: { missionId: 'm2', practicedOrTransfer: 'transfer', promptFamily: 'p.new2', partnerType: 'clerk' }
     })
   ];
-  assert.equal(stateOf(slowTransfers, 'interact.greet').state, 'TRANSFERRED',
-    'slow transfers earn TRANSFERRED — hesitating harder than baseline is not fluent');
+  const sFast = stateOf(fastTransfers, 'interact.greet');
+  assert.equal(sFast.state, 'TRANSFERRED', 'no automatic path into FLUENT exists');
+  assert.equal(sFast.milestones.fluent, false);
+  assert.deepEqual(sFast.transferPromptFamilies, ['p.new1', 'p.new2'], 'the transfers are still recorded');
 
   // f. A family rehearsed WITH support is still rehearsed — a later
   //    'transfer' attempt on it cannot be re-sold as a novel context.
@@ -449,6 +454,37 @@ const planFor = (log, opts) => planNext(LEARNER, log, opts);
   assert.equal(sAided.milestones.transferred, false,
     'a support-rehearsed prompt family is not novel transfer context');
   console.log('✓ review invariants: attempt-only credit, order-free replay, learner isolation, no due-loop, honest fluency, practiced ≠ novel');
+}
+
+// ── 10. Support conditions are enforced, not decorative ──────
+{
+  // g. interact.greet allows no support at all — a replayed prompt is a
+  //    condition violation, so the success can only reach SUPPORTED.
+  const violated = stateOf([
+    ev('interact.greet', { support: { repeat: true, repeatCount: 1 } })
+  ], 'interact.greet');
+  assert.equal(violated.state, 'SUPPORTED', 'repeat on a no-support capability is not independent evidence');
+
+  // h. A capability that declares repeat_once accepts ONE recorded replay
+  //    — and only with provenance. A bare repeat flag or a count of two
+  //    fails the declared condition.
+  const repeatOnceCap = {
+    ...capabilityById('interact.greet'),
+    id: 'test.repeat_once_allowed',
+    prerequisites: [],
+    conditions: { partnerCooperative: true, topicFamiliar: true, speechRate: 'slow_clear', supportAllowed: ['repeat_once'] }
+  };
+  const projR = (log) => projectLearnerState(LEARNER, log, [repeatOnceCap]).byCapability.get('test.repeat_once_allowed');
+  const evR = (over) => ev('interact.greet', { ...over, capabilityId: 'test.repeat_once_allowed' });
+
+  assert.equal(projR([evR({})]).state, 'INDEPENDENT', 'clean unaided success still earns INDEPENDENT');
+  assert.equal(projR([evR({ support: { repeat: true, repeatCount: 1 } })]).state, 'INDEPENDENT',
+    'one recorded replay satisfies repeat_once');
+  assert.equal(projR([evR({ support: { repeat: true } })]).state, 'SUPPORTED',
+    'a bare repeat flag cannot prove "once" — provenance required');
+  assert.equal(projR([evR({ support: { repeat: true, repeatCount: 2 } })]).state, 'SUPPORTED',
+    'two replays exceed repeat_once');
+  console.log('✓ support conditions enforced: violated conditions cap at SUPPORTED; repeat_once needs counted provenance');
 }
 
 console.log('vNext headless engine: all checks passed');

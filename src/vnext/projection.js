@@ -15,9 +15,12 @@
  *   - TRANSFERRED = an unaided observed success in a 'transfer' context
  *     whose promptFamily was never rehearsed — a family practiced WITH
  *     support is still rehearsed and cannot pass as novel;
- *   - FLUENT = transfer succeeded in ≥2 novel families AND ≥2 of those
- *     transfer successes were materially faster than the learner's first
- *     independent baseline (hesitation must be measured, not assumed).
+ *   - FLUENT — RESERVED, unreachable in v0. The doctrine requires
+ *     hesitation + intelligibility + successful turns + repairs +
+ *     stability; no single field measures that yet and "responded
+ *     faster" is not fluency. The milestone and state exist so the enum
+ *     is stable, but nothing promotes into it until a dedicated
+ *     fluency-evidence contract is calibrated.
  *
  * Hard boundaries:
  *   - only ATTEMPT_TYPES may advance state — an exposure/feedback/support
@@ -28,7 +31,7 @@
  *   - canonical order is (occurredAt, id) — arrival order can never
  *     change the projection; replay of the same event set is identical.
  */
-import { answerBearing } from './evidence.js';
+import { answerBearing, conditionsViolated } from './evidence.js';
 
 export const CAPABILITY_STATES = [
   'NOT_SEEN',
@@ -44,12 +47,6 @@ export const CAPABILITY_STATES = [
 // the day we calibrate it, every test and every learner sees the same rule.
 export const RETENTION_DELAY_MS = 24 * 60 * 60 * 1000;
 
-// Fluency = transfer-capable performance with measurably lower
-// hesitation. v0's measurable proxy: a transfer success counts toward
-// fluency only when its latency is ≤ this ratio of the learner's first
-// independent-success latency. No latency data → ceiling is TRANSFERRED.
-export const FLUENCY_LATENCY_RATIO = 0.8;
-
 const ATTEMPT_TYPES = new Set([
   'recognition_attempt',
   'recall_attempt',
@@ -63,9 +60,13 @@ const ATTEMPT_TYPES = new Set([
 
 const isSuccess = (e) => e.attempt?.outcome === 'success';
 // Observed, unaided success — the only evidence that can carry a
-// capability past SUPPORTED.
-const isIndependent = (e) =>
-  isSuccess(e) && e.attempt?.observed === true && !answerBearing(e.support);
+// capability past SUPPORTED. "Unaided" means no answer-bearing support
+// AND every support actually used was permitted by the capability's
+// declared conditions — an attempt that violates its own conditions is
+// not valid evidence of independence.
+const isIndependent = (e, cap) =>
+  isSuccess(e) && e.attempt?.observed === true && !answerBearing(e.support) &&
+  !conditionsViolated(e.support, cap);
 
 function emptyCapability() {
   return {
@@ -81,11 +82,9 @@ function emptyCapability() {
     lastEventAt: null,
     lastAttemptOutcome: null,
     firstIndependentAt: null,
-    firstIndependentLatencyMs: null,
     lastIndependentSuccessAt: null,
     rehearsedPromptFamilies: [],
-    transferPromptFamilies: [],
-    transferLatencies: []
+    transferPromptFamilies: []
   };
 }
 
@@ -136,7 +135,7 @@ export function projectLearnerState(learnerId, events, capabilities, { retention
     if (!ATTEMPT_TYPES.has(e.eventType) || e.attempt?.outcome == null) continue;
     slot.lastAttemptOutcome = e.attempt.outcome;
     if (!isSuccess(e)) continue;
-    if (!isIndependent(e)) {
+    if (!isIndependent(e, cap)) {
       slot.milestones.supported = true;
       continue;
     }
@@ -144,7 +143,6 @@ export function projectLearnerState(learnerId, events, capabilities, { retention
     slot.milestones.independent = true;
     if (slot.firstIndependentAt == null) {
       slot.firstIndependentAt = e.occurredAt;
-      slot.firstIndependentLatencyMs = e.attempt.latencyMs;
     }
     slot.lastIndependentSuccessAt = e.occurredAt;
     if (e.occurredAt - slot.firstIndependentAt >= retentionDelayMs) {
@@ -156,17 +154,8 @@ export function projectLearnerState(learnerId, events, capabilities, { retention
       const novel = family && !slot.rehearsedPromptFamilies.includes(family);
       if (novel && !slot.transferPromptFamilies.includes(family)) {
         slot.transferPromptFamilies.push(family);
-        slot.transferLatencies.push(e.attempt.latencyMs ?? null);
       }
       if (slot.transferPromptFamilies.length >= 1) slot.milestones.transferred = true;
-    }
-
-    const baseline = slot.firstIndependentLatencyMs;
-    if (!slot.milestones.fluent && slot.transferPromptFamilies.length >= 2 && baseline != null) {
-      const fastTransfers = slot.transferLatencies.filter(
-        (l) => l != null && l <= baseline * FLUENCY_LATENCY_RATIO
-      ).length;
-      if (fastTransfers >= 2) slot.milestones.fluent = true;
     }
   }
 
