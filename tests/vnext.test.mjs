@@ -17,6 +17,7 @@ import {
   validateGraph
 } from '../src/vnext/capabilities.js';
 import { makeEvent } from '../src/vnext/evidence.js';
+import { EVENT_TYPES_FOR_PURPOSE, effectiveAllowedSupport } from '../src/vnext/contracts.js';
 import {
   RETENTION_DELAY_MS,
   projectLearnerState
@@ -29,15 +30,31 @@ const HOUR = 3600_000;
 const LEARNER = 'learner-test';
 let seq = 0;
 
+/* The projection only credits events VERIFIED against the registered
+ * task registry — test events must look exactly like binder output.
+ * ev() therefore maintains a synthetic registry: every attempt event
+ * registers (or reuses) a TaskContract matching the semantics it
+ * claims, and carries the same binding the binder would stamp.
+ * effectiveSupportAllowed mirrors the capability's own conditions —
+ * these synthetic tasks do not narrow policy. */
+const PURPOSE_FOR_TYPE = {};
+for (const [purpose, types] of Object.entries(EVENT_TYPES_FOR_PURPOSE)) {
+  for (const t of types) PURPOSE_FOR_TYPE[t] ??= purpose;
+}
+const FAMILY_FOR_CONTEXT = { practiced: 'practiced', transfer: 'fresh_transfer', assessment: 'fresh_assessment' };
+const TEST_CAPS = new Map(CAPABILITIES.map((c) => [c.id, c]));
+const TEST_TASKS = new Map();
+
 function ev(capabilityId, over = {}) {
-  return makeEvent({
+  const cap = TEST_CAPS.get(capabilityId) ?? capabilityById(capabilityId);
+  const e = makeEvent({
     id: `e${++seq}`,
     learnerId: LEARNER,
     capabilityId,
-    taskId: `t.${capabilityId}`,
+    taskId: `t.obs.${capabilityId}`,
     taskRevision: 1,
     eventType: 'production_attempt',
-    modality: capabilityById(capabilityId).modality,
+    modality: cap.modality,
     occurredAt: T0 + seq * 1000,
     context: {
       missionId: 'm.baseline',
@@ -46,12 +63,48 @@ function ev(capabilityId, over = {}) {
       partnerType: 'tutor'
     },
     attempt: { observed: true, outcome: 'success', response: 'ok', latencyMs: 900 },
+    evaluation: { authority: 'deterministic', contractId: 'test.eval.v1' },
     ...over
   });
+  const purpose = PURPOSE_FOR_TYPE[e.eventType];
+  if (!purpose) return e; // observations carry no credit — unbound is fine
+  const familyClass = FAMILY_FOR_CONTEXT[e.context.practicedOrTransfer] ?? 'practiced';
+  const targetCap = TEST_CAPS.get(e.capabilityId);
+  const taskId = ['t', e.capabilityId, e.eventType, e.context.promptFamily, e.context.missionId, e.evaluation.authority].join('::');
+  if (!TEST_TASKS.has(taskId)) {
+    TEST_TASKS.set(taskId, {
+      id: taskId,
+      revision: e.taskRevision,
+      missionId: e.context.missionId,
+      capabilityId: e.capabilityId,
+      modality: e.modality,
+      purpose,
+      promptFamily: e.context.promptFamily,
+      freshness: { required: familyClass !== 'practiced', familyClass },
+      supportPolicy: { allowed: targetCap?.conditions?.supportAllowed ?? [] },
+      evaluation: { authority: e.evaluation.authority, contractId: e.evaluation.contractId },
+      // validateTask() runs on the registry entry during verification —
+      // purpose-specific requirements must be met here too.
+      ...(purpose === 'transfer' ? { transfer: { changedDimensions: ['wording'] } } : {}),
+      ...(purpose === 'assessment' ? {
+        assessment: { capabilitySample: [e.capabilityId], allowedLanguageRange: 'declared_target_range', answerRevealDuringAttempt: false }
+      } : {})
+    });
+  }
+  const task = TEST_TASKS.get(taskId);
+  e.taskId = taskId;
+  e.binding = {
+    purpose: task.purpose,
+    familyClass,
+    freshnessRequired: task.freshness.required,
+    effectiveSupportAllowed: effectiveAllowedSupport(targetCap, task)
+  };
+  return e;
 }
 
-const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES).byCapability.get(id);
-const planFor = (log, opts) => planNext(LEARNER, log, opts);
+const allTasks = () => [...TEST_TASKS.values()];
+const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES, allTasks()).byCapability.get(id);
+const planFor = (log, opts) => planNext(LEARNER, log, { tasks: allTasks(), ...opts });
 
 // ── Graph sanity ─────────────────────────────────────────────
 {
@@ -169,7 +222,7 @@ const planFor = (log, opts) => planNext(LEARNER, log, opts);
     ev('speak.say_own_name'),
     ev('speak.say_own_name', { occurredAt: T0 + 30 * HOUR })
   ];
-  const projection = projectLearnerState(LEARNER, log, CAPABILITIES);
+  const projection = projectLearnerState(LEARNER, log, CAPABILITIES, allTasks());
   assert.equal(projection.byCapability.get('speak.say_own_name').state, 'RETAINED');
   assert.equal(projection.byCapability.get('listen.identity_question_basic').state, 'NOT_SEEN',
     'producing the answer never marks the listening prerequisite known');
@@ -178,7 +231,7 @@ const planFor = (log, opts) => planNext(LEARNER, log, opts);
 
 // ── 5. Population priors cannot mutate learner state ─────────
 {
-  const empty = projectLearnerState(LEARNER, [], CAPABILITIES);
+  const empty = projectLearnerState(LEARNER, [], CAPABILITIES, allTasks());
   const before = empty.byCapability.get('interact.ask_name');
   assert.equal(before.state, 'NOT_SEEN');
   assert.deepEqual(before.milestones.independent, false);
@@ -208,13 +261,13 @@ const planFor = (log, opts) => planNext(LEARNER, log, opts);
       context: { missionId: 'm2', practicedOrTransfer: 'transfer', promptFamily: 'p.novel', partnerType: 'stranger' }
     })
   ];
-  const a = projectLearnerState(LEARNER, log, CAPABILITIES);
-  const b = projectLearnerState(LEARNER, log, CAPABILITIES);
+  const a = projectLearnerState(LEARNER, log, CAPABILITIES, allTasks());
+  const b = projectLearnerState(LEARNER, log, CAPABILITIES, allTasks());
   assert.deepEqual(a, b, 'same log → identical projection');
   // A prefix replay reproduces the intermediate state exactly.
-  const prefix = projectLearnerState(LEARNER, log.slice(0, 3), CAPABILITIES);
+  const prefix = projectLearnerState(LEARNER, log.slice(0, 3), CAPABILITIES, allTasks());
   assert.equal(prefix.byCapability.get(cap).state, 'INDEPENDENT');
-  const full = projectLearnerState(LEARNER, [...log.slice(0, 3), ...log.slice(3)], CAPABILITIES);
+  const full = projectLearnerState(LEARNER, [...log.slice(0, 3), ...log.slice(3)], CAPABILITIES, allTasks());
   assert.equal(full.byCapability.get(cap).state, 'TRANSFERRED');
   console.log('✓ replay is deterministic; prefixes reproduce intermediate states');
 }
@@ -380,8 +433,8 @@ const planFor = (log, opts) => planNext(LEARNER, log, opts);
   const eOk = ev('interact.greet', { id: 'aa-ok', occurredAt: T0, eventType: 'interaction_turn' });
   const optsB = { capabilities: CAPABILITIES, riskPriors: RISK_PRIORS, now: T0 };
   assert.deepEqual(
-    projectLearnerState(LEARNER, [eFail, eOk], CAPABILITIES),
-    projectLearnerState(LEARNER, [eOk, eFail], CAPABILITIES),
+    projectLearnerState(LEARNER, [eFail, eOk], CAPABILITIES, allTasks()),
+    projectLearnerState(LEARNER, [eOk, eFail], CAPABILITIES, allTasks()),
     'same-timestamp events replay identically regardless of arrival order'
   );
   assert.deepEqual(planFor([eFail, eOk], optsB), planFor([eOk, eFail], optsB));
@@ -392,7 +445,7 @@ const planFor = (log, opts) => planNext(LEARNER, log, opts);
     ev('interact.greet'),
     ev('interact.greet', { learnerId: 'learner-other', eventType: 'delayed_retrieval', occurredAt: T0 + 50 * HOUR })
   ];
-  const mine = projectLearnerState(LEARNER, mixed, CAPABILITIES);
+  const mine = projectLearnerState(LEARNER, mixed, CAPABILITIES, allTasks());
   assert.equal(mine.generatedFrom, 1, 'foreign learner events do not enter the projection');
   assert.equal(mine.byCapability.get('interact.greet').state, 'INDEPENDENT',
     "another learner's delayed success cannot inflate my retention");
@@ -474,7 +527,8 @@ const planFor = (log, opts) => planNext(LEARNER, log, opts);
     prerequisites: [],
     conditions: { partnerCooperative: true, topicFamiliar: true, speechRate: 'slow_clear', supportAllowed: ['repeat_once'] }
   };
-  const projR = (log) => projectLearnerState(LEARNER, log, [repeatOnceCap]).byCapability.get('test.repeat_once_allowed');
+  const projR = (log) => projectLearnerState(LEARNER, log, [repeatOnceCap], allTasks()).byCapability.get('test.repeat_once_allowed');
+  TEST_CAPS.set(repeatOnceCap.id, repeatOnceCap);
   const evR = (over) => ev('interact.greet', { ...over, capabilityId: 'test.repeat_once_allowed' });
 
   assert.equal(projR([evR({})]).state, 'INDEPENDENT', 'clean unaided success still earns INDEPENDENT');

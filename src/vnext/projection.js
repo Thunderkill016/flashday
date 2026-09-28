@@ -32,6 +32,7 @@
  *     change the projection; replay of the same event set is identical.
  */
 import { answerBearing, conditionsViolated } from './evidence.js';
+import { effectiveAllowedSupport, verifyEventTask } from './contracts.js';
 
 export const CAPABILITY_STATES = [
   'NOT_SEEN',
@@ -59,14 +60,54 @@ const ATTEMPT_TYPES = new Set([
 ]);
 
 const isSuccess = (e) => e.attempt?.outcome === 'success';
-// Observed, unaided success — the only evidence that can carry a
-// capability past SUPPORTED. "Unaided" means no answer-bearing support
-// AND every support actually used was permitted by the capability's
-// declared conditions — an attempt that violates its own conditions is
-// not valid evidence of independence.
-const isIndependent = (e, cap) =>
-  isSuccess(e) && e.attempt?.observed === true && !answerBearing(e.support) &&
-  !conditionsViolated(e.support, cap);
+
+/* Only a deterministic evaluator or an observed human judgment can
+ * award independent ability in v0:
+ *   self_report — the learner's own claim is not observation;
+ *   asr         — transcript recognition proves what was detected, not
+ *                 pronunciation or intelligibility;
+ *   ai_llm      — feedback/secondary signal only, never proficiency;
+ *   absent      — no evaluator provenance = no credit.
+ */
+const INDEPENDENT_AUTHORITIES = new Set(['deterministic', 'human']);
+
+/* Support revealed during an attempt belongs permanently to that
+ * attempt — a retry inside the same attemptId cannot launder itself
+ * back into "unaided" by resetting UI flags. unionSupport accumulates
+ * flags across events sharing an attemptId (canonical order); a replay
+ * reported without a count poisons the merged count so 'repeat_once'
+ * can never be satisfied by uncounted provenance. */
+const unionSupport = (a, b) => {
+  if (!a) return b ?? null;
+  if (!b) return a;
+  const uncounted = (a.repeat && a.repeatCount == null) || (b.repeat && b.repeatCount == null);
+  const repeatCount = uncounted
+    ? null
+    : ((a.repeatCount ?? 0) + (b.repeatCount ?? 0)) || null;
+  return {
+    hint: a.hint || b.hint,
+    translation: a.translation || b.translation,
+    transcript: a.transcript || b.transcript,
+    modelAnswer: a.modelAnswer || b.modelAnswer,
+    repeat: a.repeat || (a.repeatCount ?? 0) > 0 || b.repeat || (b.repeatCount ?? 0) > 0,
+    repeatCount
+  };
+};
+
+// Observed, unaided, condition-valid, authority-backed success on an
+// event VERIFIED against the registered task contract — the only
+// evidence that can carry a capability past SUPPORTED. A binder stamp
+// is not trusted on its own: verifyEventTask re-derives purpose,
+// family, context, evaluator and effective support from the registry
+// task, so a forged `binding` on a raw makeEvent() cannot mint
+// independent evidence.
+const isIndependent = (e, cap, support, task) =>
+  isSuccess(e) &&
+  e.attempt?.observed === true &&
+  !answerBearing(support) &&
+  !conditionsViolated(support, effectiveAllowedSupport(cap, task)) &&
+  INDEPENDENT_AUTHORITIES.has(e.evaluation?.authority) &&
+  verifyEventTask(e, task, cap);
 
 function emptyCapability() {
   return {
@@ -88,11 +129,28 @@ function emptyCapability() {
   };
 }
 
-export function projectLearnerState(learnerId, events, capabilities, { retentionDelayMs = RETENTION_DELAY_MS } = {}) {
+export function projectLearnerState(learnerId, events, capabilities, tasks, { retentionDelayMs = RETENTION_DELAY_MS } = {}) {
   // A projection is always for exactly one learner — a log mixing
   // learners must never merge into one state.
   if (typeof learnerId !== 'string' || !learnerId) {
     throw new Error('projectLearnerState requires a learnerId');
+  }
+  // The task registry is the trust boundary for independent credit:
+  // events whose taskId@taskRevision does not resolve to a registered
+  // contract, or whose stamped semantics disagree with it, are still
+  // recorded (EXPOSED/SUPPORTED) but can never prove independence.
+  // Keyed by id@revision — a v2 contract must not overwrite v1, or
+  // replaying history would silently reinterpret old evidence under a
+  // different contract. Duplicate id@revision registrations are an
+  // integrity violation, not a last-write-wins.
+  if (!Array.isArray(tasks)) {
+    throw new Error('projectLearnerState requires the registered task list');
+  }
+  const taskByRev = new Map();
+  for (const t of tasks) {
+    const key = `${t?.id}@${t?.revision}`;
+    if (taskByRev.has(key)) throw new Error(`duplicate task registration '${key}'`);
+    taskByRev.set(key, t);
   }
   const byId = new Map(capabilities.map((c) => [c.id, c]));
   const byCapability = new Map(capabilities.map((c) => [c.id, emptyCapability()]));
@@ -110,6 +168,10 @@ export function projectLearnerState(learnerId, events, capabilities, { retention
   }
   mine.sort((a, b) => a.occurredAt - b.occurredAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
+  // Support sticks to an attempt boundary: the union of every flag seen
+  // so far on this attemptId applies to all later events on it.
+  const supportByAttempt = new Map();
+
   for (const e of mine) {
     const cap = byId.get(e.capabilityId);
     const slot = byCapability.get(e.capabilityId);
@@ -122,12 +184,26 @@ export function projectLearnerState(learnerId, events, capabilities, { retention
     slot.milestones.exposed = true;
     slot.lastEventAt = e.occurredAt;
 
-    // Families rehearsed in a practiced context — succeeded OR failed,
-    // aided OR not — can never be re-sold as a novel transfer context.
-    if (e.context?.practicedOrTransfer === 'practiced' && e.context?.promptFamily) {
+    // Families encountered in ANY non-transfer context — practiced or
+    // assessment — are rehearsed: an assessed family cannot later be
+    // re-sold as a novel transfer context either.
+    if (e.context?.practicedOrTransfer !== 'transfer' && e.context?.promptFamily) {
       if (!slot.rehearsedPromptFamilies.includes(e.context.promptFamily)) {
         slot.rehearsedPromptFamilies.push(e.context.promptFamily);
       }
+    }
+
+    // Attempt-boundary accumulation happens for EVERY event kind — a
+    // support_use/feedback record on this attempt is part of its support
+    // history. The boundary key is task-scoped: reusing the same
+    // attemptId on a different task must not leak support across.
+    const aid = e.attempt?.attemptId;
+    let effSupport = e.support;
+    if (aid) {
+      const key = `${e.taskId}::${aid}`;
+      const prior = supportByAttempt.get(key) ?? null;
+      effSupport = unionSupport(prior, e.support);
+      supportByAttempt.set(key, effSupport);
     }
 
     // Non-attempt events may carry an outcome field; it is context, not
@@ -135,7 +211,8 @@ export function projectLearnerState(learnerId, events, capabilities, { retention
     if (!ATTEMPT_TYPES.has(e.eventType) || e.attempt?.outcome == null) continue;
     slot.lastAttemptOutcome = e.attempt.outcome;
     if (!isSuccess(e)) continue;
-    if (!isIndependent(e, cap)) {
+
+    if (!isIndependent(e, cap, effSupport, taskByRev.get(`${e.taskId}@${e.taskRevision}`))) {
       slot.milestones.supported = true;
       continue;
     }
