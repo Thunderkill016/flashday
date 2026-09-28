@@ -1030,7 +1030,113 @@ try {
     check('mission: context→gist→notice→retrieve→interact→unaided exit→hinted retry (mobile, no AI)');
   }
 
-  // ── 18. No-TTS context: explicit fallback, and silent click-through
+  // ── 18. Name durability: the captured name lives in the durable
+  //        context event. Losing the device-local lesson-session (a
+  //        device switch restores lessonEvents, never drafts) must NOT
+  //        silently revert <name> to the 'Linh' fallback (issue #33 r5) ──
+  {
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+    });
+    await context.addInitScript(() => {
+      window.__ttsCalls = [];
+      window.SpeechSynthesisUtterance = class {
+        constructor(text) {
+          this.text = text;
+        }
+      };
+      Object.defineProperty(window, 'speechSynthesis', {
+        value: {
+          getVoices: () => [{ name: 'Mock en-US', lang: 'en-US' }],
+          cancel: () => {},
+          speak: (u) => { window.__ttsCalls.push(u.text); u.onend?.(); },
+          addEventListener: () => {},
+        },
+      });
+    });
+    const page = await context.newPage();
+    const stage = (name) => page.locator(`.mission-stage[data-stage="${name}"]`);
+
+    // Context submitted with the learner's real name — recorded in the
+    // durable event payload, which is the only copy that syncs.
+    await goto(page, `${origin}app/?preview#/lesson/${L1}/context`);
+    await stage('context').waitFor();
+    await stage('context').locator('[data-role="play-all"]').click();
+    await stage('context').locator('[data-role="learner-name"]').fill('Hoàng');
+    await stage('context').locator('.mission-primary').click();
+    await stage('gist').waitFor();
+    await sleep(600); // let the debounced draft save flush first
+    const ctxEvents = await page.evaluate((key) => {
+      const db = JSON.parse(localStorage.getItem(key) || '{}');
+      return (db.lessonEvents || []).filter((e) => e.kind === 'context');
+    }, DB_KEY);
+    assert.equal(ctxEvents[0]?.payload?.learnerName, 'Hoàng',
+      'the durable context event carries the name');
+
+    // The device-local session is gone — draft, learnerName, everything.
+    await page.evaluate((key) => localStorage.removeItem(key), SESSION_KEY);
+
+    // Resume where the durable events say the learner is: gist. Every
+    // later stage must still resolve <name> from the event — with the
+    // bug these steps would expect/render 'Linh' instead.
+    await goto(page, `${origin}app/?preview#/lesson/${L1}/gist`);
+    const gist = stage('gist');
+    await gist.waitFor();
+    await gist.locator('.quiz-question').nth(0).locator('.quiz-option').nth(missionLesson.mission.gist[0].answer).click();
+    await gist.locator('.quiz-question').nth(1).locator('.quiz-option').nth(missionLesson.mission.gist[1].answer).click();
+    await gist.locator('.quiz-submit').click();
+    await gist.locator('.mission-primary').click();
+    await stage('notice').waitFor();
+    const notice = stage('notice');
+    for (let i = 0; i < 3; i++) await notice.locator('button', { hasText: 'Cụm tiếp' }).click();
+    await notice.locator('.mission-primary').click();
+    await stage('retrieve').waitFor();
+
+    const retrieve = stage('retrieve');
+    for (let i = 0; i < missionLesson.mission.retrieval.length; i++) {
+      await retrieve.locator('.mission-input').fill(
+        missionLesson.mission.retrieval[i].answer.replaceAll('<name>', 'Hoàng')
+      );
+      await retrieve.locator('[data-role="retrieve-check"]').click();
+      if (i < missionLesson.mission.retrieval.length - 1) await sleep(650);
+    }
+    await stage('interact').waitFor({ timeout: 5000 });
+
+    const interact = stage('interact');
+    const turns = missionLesson.mission.interact.turns;
+    for (let t = 0; t < turns.length; t++) {
+      const wb = interact.locator('.mission-interact-wb').last();
+      for (const word of turns[t].you.replaceAll('<name>', 'Hoàng').split(/\s+/).filter(Boolean)) {
+        await wb.locator(`.wb-bank .wb-chip[data-word="${word}"]`).first().click();
+      }
+      await wb.locator('.wb-check').click();
+      if (t < turns.length - 1) await sleep(700);
+    }
+    await interact.locator('.mission-primary').click();
+    await stage('exit').waitFor();
+
+    // And the exit scorer accepts the diacritic-free spelling — the
+    // contract is "Hoàng", and "I'm Hoang" is the same name.
+    const exit = stage('exit');
+    await exit.locator('[aria-label="Lượt của bạn 1"]').fill('Hi, I’m Hoang. What’s your name?');
+    await exit.locator('[data-role="exit-send"]:not([disabled])').click();
+    await exit.locator('[aria-label="Lượt của bạn 2"]').fill('Nice to meet you too.');
+    await exit.locator('[data-role="exit-send"]:not([disabled])').click();
+    await exit.locator('.mission-exit-feedback').waitFor();
+    const exitEvents = await page.evaluate((key) => {
+      const db = JSON.parse(localStorage.getItem(key) || '{}');
+      return (db.lessonEvents || []).filter((e) => e.kind === 'exit');
+    }, DB_KEY);
+    assert.equal(exitEvents.length, 1);
+    assert.equal(exitEvents[0].payload.passed, true,
+      '"I\'m Hoang" passes against the durable-captured Hoàng');
+    assert.equal(exitEvents[0].payload.unaidedFirst, true,
+      'the restored-session attempt is still a real unaided first try');
+    await context.close();
+    check('learner name survives device-local draft loss — restored from the durable context event');
+  }
+
+  // ── 19. No-TTS context: explicit fallback, and silent click-through
   //        mints zero tasks ──
   {
     const context = await browser.newContext({
@@ -1067,7 +1173,7 @@ try {
     check('no-TTS context falls back explicitly and mints zero tasks');
   }
 
-  // ── 19. Deliberate audio skip: "Đọc thay vì nghe" is an explicit
+  // ── 20. Deliberate audio skip: "Đọc thay vì nghe" is an explicit
   //        action with its own provenance — support ≠ silent bypass ──
   {
     const context = await browser.newContext({
@@ -1113,7 +1219,7 @@ try {
     check('explicit "Đọc thay vì nghe" skip is recorded and mints nothing');
   }
 
-  // ── 18. Old lessons still load — the five-pane runner is intact for the
+  // ── 21. Old lessons still load — the five-pane runner is intact for the
   //        29 untouched lessons ──
   {
     const context = await browser.newContext({

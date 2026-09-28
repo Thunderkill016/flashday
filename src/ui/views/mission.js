@@ -133,13 +133,26 @@ function stageDone(stage) {
   );
 }
 
-// The learner's own name — captured once in context, substituted wherever
-// content carries `<name>`. "Nói tên mình" means THEIR name, so the exit
-// scorer compares against it instead of any stem + word (issue #33 r4).
+// The learner's own name — captured once in context and carried in TWO
+// places: the device-local draft AND the durable context event payload.
+// Drafts do not sync (session.js), so a device switch or a lost session
+// restores the name from the most recent context event instead of
+// silently reverting <name> to 'Linh' mid-lesson (issue #33 r5).
+function capturedName() {
+  const draftName = state.draft?.mission?.learnerName;
+  if (typeof draftName === 'string' && draftName.trim()) return draftName.trim();
+  const list = events();
+  for (let i = list.length - 1; i >= 0; i--) {
+    const e = list[i];
+    if (e.lessonId !== state.lesson.id || e.step !== 'context') continue;
+    const name = e.payload?.learnerName;
+    if (typeof name === 'string' && name.trim()) return name.trim();
+  }
+  return '';
+}
+
 function learnerName() {
-  const raw = state.draft?.mission?.learnerName;
-  const name = typeof raw === 'string' ? raw.trim() : '';
-  return name || 'Linh'; // persona fallback for drafts pre-dating capture
+  return capturedName() || 'Linh'; // persona fallback for records pre-dating capture
 }
 
 function renderName(text) {
@@ -360,7 +373,8 @@ const builders = {
     // The name contract is declared BEFORE any production attempt: the
     // learner says their OWN name to Mia and Sam — no hidden "you are
     // Linh" rule discovered only after a failed check (issue #33 r4).
-    const draftName = state.draft?.mission?.learnerName;
+    // Prefill reads draft→event so a restored session shows the name on
+    // record instead of an empty box (issue #33 r5).
     const nameWrap = document.createElement('div');
     nameWrap.className = 'mission-name';
     const nameLabel = document.createElement('label');
@@ -373,7 +387,7 @@ const builders = {
     nameInput.maxLength = 24;
     nameInput.placeholder = 'Tên của bạn';
     nameInput.setAttribute('aria-label', 'Tên của bạn');
-    nameInput.value = typeof draftName === 'string' ? draftName : '';
+    nameInput.value = capturedName();
     nameInput.addEventListener('input', () => {
       patchMission({ learnerName: capitalizeName(nameInput.value) || null });
       maybeArm();
@@ -504,7 +518,10 @@ const builders = {
     }
 
     function learnerNameIsSet() {
-      return Boolean(state.draft?.mission?.learnerName?.trim());
+      // Draft OR the durable context event both satisfy the contract —
+      // a revisited/restored context must not demand re-entry when the
+      // name is already on record (and the input shows it).
+      return Boolean(capturedName());
     }
   },
 

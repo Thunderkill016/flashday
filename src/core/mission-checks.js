@@ -8,10 +8,10 @@
  *                     'i am your name' is not 'i am linh'.
  *   'word'          — one exact token (greeting forms like 'hi').
  *
- * Name checks match the learner's persona phrase for the mission — the
- * vertical slice plays a fixed role ("you are Linh"), so 'i am linh' is
- * the honest expected utterance, not any stem + word. No keyword bags,
- * no blacklists.
+ * Name checks compare against the learner's OWN name: the mission
+ * captures it up front and resolves `<name>` inside match patterns
+ * before scoring, so 'i am <name>' is the honest expected utterance —
+ * not any stem + word. No keyword bags, no blacklists.
  *
  * Everything is pure text — no DOM — so the unit tests pin the
  * counterexamples without a browser.
