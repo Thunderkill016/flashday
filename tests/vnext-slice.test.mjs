@@ -16,7 +16,8 @@
 import assert from 'node:assert/strict';
 import { CAPABILITIES, capabilityById } from '../src/vnext/capabilities.js';
 import { projectLearnerState, RETENTION_DELAY_MS } from '../src/vnext/projection.js';
-import { bindAttempt } from '../src/vnext/bind.js';
+import { bindAttempt, bindObservation } from '../src/vnext/bind.js';
+import { makeEvent } from '../src/vnext/evidence.js';
 import { nextMissionTask, runMissionTrace } from '../src/vnext/mission-runner.js';
 import { RISK_PRIORS } from '../src/vnext/risk-priors.js';
 import { MISSION_MEET_PERSON, TASKS_MEET_PERSON } from '../src/vnext/fixtures.js';
@@ -256,6 +257,108 @@ const row = (step) => trace[step - 1];
   });
   assert.deepEqual(sel8, sel7a, "another learner's evidence never changes my next task");
   console.log('✓ selector replay is deterministic and learner-isolated');
+}
+
+// ── Orchestration trust boundaries (review round 2, spec §7) ─────────
+{
+  // 9. Consumption is revision-scoped and the selector is
+  //    revision-aware: evidence bound under v1 never consumes the v2
+  //    contract; selection resolves to the highest registered revision.
+  const diagV2 = { ...taskById('task.meet.diagnostic.opening'), revision: 2 };
+  const v1Diag = bindAttempt(taskById('task.meet.diagnostic.opening'), capabilityById('interact.greet'), {
+    id: 'rv.a', learnerId: LEARNER, occurredAt: T0,
+    attempt: { observed: true, outcome: 'success', response: 'hi', latencyMs: 800, attemptId: 'rv.1' }
+  });
+  const sel9 = nextMissionTask({
+    learnerId: LEARNER, mission: MISSION_MEET_PERSON, tasks: [...TASKS, diagV2],
+    capabilities: CAPABILITIES, events: [v1Diag], riskPriors: RISK_PRIORS, now: T0 + 1000
+  });
+  assert.equal(sel9.status, 'ready');
+  assert.equal(sel9.taskId, 'task.meet.diagnostic.opening');
+  assert.equal(sel9.taskRevision, 2, 'v1 evidence does not consume the v2 contract — v2 is still due');
+
+  // 10. Only VERIFIED events mark a task consumed. A well-formed raw
+  //     event whose stamped semantics fail registry verification cannot
+  //     hide an unrun baseline.
+  const forged = makeEvent({
+    id: 'fg.1', learnerId: LEARNER, occurredAt: T0, eventType: 'checkpoint',
+    taskId: 'task.meet.diagnostic.opening', taskRevision: 1,
+    capabilityId: 'interact.greet', modality: 'spoken_interaction',
+    attempt: { observed: true, outcome: 'success', response: 'x', latencyMs: 100, attemptId: 'fg.1' },
+    context: { missionId: 'mission.meet_new_person', promptFamily: 'meet.opening.baseline.v1', practicedOrTransfer: 'practiced' },
+    evaluation: { authority: 'deterministic', contractId: 'eval.task.meet.diagnostic.opening.v1' },
+    binding: { purpose: 'diagnostic', familyClass: 'practiced', freshnessRequired: false, effectiveSupportAllowed: [] }
+  });
+  const sel10 = nextMissionTask({
+    learnerId: LEARNER, mission: MISSION_MEET_PERSON, tasks: TASKS,
+    capabilities: CAPABILITIES, events: [forged], riskPriors: RISK_PRIORS, now: T0 + 1000
+  });
+  assert.equal(sel10.taskId, 'task.meet.diagnostic.opening',
+    'an unverifiable event must not consume the baseline diagnostic');
+  console.log('✓ selection is revision-scoped and only verified evidence consumes a task');
+
+  // 11. Mission integrity fails closed: a declared taskId absent from
+  //     the registry (or resolving to an invalid contract) blocks the
+  //     whole selection instead of being silently dropped.
+  const ghostMission = { ...MISSION_MEET_PERSON, taskIds: [...MISSION_MEET_PERSON.taskIds, 'task.meet.ghost'] };
+  const sel11a = nextMissionTask({
+    learnerId: LEARNER, mission: ghostMission, tasks: TASKS,
+    capabilities: CAPABILITIES, events: [], riskPriors: RISK_PRIORS, now: T0
+  });
+  assert.equal(sel11a.status, 'blocked');
+  assert.match(sel11a.reason, /task\.meet\.ghost.*absent/, 'missing declared task blocks the mission');
+
+  const invalidV2 = { ...taskById('task.meet.diagnostic.opening'), revision: 2, purpose: 'fluency' };
+  const sel11b = nextMissionTask({
+    learnerId: LEARNER, mission: MISSION_MEET_PERSON, tasks: [...TASKS, invalidV2],
+    capabilities: CAPABILITIES, events: [], riskPriors: RISK_PRIORS, now: T0
+  });
+  assert.equal(sel11b.status, 'blocked');
+  assert.match(sel11b.reason, /invalid/, 'a declared task failing validateTask blocks the mission');
+  console.log('✓ missing or invalid declared tasks fail closed — never silently skipped');
+
+  // 12. expose/resume fallback is bounded to input/notice →
+  //     retrieval/production/interaction: a capability with its input
+  //     consumed but no eliciting task can never drift into transfer or
+  //     assessment tasks.
+  const leanMission = {
+    ...MISSION_MEET_PERSON,
+    taskIds: [
+      'task.meet.diagnostic.identity_q',
+      'task.meet.diagnostic.own_name',
+      'task.meet.diagnostic.ask_name',
+      'task.meet.input.ask_name',
+      'task.meet.transfer.street',
+      'task.meet.assessment.checkpoint'
+    ]
+  };
+  const capAsk = capabilityById('interact.ask_name');
+  const leanLog = [
+    bindAttempt(taskById('task.meet.diagnostic.identity_q'), capabilityById('listen.identity_question_basic'), {
+      id: 'lm.a', learnerId: LEARNER, occurredAt: T0,
+      attempt: { observed: true, outcome: 'success', response: 'ok', latencyMs: 900, attemptId: 'lm.iq' }
+    }),
+    bindAttempt(taskById('task.meet.diagnostic.own_name'), capabilityById('speak.say_own_name'), {
+      id: 'lm.b', learnerId: LEARNER, occurredAt: T0 + 1000,
+      attempt: { observed: true, outcome: 'success', response: 'ok', latencyMs: 900, attemptId: 'lm.on' }
+    }),
+    bindAttempt(taskById('task.meet.diagnostic.ask_name'), capAsk, {
+      id: 'lm.c', learnerId: LEARNER, occurredAt: T0 + 2000,
+      attempt: { observed: true, outcome: 'fail', response: '…', latencyMs: 4000, attemptId: 'lm.d' }
+    }),
+    bindObservation(taskById('task.meet.input.ask_name'), capAsk, {
+      id: 'lm.d', learnerId: LEARNER, occurredAt: T0 + 3000, eventType: 'exposure'
+    })
+  ];
+  const sel12 = nextMissionTask({
+    learnerId: LEARNER, mission: leanMission, tasks: TASKS,
+    capabilities: CAPABILITIES, events: leanLog, riskPriors: RISK_PRIORS, now: T0 + 9000
+  });
+  assert.equal(sel12.status, 'blocked', 'no eliciting task left → blocked, not a semantic leap');
+  assert.match(sel12.reason, /interact\.ask_name.*expose/, 'the uncovered expose intent is named');
+  assert.notEqual(sel12.taskId, 'task.meet.transfer.street');
+  assert.notEqual(sel12.taskId, 'task.meet.assessment.checkpoint');
+  console.log('✓ expose/resume fallback never drifts into remediation, delayed, transfer or assessment');
 }
 
 console.log('vNext slice: all checks passed');
