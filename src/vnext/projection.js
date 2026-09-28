@@ -9,16 +9,24 @@
  *   - exposure is any modality-matched contact, including a failed probe;
  *   - SUPPORTED = a success that needed answer-bearing help or was not
  *     observed (self-report cannot prove independence);
- *   - INDEPENDENT = an observed, unaided success;
+ *   - INDEPENDENT = an observed, unaided success on an ATTEMPT event;
  *   - RETAINED = another unaided observed success ≥ RETENTION_DELAY_MS
  *     after the first independent success;
  *   - TRANSFERRED = an unaided observed success in a 'transfer' context
- *     whose promptFamily was never proven in practice — replaying the
- *     practiced prompt does not transfer;
- *   - FLUENT = transfer succeeded in ≥2 distinct prompt families.
+ *     whose promptFamily was never rehearsed — a family practiced WITH
+ *     support is still rehearsed and cannot pass as novel;
+ *   - FLUENT = transfer succeeded in ≥2 novel families AND ≥2 of those
+ *     transfer successes were materially faster than the learner's first
+ *     independent baseline (hesitation must be measured, not assumed).
  *
- * Only events whose modality matches the capability's modality count —
- * speaking practice can never mark a listening capability learned.
+ * Hard boundaries:
+ *   - only ATTEMPT_TYPES may advance state — an exposure/feedback/support
+ *     record carrying an outcome field is context, not performance;
+ *   - only events for THIS learner and THIS modality count — a speaking
+ *     event can never mark a listening capability learned, and a mixed
+ *     learner log can never cross-contaminate;
+ *   - canonical order is (occurredAt, id) — arrival order can never
+ *     change the projection; replay of the same event set is identical.
  */
 import { answerBearing } from './evidence.js';
 
@@ -35,6 +43,12 @@ export const CAPABILITY_STATES = [
 // "A meaningful delay" — v0 pins this at 24h. It is a named constant so
 // the day we calibrate it, every test and every learner sees the same rule.
 export const RETENTION_DELAY_MS = 24 * 60 * 60 * 1000;
+
+// Fluency = transfer-capable performance with measurably lower
+// hesitation. v0's measurable proxy: a transfer success counts toward
+// fluency only when its latency is ≤ this ratio of the learner's first
+// independent-success latency. No latency data → ceiling is TRANSFERRED.
+export const FLUENCY_LATENCY_RATIO = 0.8;
 
 const ATTEMPT_TYPES = new Set([
   'recognition_attempt',
@@ -67,27 +81,37 @@ function emptyCapability() {
     lastEventAt: null,
     lastAttemptOutcome: null,
     firstIndependentAt: null,
+    firstIndependentLatencyMs: null,
     lastIndependentSuccessAt: null,
-    provenPromptFamilies: [],
-    transferPromptFamilies: []
+    rehearsedPromptFamilies: [],
+    transferPromptFamilies: [],
+    transferLatencies: []
   };
 }
 
-export function projectLearnerState(events, capabilities, { retentionDelayMs = RETENTION_DELAY_MS } = {}) {
+export function projectLearnerState(learnerId, events, capabilities, { retentionDelayMs = RETENTION_DELAY_MS } = {}) {
+  // A projection is always for exactly one learner — a log mixing
+  // learners must never merge into one state.
+  if (typeof learnerId !== 'string' || !learnerId) {
+    throw new Error('projectLearnerState requires a learnerId');
+  }
   const byId = new Map(capabilities.map((c) => [c.id, c]));
   const byCapability = new Map(capabilities.map((c) => [c.id, emptyCapability()]));
 
-  // Sort by time so arrival order cannot change the projection; a stable
-  // second key keeps same-timestamp replays deterministic too.
-  const sorted = events
-    .map((e, i) => [e, i])
-    .sort((a, b) => a[0].occurredAt - b[0].occurredAt || a[1] - b[1])
-    .map(([e]) => e);
-
+  // Canonical replay order: (occurredAt, id). Two deliveries of the same
+  // event set produce the same projection regardless of arrival order;
+  // ids dedupe resynced duplicates.
   const seenIds = new Set();
-  for (const e of sorted) {
-    if (seenIds.has(e.id)) continue; // sync replay dedupe — append-only log
+  const mine = [];
+  for (const e of events) {
+    if (e.learnerId !== learnerId) continue;
+    if (seenIds.has(e.id)) continue;
     seenIds.add(e.id);
+    mine.push(e);
+  }
+  mine.sort((a, b) => a.occurredAt - b.occurredAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+
+  for (const e of mine) {
     const cap = byId.get(e.capabilityId);
     const slot = byCapability.get(e.capabilityId);
     if (!cap || !slot) continue;
@@ -98,37 +122,54 @@ export function projectLearnerState(events, capabilities, { retentionDelayMs = R
 
     slot.milestones.exposed = true;
     slot.lastEventAt = e.occurredAt;
-    if (ATTEMPT_TYPES.has(e.eventType) && e.attempt?.outcome != null) {
-      slot.lastAttemptOutcome = e.attempt.outcome;
+
+    // Families rehearsed in a practiced context — succeeded OR failed,
+    // aided OR not — can never be re-sold as a novel transfer context.
+    if (e.context?.practicedOrTransfer === 'practiced' && e.context?.promptFamily) {
+      if (!slot.rehearsedPromptFamilies.includes(e.context.promptFamily)) {
+        slot.rehearsedPromptFamilies.push(e.context.promptFamily);
+      }
     }
 
-    if (isSuccess(e)) {
-      if (!isIndependent(e)) {
-        slot.milestones.supported = true;
-        continue;
-      }
-      slot.milestones.independent = true;
-      if (slot.firstIndependentAt == null) slot.firstIndependentAt = e.occurredAt;
-      slot.lastIndependentSuccessAt = e.occurredAt;
-      if (e.occurredAt - slot.firstIndependentAt >= retentionDelayMs) {
-        slot.milestones.retained = true;
-      }
+    // Non-attempt events may carry an outcome field; it is context, not
+    // performance, and must not advance state.
+    if (!ATTEMPT_TYPES.has(e.eventType) || e.attempt?.outcome == null) continue;
+    slot.lastAttemptOutcome = e.attempt.outcome;
+    if (!isSuccess(e)) continue;
+    if (!isIndependent(e)) {
+      slot.milestones.supported = true;
+      continue;
+    }
+
+    slot.milestones.independent = true;
+    if (slot.firstIndependentAt == null) {
+      slot.firstIndependentAt = e.occurredAt;
+      slot.firstIndependentLatencyMs = e.attempt.latencyMs;
+    }
+    slot.lastIndependentSuccessAt = e.occurredAt;
+    if (e.occurredAt - slot.firstIndependentAt >= retentionDelayMs) {
+      slot.milestones.retained = true;
+    }
+
+    if (e.context?.practicedOrTransfer === 'transfer') {
       const family = e.context?.promptFamily;
-      if (e.context?.practicedOrTransfer === 'transfer') {
-        // A transfer claim only counts when the prompt family is novel —
-        // a practiced prompt replayed later is retention, not transfer.
-        if (family && !slot.provenPromptFamilies.includes(family)) {
-          if (!slot.transferPromptFamilies.includes(family)) slot.transferPromptFamilies.push(family);
-          slot.milestones.transferred = true;
-        }
-      } else if (family && !slot.provenPromptFamilies.includes(family)) {
-        slot.provenPromptFamilies.push(family);
+      const novel = family && !slot.rehearsedPromptFamilies.includes(family);
+      if (novel && !slot.transferPromptFamilies.includes(family)) {
+        slot.transferPromptFamilies.push(family);
+        slot.transferLatencies.push(e.attempt.latencyMs ?? null);
       }
-      if (slot.transferPromptFamilies.length >= 2) slot.milestones.fluent = true;
+      if (slot.transferPromptFamilies.length >= 1) slot.milestones.transferred = true;
+    }
+
+    const baseline = slot.firstIndependentLatencyMs;
+    if (!slot.milestones.fluent && slot.transferPromptFamilies.length >= 2 && baseline != null) {
+      const fastTransfers = slot.transferLatencies.filter(
+        (l) => l != null && l <= baseline * FLUENCY_LATENCY_RATIO
+      ).length;
+      if (fastTransfers >= 2) slot.milestones.fluent = true;
     }
   }
 
-  const rank = (name) => CAPABILITY_STATES.indexOf(name);
   for (const slot of byCapability.values()) {
     let highest = 'NOT_SEEN';
     for (const name of ['EXPOSED', 'SUPPORTED', 'INDEPENDENT', 'RETAINED', 'TRANSFERRED', 'FLUENT']) {
@@ -136,5 +177,5 @@ export function projectLearnerState(events, capabilities, { retentionDelayMs = R
     }
     slot.state = highest;
   }
-  return { byCapability, generatedFrom: sorted.length };
+  return { learnerId, byCapability, generatedFrom: mine.length };
 }

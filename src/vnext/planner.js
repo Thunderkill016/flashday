@@ -16,11 +16,11 @@
  *
  * Every action carries a reason so the plan is explainable.
  */
-import { CAPABILITY_STATES, RETENTION_DELAY_MS, projectLearnerState } from './projection.js';
+import { RETENTION_DELAY_MS, projectLearnerState } from './projection.js';
 import { priorById } from './risk-priors.js';
 
-export function planNext(events, { capabilities, riskPriors = [], now, retentionDelayMs = RETENTION_DELAY_MS }) {
-  const { byCapability } = projectLearnerState(events, capabilities, { retentionDelayMs });
+export function planNext(learnerId, events, { capabilities, riskPriors = [], now, retentionDelayMs = RETENTION_DELAY_MS }) {
+  const { byCapability } = projectLearnerState(learnerId, events, capabilities, { retentionDelayMs });
   const priorMap = new Map(riskPriors.map((p) => [p.id, p]));
 
   /* 1. Resume in-flight work: the encounter started but no attempt
@@ -34,11 +34,14 @@ export function planNext(events, { capabilities, riskPriors = [], now, retention
 
   /* 2. Due retrieval: an independent ability whose last unaided success
    *    is older than the retention window goes back in for a delayed
-   *    check. Earliest due first. */
+   *    check. Earliest due first. A FAILED due check is remediation
+   *    (rule 3), not a reschedule — otherwise the planner re-queues
+   *    delayed_retrieval forever after each failure. */
   let due = null;
   for (const c of capabilities) {
     const s = byCapability.get(c.id);
     if (!s.milestones.independent || s.lastIndependentSuccessAt == null) continue;
+    if (s.lastAttemptOutcome === 'fail' || s.lastAttemptOutcome === 'partial') continue;
     const dueAt = s.lastIndependentSuccessAt + retentionDelayMs;
     if (now >= dueAt && (!due || dueAt < due.dueAt)) {
       due = { kind: 'delayed_retrieval', capabilityId: c.id, dueAt, reason: 'independent success is due for a delayed check' };
