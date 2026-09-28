@@ -633,3 +633,61 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES, REG
     'an eliciting task without evaluator contractId cannot mint independent evidence, however shaped');
   console.log('✓ trust boundary: forged bindings fail registry verification; eliciting tasks require a real evaluator contract');
 }
+
+// ── 14. Registry integrity: revision keying + valid contracts ──
+{
+  const cap = capabilityById('interact.greet');
+
+  // a. Revisions coexist: a v2 registration under the same task id must
+  //    NOT overwrite v1 — historical evidence keeps verifying under the
+  //    contract that actually produced it.
+  const v1 = register(makeTask({
+    id: 't.rev', missionId: 'm.x', capabilityId: cap.id, modality: cap.modality,
+    purpose: 'production', promptFamily: 'p.rev',
+    evaluation: { authority: 'deterministic', contractId: 'eval.rev.v1' }
+  }));
+  const eV1 = bindAttempt(v1, cap, {
+    id: 'rv1', learnerId: LEARNER, occurredAt: T0,
+    attempt: { observed: true, outcome: 'success', response: 'hi', latencyMs: 900, attemptId: 'rv.1' }
+  });
+  const v2 = register({ ...v1, revision: 2, evaluation: { authority: 'deterministic', contractId: 'eval.rev.v2' } });
+  const eV2 = bindAttempt(v2, cap, {
+    id: 'rv2', learnerId: LEARNER, occurredAt: T0 + 50 * HOUR,
+    attempt: { observed: true, outcome: 'success', response: 'hi', latencyMs: 900, attemptId: 'rv.2' }
+  });
+  const sRev = stateOf([eV1, eV2], cap.id);
+  assert.equal(sRev.milestones.independent, true, 'v1 evidence still verifies after v2 registers');
+  assert.equal(sRev.milestones.retained, true, 'v2 event lands on its own contract — replay stays stable');
+
+  // b. Duplicate id@revision is an integrity violation — rejected, not
+  //    last-write-wins.
+  assert.throws(
+    () => projectLearnerState(LEARNER, [], CAPABILITIES, [v1, v1]),
+    /duplicate task registration/,
+    'two registrations of the same id@revision are rejected'
+  );
+
+  // c. A hand-rolled task that fails validateTask can never mint
+  //    evidence — e.g. purpose 'transfer' with no changedDimensions.
+  const badTransfer = {
+    id: 't.badtr', revision: 1, missionId: 'm.x', capabilityId: cap.id,
+    modality: cap.modality, purpose: 'transfer', promptFamily: 'p.badtr',
+    freshness: { required: true, familyClass: 'fresh_transfer' },
+    transfer: { changedDimensions: [] }, // invalid: zero real changes
+    supportPolicy: { allowed: [] },
+    evaluation: { authority: 'deterministic', contractId: 'eval.badtr.v1' }
+  };
+  const forgedTransfer = makeEventRaw({
+    id: 'bt.1', learnerId: LEARNER, capabilityId: cap.id, taskId: 't.badtr', taskRevision: 1,
+    eventType: 'transfer_attempt', modality: cap.modality, occurredAt: T0,
+    context: { missionId: 'm.x', practicedOrTransfer: 'transfer', promptFamily: 'p.badtr', partnerType: 'stranger' },
+    attempt: { observed: true, outcome: 'success', response: 'ok', latencyMs: 100, attemptId: 'bt.1' },
+    evaluation: { authority: 'deterministic', contractId: 'eval.badtr.v1' },
+    binding: { purpose: 'transfer', familyClass: 'fresh_transfer', freshnessRequired: true, effectiveSupportAllowed: [] }
+  });
+  const sBad = projectLearnerState(LEARNER, [forgedTransfer], CAPABILITIES, [badTransfer]).byCapability.get(cap.id);
+  assert.equal(sBad.milestones.independent, false, 'an invalid registry task cannot mint INDEPENDENT');
+  assert.equal(sBad.milestones.transferred, false, 'an invalid registry task cannot mint TRANSFERRED');
+  assert.equal(sBad.state, 'SUPPORTED');
+  console.log('✓ registry: revisions coexist, duplicate id@revision rejected, invalid tasks mint nothing');
+}

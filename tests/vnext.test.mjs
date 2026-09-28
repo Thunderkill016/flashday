@@ -82,7 +82,13 @@ function ev(capabilityId, over = {}) {
       promptFamily: e.context.promptFamily,
       freshness: { required: familyClass !== 'practiced', familyClass },
       supportPolicy: { allowed: targetCap?.conditions?.supportAllowed ?? [] },
-      evaluation: { authority: e.evaluation.authority, contractId: e.evaluation.contractId }
+      evaluation: { authority: e.evaluation.authority, contractId: e.evaluation.contractId },
+      // validateTask() runs on the registry entry during verification —
+      // purpose-specific requirements must be met here too.
+      ...(purpose === 'transfer' ? { transfer: { changedDimensions: ['wording'] } } : {}),
+      ...(purpose === 'assessment' ? {
+        assessment: { capabilitySample: [e.capabilityId], allowedLanguageRange: 'declared_target_range', answerRevealDuringAttempt: false }
+      } : {})
     });
   }
   const task = TEST_TASKS.get(taskId);

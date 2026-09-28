@@ -136,13 +136,22 @@ export function projectLearnerState(learnerId, events, capabilities, tasks, { re
     throw new Error('projectLearnerState requires a learnerId');
   }
   // The task registry is the trust boundary for independent credit:
-  // events whose taskId does not resolve to a registered contract, or
-  // whose stamped semantics disagree with it, are still recorded
-  // (EXPOSED/SUPPORTED) but can never prove independence.
+  // events whose taskId@taskRevision does not resolve to a registered
+  // contract, or whose stamped semantics disagree with it, are still
+  // recorded (EXPOSED/SUPPORTED) but can never prove independence.
+  // Keyed by id@revision — a v2 contract must not overwrite v1, or
+  // replaying history would silently reinterpret old evidence under a
+  // different contract. Duplicate id@revision registrations are an
+  // integrity violation, not a last-write-wins.
   if (!Array.isArray(tasks)) {
     throw new Error('projectLearnerState requires the registered task list');
   }
-  const taskById = new Map(tasks.map((t) => [t.id, t]));
+  const taskByRev = new Map();
+  for (const t of tasks) {
+    const key = `${t?.id}@${t?.revision}`;
+    if (taskByRev.has(key)) throw new Error(`duplicate task registration '${key}'`);
+    taskByRev.set(key, t);
+  }
   const byId = new Map(capabilities.map((c) => [c.id, c]));
   const byCapability = new Map(capabilities.map((c) => [c.id, emptyCapability()]));
 
@@ -203,7 +212,7 @@ export function projectLearnerState(learnerId, events, capabilities, tasks, { re
     slot.lastAttemptOutcome = e.attempt.outcome;
     if (!isSuccess(e)) continue;
 
-    if (!isIndependent(e, cap, effSupport, taskById.get(e.taskId))) {
+    if (!isIndependent(e, cap, effSupport, taskByRev.get(`${e.taskId}@${e.taskRevision}`))) {
       slot.milestones.supported = true;
       continue;
     }

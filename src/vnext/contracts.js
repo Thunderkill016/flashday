@@ -141,6 +141,10 @@ const sameStringSet = (a, b) =>
  * can mark EXPOSED/SUPPORTED — but it can never mint INDEPENDENT. */
 export function verifyEventTask(event, task, capability) {
   if (!task || !capability) return false;
+  // The registry entry must itself be a valid contract — a hand-rolled
+  // task (e.g. purpose 'transfer' with no changedDimensions) is never
+  // trusted, however closely an event's fields happen to match it.
+  if (validateTask(task).length) return false;
   const e = event;
   if (e.taskRevision !== task.revision) return false;
   if (e.capabilityId !== task.capabilityId || task.capabilityId !== capability.id) return false;
