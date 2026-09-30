@@ -156,9 +156,11 @@ export function nextMissionTask({ learnerId, mission, tasks, capabilities, event
     ...(mission.supportCapabilities ?? [])
   ]);
   const scopedCaps = capabilities.filter((c) => surface.has(c.id));
+  const targets = new Set(mission.targetCapabilities ?? []);
   const roles = {
-    targets: new Set(mission.targetCapabilities ?? []),
-    supports: new Set(mission.supportCapabilities ?? [])
+    targets,
+    supports: new Set(mission.supportCapabilities ?? []),
+    prereqs: new Set(mission.prerequisiteCapabilities ?? [])
   };
 
   /* Exposure-phase tasks are one-shot: re-running consumed input is
@@ -188,6 +190,14 @@ export function nextMissionTask({ learnerId, mission, tasks, capabilities, event
     pick(capId, EXPOSURE, { unattemptedOnly: true })
       ?? pick(capId, ELICITABLE, { unattemptedOnly: true });
 
+  /* An intent the mission cannot serve is recorded per (capability,
+   * kind) and that kind is silenced for THIS call — but it only counts
+   * as a hard block when it belongs to a claim-bearing TARGET. Due,
+   * transfer or remediation intents on carriers/prerequisite gates are
+   * cross-mission backlog (their claim path lives in their origin
+   * mission or a later cumulative checkpoint), not this mission's
+   * integrity problem — reporting them as `blocked` would freeze every
+   * later mission on stale evidence it was never meant to serve. */
   const skipped = [];
   const excluded = new Set();
   for (;;) {
@@ -212,7 +222,7 @@ export function nextMissionTask({ learnerId, mission, tasks, capabilities, event
       return ready(task, `${plan.kind} on ${plan.capabilityId}: ${plan.reason}`);
     }
     const purposes = INTENT_PURPOSES[plan.kind] ?? [...EXPOSURE, ...ELICITABLE];
-    skipped.push(`${plan.capabilityId}: planner wants '${plan.kind}' but the mission has no compatible task (${purposes.join('/')})`);
+    skipped.push({ capabilityId: plan.capabilityId, kind: plan.kind, reason: `${plan.capabilityId}: planner wants '${plan.kind}' but the mission has no compatible task (${purposes.join('/')})` });
     excluded.add(`${plan.capabilityId}|${plan.kind}`);
   }
 
@@ -233,12 +243,23 @@ export function nextMissionTask({ learnerId, mission, tasks, capabilities, event
           ? `assessment re-probe after ${latest.outcome} outcome — TRANSFERRED still requires a fresh pass`
           : 'assessment plan requires a fresh sample after transfer');
       }
-      skipped.push(`${t.capabilityId}: assessment '${keyOf(t)}' waits for TRANSFERRED`);
+      skipped.push({ capabilityId: t.capabilityId, kind: 'checkpoint', reason: `${t.capabilityId}: assessment '${keyOf(t)}' waits for TRANSFERRED` });
     }
   }
 
-  if (skipped.length) return blocked(skipped.join('; '));
-  return { status: 'idle', taskId: null, taskRevision: null, capabilityId: null, purpose: null, reason: 'no planner intents and no pending assessment — mission plan exhausted' };
+  const fatal = skipped.filter((s) => targets.has(s.capabilityId));
+  if (fatal.length) return blocked([...skipped.map((s) => s.reason)].join('; '));
+  return {
+    status: 'idle',
+    taskId: null,
+    taskRevision: null,
+    capabilityId: null,
+    purpose: null,
+    reason: skipped.length
+      ? `mission plan exhausted; cross-mission backlog remains: ${skipped.map((s) => s.reason).join('; ')}`
+      : 'no planner intents and no pending assessment — mission plan exhausted',
+    skippedIntents: skipped.map((s) => s.reason)
+  };
 }
 
 /* Headless trace helper (issue #47 §8): drives a scripted learner

@@ -119,6 +119,119 @@ export const CAPABILITIES = [
     language: { chunks: ['Can I have …?', 'A coffee, please'], vocabulary: ['coffee', 'tea', 'please'] },
     vietnameseRiskProbes: ['vn.inflectional_endings', 'vn.lexical_stress']
   }),
+  /* ── M3–M7 additions (R6). Substrate caps carry NO DAG edges —
+   * number/direction-term recognition is support material the planner
+   * may probe on demand, not a hard gate: CEFR A1 never requires
+   * general number mastery before time/price activities. Interaction
+   * targets edge only to the reception capability that genuinely
+   * constrains them. ─────────────────────────────────────────────── */
+  cap({
+    id: 'reception.listen.identify_spoken_number',
+    performance: 'Catch a spoken number word (one–twenty) inside a short utterance.',
+    modality: 'listening',
+    criteria: { meaningDelivered: true, intelligibleEnoughForPartner: false, requiredFunctions: ['identify_spoken_number'] },
+    language: { vocabulary: ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'] },
+    vietnameseRiskProbes: ['vn.english_intonation', 'vn.consonant_clusters']
+  }),
+  cap({
+    id: 'reception.listen.understand_clock_time',
+    performance: "Understand a stated clock time ('It's three o'clock', 'at half past two').",
+    modality: 'listening',
+    criteria: { meaningDelivered: true, intelligibleEnoughForPartner: false, requiredFunctions: ['understand_clock_time'] },
+    language: { chunks: ["It's … o'clock", 'at …', 'half past …'], vocabulary: ['time', 'clock'] },
+    vietnameseRiskProbes: ['vn.theta_eth', 'vn.english_intonation']
+  }),
+  cap({
+    id: 'production.speak.state_clock_time',
+    performance: "Say a clock time when asked ('It's two o'clock').",
+    modality: 'spoken_production',
+    prerequisites: ['reception.listen.understand_clock_time'],
+    criteria: { meaningDelivered: true, intelligibleEnoughForPartner: true, requiredFunctions: ['state_clock_time'] },
+    language: { chunks: ["It's … o'clock", 'half past …', 'at …'], vocabulary: ['time', 'clock'] },
+    vietnameseRiskProbes: ['vn.word_final_consonants', 'vn.lexical_stress']
+  }),
+  cap({
+    id: 'reception.listen.understand_simple_choice',
+    performance: "Understand a spoken either/or offer ('Small or large?').",
+    modality: 'listening',
+    criteria: { meaningDelivered: true, intelligibleEnoughForPartner: false, requiredFunctions: ['understand_simple_choice'] },
+    language: { chunks: ['… or …?'], vocabulary: ['or', 'small', 'large', 'this', 'that'] },
+    vietnameseRiskProbes: ['vn.english_intonation', 'vn.consonant_clusters']
+  }),
+  cap({
+    id: 'interaction.answer_simple_choice',
+    performance: 'Pick one option from a spoken either/or offer.',
+    modality: 'spoken_interaction',
+    criteria: { meaningDelivered: true, intelligibleEnoughForPartner: true, requiredFunctions: ['answer_simple_choice'] },
+    language: { chunks: ['The … one, please', 'A … one, please', '…, please'], vocabulary: ['small', 'large', 'please'] },
+    vietnameseRiskProbes: ['vn.word_final_consonants', 'vn.lexical_stress']
+  }),
+  cap({
+    id: 'interaction.thank',
+    performance: "Thank a partner politely in a service exchange ('Thank you', 'Thanks').",
+    modality: 'spoken_interaction',
+    criteria: { meaningDelivered: true, intelligibleEnoughForPartner: true, requiredFunctions: ['thank'] },
+    language: { chunks: ['Thank you', 'Thanks'], vocabulary: ['thank'] },
+    vietnameseRiskProbes: ['vn.theta_eth', 'vn.speaking_anxiety_support']
+  }),
+  cap({
+    id: 'interaction.ask_price',
+    performance: "Ask the price of an item ('How much is this?').",
+    modality: 'spoken_interaction',
+    criteria: { meaningDelivered: true, intelligibleEnoughForPartner: true, requiredFunctions: ['ask_price'] },
+    language: { chunks: ['How much is this?', 'How much is it?'], vocabulary: ['much', 'this', 'price'] },
+    vietnameseRiskProbes: ['vn.question_formation', 'vn.word_final_consonants']
+  }),
+  cap({
+    id: 'reception.listen.understand_spoken_price',
+    performance: "Understand a stated price ('Two dollars', 'Five fifty').",
+    modality: 'listening',
+    criteria: { meaningDelivered: true, intelligibleEnoughForPartner: false, requiredFunctions: ['understand_spoken_price'] },
+    language: { chunks: ["It's …", '… dollars', '…, please'], vocabulary: ['dollar', 'fifty'] },
+    vietnameseRiskProbes: ['vn.english_intonation', 'vn.theta_eth']
+  }),
+  cap({
+    id: 'interaction.ask_location',
+    performance: "Ask where a place is ('Where is the station?').",
+    modality: 'spoken_interaction',
+    criteria: { meaningDelivered: true, intelligibleEnoughForPartner: true, requiredFunctions: ['ask_location'] },
+    language: { chunks: ['Where is the …?', 'Where is …?'], vocabulary: ['where', 'station', 'toilet', 'bank'] },
+    vietnameseRiskProbes: ['vn.question_formation', 'vn.lexical_stress']
+  }),
+  cap({
+    id: 'reception.listen.follow_short_direction',
+    performance: 'Follow a short spoken direction (turn left, go straight, on the right).',
+    modality: 'listening',
+    criteria: { meaningDelivered: true, intelligibleEnoughForPartner: false, requiredFunctions: ['follow_short_direction'] },
+    language: { chunks: ['Turn left', 'Go straight', 'On the right', 'Next to …'], vocabulary: ['left', 'right', 'straight'] },
+    vietnameseRiskProbes: ['vn.consonant_clusters', 'vn.word_final_consonants']
+  }),
+  cap({
+    id: 'reception.listen.identify_basic_direction_term',
+    performance: 'Catch a basic direction term (left, right, straight) inside an utterance.',
+    modality: 'listening',
+    criteria: { meaningDelivered: true, intelligibleEnoughForPartner: false, requiredFunctions: ['identify_basic_direction_term'] },
+    language: { vocabulary: ['left', 'right', 'straight', 'turn'] },
+    vietnameseRiskProbes: ['vn.consonant_clusters']
+  }),
+  cap({
+    id: 'production.speak.state_basic_self_detail',
+    performance: "State one basic personal detail when asked ('I'm from Vietnam', 'I live in Hanoi').",
+    modality: 'spoken_production',
+    prerequisites: ['production.speak.say_own_name'],
+    criteria: { meaningDelivered: true, intelligibleEnoughForPartner: true, requiredFunctions: ['state_basic_self_detail'] },
+    language: { chunks: ["I'm from …", 'I live in …', 'I work in …'], vocabulary: ['from', 'live', 'work'] },
+    vietnameseRiskProbes: ['vn.copula_be', 'vn.lexical_stress']
+  }),
+  cap({
+    id: 'production.speak.describe_family_member_basic',
+    performance: "Describe a family member in one or two simple phrases ('This is my mother. She's a teacher.').",
+    modality: 'spoken_production',
+    prerequisites: ['production.speak.state_basic_self_detail'],
+    criteria: { meaningDelivered: true, intelligibleEnoughForPartner: true, requiredFunctions: ['describe_family_member_basic'] },
+    language: { chunks: ['This is my …', 'My … is …', "She's …", "He's …"], vocabulary: ['mother', 'father', 'sister', 'brother', 'family'] },
+    vietnameseRiskProbes: ['vn.theta_eth', 'vn.inflectional_endings']
+  }),
   cap({
     id: 'reception.read.simple_sign_or_menu_item',
     performance: 'Read a very simple sign or menu item (EXIT, OPEN, coffee, tea).',

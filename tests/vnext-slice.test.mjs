@@ -20,7 +20,10 @@ import { bindAttempt, bindObservation } from '../src/vnext/bind.js';
 import { makeEvent } from '../src/vnext/evidence.js';
 import { nextMissionTask, runMissionTrace } from '../src/vnext/mission-runner.js';
 import { RISK_PRIORS } from '../src/vnext/risk-priors.js';
-import { MISSION_MEET_PERSON, TASKS_MEET_PERSON } from '../src/vnext/fixtures.js';
+import {
+  MISSION_MEET_PERSON, TASKS_MEET_PERSON,
+  MISSION_MEET_AT_TIME, TASKS_MEET_AT_TIME
+} from '../src/vnext/fixtures.js';
 
 const T0 = Date.parse('2026-03-02T09:00:00Z');
 const HOUR = 3600_000;
@@ -399,6 +402,119 @@ const row = (step) => trace[step - 1];
   assert.notEqual(sel12.taskId, 'task.meet.transfer.street');
   assert.notEqual(sel12.taskId, 'task.meet.assessment.checkpoint');
   console.log('✓ expose/resume fallback never drifts into remediation, delayed, transfer or assessment');
+}
+
+// ── Cross-mission slice: M3 meet_at_a_time on an M1-graduate ───
+// The R6 mission set gates carriers on prior-mission prerequisites —
+// ask_name's DAG edge needs identity_question_basic + say_own_name
+// INDEPENDENT, which only M1 evidence can supply. A learner with those
+// carried milestones walks the same evidence chain in the new content.
+{
+  const TASKS3 = TASKS_MEET_AT_TIME;
+  // M1 evidence carried into M3: the prereq chain ask_name needs is
+  // already INDEPENDENT; greeting_basic only has EXPOSURE — the M3
+  // comprehension task is the curriculum's only eliciting path for it.
+  const seeds = [
+    bindAttempt(taskById('task.meet.retrieval.questions'), capabilityById('reception.listen.identity_question_basic'), {
+      id: 'm3.s1', learnerId: LEARNER, occurredAt: T0 - 2 * HOUR,
+      attempt: { observed: true, outcome: 'success', response: 'ok', latencyMs: 900, attemptId: 'm3.si' }
+    }),
+    bindAttempt(taskById('task.meet.retrieval.phrases'), capabilityById('production.speak.say_own_name'), {
+      id: 'm3.s2', learnerId: LEARNER, occurredAt: T0 - 2 * HOUR + 1000,
+      attempt: { observed: true, outcome: 'success', response: "I'm Linh", latencyMs: 900, attemptId: 'm3.so' }
+    }),
+    bindObservation(taskById('task.meet.input.scene'), capabilityById('reception.listen.greeting_basic'), {
+      id: 'm3.s3', learnerId: LEARNER, occurredAt: T0 - 2 * HOUR + 2000, eventType: 'exposure'
+    })
+  ];
+  const SCRIPT3 = {
+    'task.time.diagnostic.hear': [[{ attempt: { observed: true, outcome: 'fail', response: 'four', latencyMs: 3000, attemptId: 'd.hr' } }]],
+    'task.time.diagnostic.say': [[{ attempt: { observed: true, outcome: 'fail', response: '…', latencyMs: 4000, attemptId: 'd.sy' } }]],
+    'task.time.retrieval.greeting': [[{ attempt: { observed: true, outcome: 'success', response: 'greeting', latencyMs: 800, attemptId: 'r.gr' } }]],
+    'task.time.input.scene': [[{ observe: 'exposure' }]],
+    'task.time.retrieval.greet': [[{ attempt: { observed: true, outcome: 'success', response: 'Hi!', latencyMs: 700, attemptId: 'r.gt' } }]],
+    'task.time.interaction.ask_name': [[{ attempt: { observed: true, outcome: 'success', response: "What's your name?", latencyMs: 1100, attemptId: 'i.an' } }]],
+    'task.time.input.clock': [[{ observe: 'exposure' }]],
+    'task.time.retrieval.hear': [[{ attempt: { observed: true, outcome: 'success', response: 'half_four', latencyMs: 900, attemptId: 'r.hr' } }]],
+    'task.time.retrieval.say': [[{ attempt: { observed: true, outcome: 'success', response: "It's three o'clock", latencyMs: 1000, attemptId: 'r.sy' } }]],
+    'task.time.interaction.guided': [[{ attempt: { observed: true, outcome: 'success', response: "It's two o'clock", latencyMs: 1200, attemptId: 'g.sy' }, support: { modelAnswer: true } }]],
+    'task.time.interaction.unaided': [[{ attempt: { observed: true, outcome: 'success', response: "It's two o'clock", latencyMs: 1100, attemptId: 'u.sy' } }]],
+    'task.time.delayed.hear': [[{ attempt: { observed: true, outcome: 'success', response: 'six', latencyMs: 1000, attemptId: 'dr.hr' } }]],
+    'task.time.delayed.say': [[{ attempt: { observed: true, outcome: 'success', response: 'At three', latencyMs: 1000, attemptId: 'dr.sy' } }]],
+    'task.time.transfer.clinic': [[{ attempt: { observed: true, outcome: 'success', response: 'half_ten', latencyMs: 1400, attemptId: 'tr.hr' } }]],
+    'task.time.transfer.event': [[{ attempt: { observed: true, outcome: 'success', response: 'At six', latencyMs: 1300, attemptId: 'tr.sy' } }]],
+    'task.time.assessment.hear': [[{ attempt: { observed: true, outcome: 'success', response: 'nine', latencyMs: 1200, attemptId: 'ck.hr' } }]],
+    'task.time.assessment.checkpoint': [[{ attempt: { observed: true, outcome: 'success', response: "Hi, it's three o'clock. What's your name?", latencyMs: 1600, attemptId: 'ck.sy' } }]]
+  };
+  const STEP3 = (step) => {
+    if (step <= 9) return T0 + step * 1000;
+    return T0 + 9_000 + RETENTION_DELAY_MS + (step - 9) * HOUR;
+  };
+  const queues = {};
+  const { trace: trace3 } = runMissionTrace({
+    learnerId: LEARNER,
+    mission: MISSION_MEET_AT_TIME,
+    /* The registry is the union of both missions' tasks — carried M1
+     * evidence must verify or the prereq gates look unmet; routing
+     * stays scoped to mission.taskIds. */
+    tasks: [...TASKS, ...TASKS3],
+    capabilities: CAPABILITIES,
+    events: seeds,
+    riskPriors: RISK_PRIORS,
+    nowAt: STEP3,
+    act: (task, { step }) => {
+      const q = queues[task.id] ?? (queues[task.id] = [...(SCRIPT3[task.id] ?? [])]);
+      return (q.shift() ?? []).map((s, i) => ({
+        id: nextId(), learnerId: LEARNER, occurredAt: STEP3(step) + i * 500, ...s
+      }));
+    }
+  });
+  const seq3 = trace3.filter((t) => t.taskId).map((t) => t.taskId);
+  assert.deepEqual(seq3, [
+    'task.time.diagnostic.hear',   // targets probe baseline first
+    'task.time.diagnostic.say',
+    'task.time.retrieval.greeting',// greeting_basic EXPOSED → completes to INDEPENDENT
+    'task.time.input.clock',       // failed targets get teaching
+    'task.time.retrieval.hear',
+    'task.time.retrieval.say',
+    'task.time.input.scene',       // greet carrier introduced: input, no baseline
+    'task.time.retrieval.greet',
+    'task.time.interaction.ask_name', // ask_name carrier rehearses once prereqs hold
+    'task.time.delayed.hear',      // after the retention jump
+    'task.time.delayed.say',
+    'task.time.transfer.clinic',
+    'task.time.transfer.event',
+    'task.time.assessment.hear',   // fresh comprehension sample
+    'task.time.assessment.checkpoint' // fresh spoken sample incl. M1 carriers
+  ], `M3 should walk the same evidence chain:\n${trace3.map((t) => `${t.step}: ${t.taskId} [${t.beforeState}→${t.afterState}] ${t.reason}`).join('\n')}`);
+
+  const rows3 = (s) => trace3[s - 1];
+  assert.equal(rows3(1).afterState, 'EXPOSED', 'baseline fail → EXPOSED');
+  assert.equal(rows3(3).afterState, 'INDEPENDENT', 'prereq gate cap completes via its only eliciting task');
+  assert.equal(rows3(5).afterState, 'INDEPENDENT', 'unaided retrieval → INDEPENDENT');
+  assert.equal(rows3(8).afterState, 'INDEPENDENT', 'carrier greets opportunistically');
+  assert.equal(rows3(10).afterState, 'RETAINED', '24h+ delayed → RETAINED');
+  assert.equal(rows3(12).afterState, 'TRANSFERRED');
+  assert.equal(rows3(15).afterState, 'TRANSFERRED', 'assessment does not move state');
+  // Carriers receive no probes/certification in M3 either.
+  for (const t of trace3.filter((t) => t.taskId)) {
+    const task = TASKS3.find((x) => x.id === t.taskId);
+    if (MISSION_MEET_AT_TIME.carrierCapabilities.includes(task.capabilityId)) {
+      assert.ok(!['diagnostic', 'transfer', 'assessment'].includes(task.purpose),
+        `carrier ${task.capabilityId} got a claim-bearing ${task.purpose} task`);
+    }
+  }
+  // The lazy support cap is never routed — no demand mechanism exists.
+  assert.ok(!seq3.some((id) => TASKS3.find((x) => x.id === id)?.capabilityId === 'reception.listen.identify_spoken_number'),
+    'support cap must stay lazy — nothing may route to it');
+  // Once the seeded M1 evidence goes stale, its due re-checks are
+  // cross-mission backlog — they cannot freeze M3's terminal state.
+  const last3 = trace3[trace3.length - 1];
+  assert.equal(last3.status, 'idle',
+    `uncoverable intents on non-target caps must end the mission 'idle', not 'blocked': ${last3.reason}`);
+  assert.ok(last3.reason.includes('backlog'),
+    `the backlog must stay visible in the terminal reason: ${last3.reason}`);
+  console.log('✓ M3 cross-mission slice: prereq gates carry M1 evidence, carriers rehearse, lazy support never routed');
 }
 
 console.log('vNext slice: all checks passed');

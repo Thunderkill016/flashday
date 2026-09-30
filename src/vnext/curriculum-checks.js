@@ -39,9 +39,11 @@ import { validateGraph } from './capabilities.js';
 export const MAX_TARGETS_PER_MISSION = 3;
 
 /* R6: the binding constraint on a mission is the ACTIVE SURFACE —
- * targets + carriers + supports + prerequisites together. Beyond this
- * the diagnostic/exposure phase explodes and attention dilutes; split
- * the content into a second mission instead. */
+ * targets + carriers + supports: the capabilities the mission can
+ * actually serve tasks to. Declared `prerequisiteCapabilities` are
+ * read-only gates (evidence carried from earlier missions) — they are
+ * not counted here because they never consume diagnostic, exposure or
+ * rehearsal bandwidth in THIS mission. */
 export const MAX_SURFACE_CAPABILITIES = 6;
 
 /* TRANSFER_DIMENSIONS are the contract's v0 vocabulary; the signature
@@ -98,10 +100,9 @@ export function checkCurriculum({ capabilities = [], missions = [], tasks = [] }
     }
     const surface = targets.length +
       (mission?.carrierCapabilities ?? []).length +
-      (mission?.supportCapabilities ?? []).length +
-      (mission?.prerequisiteCapabilities ?? []).length;
+      (mission?.supportCapabilities ?? []).length;
     if (surface > MAX_SURFACE_CAPABILITIES) {
-      problems.push(`${tag}: ${surface} declared capabilities — the active surface is capped at ${MAX_SURFACE_CAPABILITIES}; split into another mission`);
+      problems.push(`${tag}: ${surface} active capabilities — the active surface is capped at ${MAX_SURFACE_CAPABILITIES} (prerequisite gates excluded); split into another mission`);
     }
     for (const capId of targets) {
       const capTasks = missionTasks.filter((t) => t.capabilityId === capId);
