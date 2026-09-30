@@ -23,14 +23,17 @@ import { nextMissionTask } from '../../src/vnext/mission-runner.js';
 import { capabilityById, FIXTURES } from '../../src/vnext/fixtures.js';
 import { CAPABILITIES } from '../../src/vnext/capabilities.js';
 import { LEARNING_POLICY_V1 } from '../../src/vnext/policy.js';
-import { RISK_PRIORS } from '../../src/vnext/risk-priors.js';
+import { RISK_PRIORS, priorById } from '../../src/vnext/risk-priors.js';
+import { contractAttributesFunctions } from '../../src/vnext/evaluators.js';
+import { canonicalFamilyId } from '../../src/vnext/contracts.js';
 import { engineState } from '../../src/vnext/next-for-you/selector.js';
 import { policyB, PURPOSE_TO_KIND } from '../../src/vnext/next-for-you/policies.js';
-import { INTENT_PURPOSES } from '../../src/vnext/next-for-you/candidate-generator.js';
 import { validateDecision } from '../../src/vnext/next-for-you/validator.js';
 import { emptyContext, recordChoice } from '../../src/vnext/next-for-you/decision-context.js';
+import { generateCandidates } from '../../src/vnext/next-for-you/candidate-generator.js';
+import { projectLearnerState } from '../../src/vnext/projection.js';
 import { KINDS } from '../../src/vnext/next-for-you/constants.js';
-import { attemptEvent, observeEvent, seedIndependentHistory, ARCHETYPES } from './scenarios.js';
+import { attemptEvent, observeEvent, seedIndependentHistory, missionState, ARCHETYPES } from './scenarios.js';
 
 const MIN = 60_000;
 const HOUR = 3600_000;
@@ -293,29 +296,170 @@ export function runCorpus(fixtures, { steps = 40, matrix = DIFFERENTIAL_MATRIX }
   return all;
 }
 
-/* ── HIGH-7: trajectory-independent B0 content coverage audit ──────
+/* ── HIGH-7 + 008D: trajectory-independent coverage audit — a
+ * CONSERVATIVE SEMANTIC REACHABILITY audit, not a state-space proof ──
+ *
  * The differential corpus is REFERENCE-driven — B0-only states are
  * unreachable inside it, so "0 CONTENT-GAP rows" can never prove "no
- * content gaps". This audit instead enumerates every intent kind B0
- * can mint for each mission-surface capability and asks the static
- * question: does the authored task surface contain at least one task
- * whose purpose can serve it? Plus the assessment-family backlog:
- * claim-bearing caps whose only assessment tasks reuse a family the
- * teaching surface already consumed. */
-const MINTABLE_BY_ROLE = {
-  target: [
-    'diagnostic_probe', 'correction', 'refresh', 'independent_attempt',
-    'due_retrieval', 'transfer', 'assessment', 'mission_continuation',
-    'new_input', 'resume_in_flight'
-  ],
-  carrier: [
-    'diagnostic_probe', 'correction', 'refresh', 'independent_attempt',
-    'mission_continuation', 'new_input', 'resume_in_flight'
-  ],
-  prereq: ['mission_continuation', 'new_input', 'resume_in_flight'],
-  support: ['support_demand']
-};
-const TEACHING_PURPOSES = new Set(['diagnostic', 'input', 'notice', 'retrieval', 'production', 'interaction', 'remediation', 'delayed_retrieval', 'transfer']);
+ * content gaps". This audit instead derives, per mission-surface
+ * capability, the authored REACHABILITY envelope and mirrors
+ * candidate-generator.js's mint conditions as a static surface model.
+ *
+ * SCOPE LIMIT (review 008D-R1): `attemptable` / `attributable` /
+ * `freshTransfer` are EXISTENTIAL surface properties; actual minting
+ * also depends on temporal learner state (milestone ladders, last
+ * observed outcome, unresolved-function lifecycle, prerequisites,
+ * budgets, prior consumption). This audit is excellent for content
+ * triage — it is NOT an exhaustive proof that a given learner state
+ * can or cannot produce a serve. Every `required` finding therefore
+ * carries an EXECUTABLE WITNESS (`requiredWitness`): a built engine
+ * state where the intent's mint preconditions genuinely hold and the
+ * generator confirms there is nothing servable.
+ *
+ * Surface conditions mirrored from candidate-generator.js:
+ *
+ *   - EXPOSED is set by ANY verified modality-matching event
+ *     (projection.js), so an eliciting task doubles as introduction
+ *     (pendingPhase's exposure→eliciting fallthrough).
+ *   - independent/retained are reachable from ANY attempt-binding
+ *     task; retained needs no delayed_retrieval purpose (two
+ *     independent successes ≥ lag suffice).
+ *   - transferred needs a transfer task on a family NO non-transfer
+ *     task consumes (projection counts only novel-family transfer
+ *     successes).
+ *   - correction mints only on ATTRIBUTED consecutive failure — a cap
+ *     whose attempt tasks all carry non-attributing contracts can
+ *     never mint it; the failure path self-suppresses (no fabricated
+ *     substrate diagnosis).
+ *   - diagnostic_probe post-baseline paths self-suppress when no
+ *     diagnostic task exists; only the baseline probe (targets and
+ *     risk-triggered prereqs) mints unconditionally.
+ *   - assessment iterates authored assessment tasks — none authored
+ *     means the intent never mints, but assessmentPlan.required makes
+ *     it authoring debt, not a benign absence.
+ *
+ * Each (capability, intent) pair then lands in exactly one class:
+ *   covered       mintable AND servable on the authored surface
+ *                 (`derivation` notes fallback servable paths, e.g.
+ *                 new_input introduced by an eliciting task)
+ *   required      mintable, nothing servable, claim/repair-bearing
+ *                 role (target / support / prereq) — a learner-facing
+ *                 dead end on the evidence chain; an executable
+ *                 witness state backs each row (`witness`)
+ *   optional      mintable, nothing servable, carrier role — degraded
+ *                 recovery surface; carriers own no claim
+ *   not_mintable  structurally unreachable under the authored surface
+ *                 — audit-visible, NOT a gap; `reason` names the
+ *                 concrete structural cause
+ */
+const G_EXPOSURE = ['input', 'notice'];
+const G_ELICITING = ['retrieval', 'production', 'interaction'];
+const ATTEMPT_BINDING = (t) => t.response?.type != null && t.response.type !== 'none';
+const famOf = (t) => t?.contextSignature
+  ? canonicalFamilyId(t.capabilityId, t.contextSignature)
+  : (t?.promptFamily ?? null);
+
+/* The authored-surface reachability envelope for one capability. */
+function capProfile(tasks) {
+  const purposes = new Set(tasks.map((t) => t.purpose));
+  const attemptTasks = tasks.filter(ATTEMPT_BINDING);
+  const nonTransferFams = new Set(tasks.filter((t) => t.purpose !== 'transfer').map(famOf).filter(Boolean));
+  const teachingFams = new Set(tasks.filter((t) => t.purpose !== 'assessment').map(famOf).filter(Boolean));
+  return {
+    exposure: purposes.has('input') || purposes.has('notice'),
+    eliciting: purposes.has('retrieval') || purposes.has('production') || purposes.has('interaction'),
+    retrieval: purposes.has('retrieval'),
+    diagnostic: purposes.has('diagnostic'),
+    remediation: purposes.has('remediation'),
+    delayed: purposes.has('delayed_retrieval'),
+    support: purposes.has('support'),
+    attemptable: attemptTasks.length > 0,
+    attributable: attemptTasks.some((t) => contractAttributesFunctions(t.evaluation?.contractId)),
+    /* A transfer task whose family collides with a non-transfer
+     * authored family can never demonstrate novelty. */
+    freshTransfer: tasks.some((t) => t.purpose === 'transfer' && famOf(t) && !nonTransferFams.has(famOf(t))),
+    freshAssessment: tasks.some((t) => t.purpose === 'assessment' && famOf(t) && !teachingFams.has(famOf(t)))
+  };
+}
+
+/* Mintability + servability per intent kind, mirroring
+ * candidate-generator.js. `probeTrigger` marks a prereq-role cap whose
+ * vietnameseRiskProbes route its introduction to DIAGNOSTIC_PROBE.
+ * `notMintableReason` names the structural cause when `mintable` is
+ * false — every not_mintable row carries it so the class is a concrete
+ * derivation, not an aggregate-count inference. */
+const INTENT_MODEL = [
+  {
+    kind: 'diagnostic_probe',
+    mintable: (role, p, probeTrigger) =>
+      role === 'target' || (role === 'prereq' && probeTrigger) || p.diagnostic,
+    servable: (p) => p.diagnostic,
+    notMintableReason: (role, p) => (!p.diagnostic
+      ? `${role}_intro_mints_${role === 'carrier' ? 'new_input' : 'probe_or_input'}_and_no_diagnostic_task`
+      : `${role}_intro_does_not_probe`)
+  },
+  {
+    kind: 'new_input',
+    mintable: (role, p, probeTrigger) => role === 'carrier' || (role === 'prereq' && !probeTrigger),
+    servable: (p) => p.exposure || p.eliciting,
+    servedBy: (p) => (p.exposure ? 'exposure' : 'eliciting_intro'),
+    notMintableReason: (role, p, probeTrigger) =>
+      role === 'target' ? 'target_intro_mints_baseline_probe' : 'prereq_intro_mints_risk_probe'
+  },
+  {
+    kind: 'resume_in_flight',
+    mintable: (role, p) => p.exposure || p.attemptable,
+    servable: (p) => p.exposure || p.eliciting,
+    notMintableReason: () => 'no_exposure_or_attempt_surface'
+  },
+  {
+    kind: 'mission_continuation',
+    mintable: (role, p) => p.exposure || p.attemptable,
+    servable: (p) => p.exposure || p.eliciting,
+    notMintableReason: () => 'no_exposure_or_attempt_surface'
+  },
+  {
+    kind: 'independent_attempt',
+    mintable: (role, p) => p.attemptable,
+    servable: (p) => p.eliciting,
+    notMintableReason: () => 'no_attempt_binding_task'
+  },
+  {
+    kind: 'refresh',
+    mintable: (role, p) => p.attemptable,
+    servable: (p) => p.remediation || p.retrieval,
+    servedBy: (p) => (p.remediation ? 'remediation' : 'retrieval'),
+    notMintableReason: () => 'no_attempt_binding_task'
+  },
+  {
+    kind: 'correction',
+    mintable: (role, p) => p.attemptable && p.attributable,
+    servable: (p) => p.remediation,
+    notMintableReason: (role, p) => (!p.attemptable
+      ? 'no_attempt_binding_task'
+      : 'no_attributing_evaluator')
+  },
+  {
+    kind: 'due_retrieval',
+    mintable: (role, p) => p.attemptable,
+    servable: (p) => p.delayed,
+    notMintableReason: () => 'no_attempt_binding_task'
+  },
+  {
+    kind: 'transfer',
+    mintable: (role, p) => role === 'target' && p.attemptable,
+    servable: (p) => p.freshTransfer,
+    notMintableReason: (role, p) => (role !== 'target'
+      ? 'non_target_role'
+      : 'no_attempt_binding_task')
+  },
+  {
+    kind: 'support_demand',
+    mintable: (role, p) => role === 'support',
+    servable: (p) => p.support,
+    notMintableReason: () => 'non_support_role_demand_routed_only'
+  }
+];
 
 export function contentCoverageAudit(fixture) {
   const mission = fixture.mission;
@@ -331,41 +475,190 @@ export function contentCoverageAudit(fixture) {
     : (mission.supportCapabilities ?? []).includes(capId) ? 'support'
     : (mission.prerequisiteCapabilities ?? []).includes(capId) ? 'prereq'
     : 'carrier';
-  const gaps = [];
+  const findings = [];
   const rows = [];
+  const pushRow = (row) => {
+    rows.push(row);
+    if (row.class !== 'covered') findings.push(row);
+  };
+  const classify = (capId, role, kind, mintable, servable, extra = {}) => {
+    const cls = !mintable ? 'not_mintable'
+      : servable ? 'covered'
+      : (role === 'target' || role === 'support' || role === 'prereq') ? 'required'
+      : 'optional';
+    pushRow({ capabilityId: capId, role, kind, mintable, servable, class: cls, ...extra });
+  };
+
   for (const capId of surface) {
     const tasks = scopedTasks.filter((t) => t.capabilityId === capId);
-    const authored = new Set(tasks.map((t) => t.purpose));
     const role = roleOf(capId);
-    for (const kind of MINTABLE_BY_ROLE[role] ?? []) {
-      const serves = INTENT_PURPOSES[kind] ?? [];
-      const covered = serves.some((p) => authored.has(p));
-      rows.push({ capabilityId: capId, role, kind, covered });
-      if (!covered) gaps.push({ capabilityId: capId, role, kind, neededPurposes: serves });
+    const cap = capabilityById(capId);
+    const p = capProfile(tasks);
+    /* The generator's intro rule (candidate-generator.js: kind =
+     * target→PROBE, carrier→NEW_INPUT, prereq→probe-or-input) keys on
+     * risk priors that may trigger for this capability's modality. */
+    const probeTrigger = (cap?.vietnameseRiskProbes ?? [])
+      .map(priorById)
+      .some((pr) => pr && pr.mayTriggerProbe && pr.appliesTo.includes(cap.modality));
+
+    for (const { kind, mintable, servable, servedBy, notMintableReason } of INTENT_MODEL) {
+      if (kind === 'support_demand' && role !== 'support') continue;
+      if (role === 'support' && kind !== 'support_demand') continue;
+      const m = mintable(role, p, probeTrigger);
+      const s = servable(p);
+      classify(capId, role, kind, m, s, {
+        ...(m && s && servedBy ? { derivation: servedBy(p) } : {}),
+        ...(!m ? { reason: notMintableReason(role, p, probeTrigger) } : {})
+      });
     }
-    /* Assessment-family backlog: the checkpoint must come from a
-     * family the teaching surface never consumed. */
-    if (role === 'target' && mission.assessmentPlan?.required) {
-      const teachingFams = new Set(
-        tasks.filter((t) => TEACHING_PURPOSES.has(t.purpose)).map((t) => t.promptFamily).filter(Boolean)
-      );
+
+    /* Assessment is handled separately — its mint iterates AUTHORED
+     * assessment tasks, so the gap classes differ: missing task vs
+     * consumed-only families vs transfer unreachable. */
+    if (mission.assessmentPlan?.required && role === 'target') {
       const assessTasks = tasks.filter((t) => t.purpose === 'assessment');
-      const fresh = assessTasks.filter((t) => t.promptFamily && !teachingFams.has(t.promptFamily));
-      if (assessTasks.length === 0) {
-        gaps.push({ capabilityId: capId, role, kind: 'assessment', neededPurposes: ['assessment'], backlog: 'no_assessment_task' });
-      } else if (fresh.length === 0) {
-        gaps.push({ capabilityId: capId, role, kind: 'assessment', neededPurposes: ['assessment'], backlog: 'no_fresh_family', families: [...teachingFams] });
+      const reason = assessTasks.length === 0 ? 'no_assessment_task'
+        : !p.freshAssessment ? 'no_fresh_family'
+        : null;
+      const blockedOn = !p.freshTransfer ? 'transfer' : null;
+      if (reason || blockedOn) {
+        pushRow({
+          capabilityId: capId, role, kind: 'assessment',
+          mintable: p.attemptable && p.freshTransfer, servable: !reason,
+          class: 'required', backlog: reason ?? 'transfer_unreachable', blockedOn
+        });
+      } else {
+        pushRow({ capabilityId: capId, role, kind: 'assessment', mintable: true, servable: true, class: 'covered' });
       }
     }
   }
-  return { mission: mission.id, rows, gaps };
+  /* Every required finding carries its executable witness — the audit
+   * is conservative triage, so a row only earns 'required' when the
+   * real generator confirms the dead end on a state that satisfies the
+   * mint preconditions. */
+  for (const f of findings.filter((x) => x.class === 'required')) {
+    f.witness = requiredWitness(f, fixture);
+  }
+  const gaps = findings.filter((f) => f.class === 'required');
+  return { mission: mission.id, rows, findings, gaps };
+}
+
+/* ── Executable witnesses for REQUIRED findings (review 008D-R1) ────
+ * A static reachability model cannot prove "intent mints + no valid
+ * authored surface" — so each required row is backed by a built engine
+ * state replayed through the REAL generateCandidates. The witness is
+ * the executable half of the finding; the static row is the triage.
+ *
+ *   correction            taught cap + attributed observed miss → the
+ *                         correction candidate must exist with
+ *                         servableTask === null
+ *   assessment            post-transfer state → either zero authored
+ *     no_assessment_task  assessment tasks to iterate (nothing can
+ *                         mint), or every assessment candidate is
+ *     no_fresh_family     family-consumed
+ */
+const WT0 = Date.parse('2026-02-01T09:00:00Z');
+const WITNESS_LAG = 25 * HOUR; /* retention lag is 24h; +1h margin */
+
+const WITNESS_LEARNER = 'SIM'; /* attemptEvent stamps learnerId 'SIM' */
+const witnessState = (fixture, events, now) => {
+  const ms = missionState(fixture);
+  return {
+    learnerId: WITNESS_LEARNER, events, capabilities: ms.capabilities, tasks: fixture.tasks,
+    roles: ms.roles, policy: LEARNING_POLICY_V1, now, mission: fixture.mission,
+    decisionContext: emptyContext('ep.audit', 'ses.audit'), selection: {}
+  };
+};
+
+const attemptTasksOf = (tasks, capId) =>
+  tasks.filter((t) => t.capabilityId === capId && ATTEMPT_BINDING(t) && t.purpose !== 'assessment');
+
+/* Build: independent success → post-lag success (retained) → fresh
+ * transfer success (transferred). Returns null when the authored
+ * surface cannot reach the precondition state. */
+const transferredHistory = (fixture, capId) => {
+  const tasks = fixture.tasks.filter((t) => t.capabilityId === capId);
+  const cap = capabilityById(capId);
+  const indep = attemptTasksOf(fixture.tasks, capId).find((t) => t.purpose !== 'transfer');
+  const delayed = tasks.find((t) => t.purpose === 'delayed_retrieval')
+    ?? attemptTasksOf(fixture.tasks, capId).find((t) => t !== indep && t.purpose !== 'transfer');
+  const nonTransferFams = new Set(tasks.filter((t) => t.purpose !== 'transfer').map(famOf).filter(Boolean));
+  const transfer = tasks.find((t) => t.purpose === 'transfer' && famOf(t) && !nonTransferFams.has(famOf(t)));
+  if (!indep || !delayed || !transfer) return null;
+  return [
+    attemptEvent(indep, cap, { at: WT0, outcome: 'success' }),
+    attemptEvent(delayed, cap, { at: WT0 + WITNESS_LAG, outcome: 'success' }),
+    attemptEvent(transfer, cap, { at: WT0 + WITNESS_LAG + MIN, outcome: 'success' })
+  ];
+};
+
+export function requiredWitness(finding, fixture) {
+  const capId = finding.capabilityId;
+  const cap = capabilityById(capId);
+  const tasks = fixture.tasks.filter((t) => t.capabilityId === capId);
+
+  if (finding.kind === 'correction') {
+    const indep = attemptTasksOf(fixture.tasks, capId).find((t) => t.purpose !== 'remediation');
+    const attr = tasks.find((t) => ATTEMPT_BINDING(t) && contractAttributesFunctions(t.evaluation?.contractId));
+    if (!indep || !attr) return { confirmed: false, built: false, reason: 'no_taught_attributing_surface' };
+    const events = [
+      attemptEvent(indep, cap, { at: WT0, outcome: 'success' }),
+      attemptEvent(attr, cap, { at: WT0 + HOUR, outcome: 'fail', missing: attr.response?.requiredFunctions ?? [] })
+    ];
+    const cand = generateCandidates(witnessState(fixture, events, WT0 + 2 * HOUR)).candidates
+      .find((c) => c.kind === KINDS.CORRECTION && c.capabilityId === capId);
+    return {
+      confirmed: cand != null && cand.servableTask == null,
+      built: true, minted: cand != null, servableTask: cand?.servableTask?.id ?? null,
+      state: 'taught_then_attributed_observed_miss'
+    };
+  }
+
+  if (finding.kind === 'assessment') {
+    const assessTasks = tasks.filter((t) => t.purpose === 'assessment');
+    const history = transferredHistory(fixture, capId);
+    if (!history) return { confirmed: false, built: false, reason: 'transfer_precondition_unreachable' };
+    const now = WT0 + WITNESS_LAG + 2 * MIN;
+    const proj = projectLearnerState(WITNESS_LEARNER, history, witnessState(fixture, history, now).capabilities, fixture.tasks, { policy: LEARNING_POLICY_V1 });
+    const transferred = proj.byCapability.get(capId)?.milestones?.transferred === true;
+    if (finding.backlog === 'no_fresh_family') {
+      /* Consume every authored assessment task, then re-check — every
+       * minted candidate must be family-consumed. */
+      const ev2 = [...history, ...assessTasks.map((t, i) => attemptEvent(t, cap, { at: now + (i + 1) * MIN, outcome: 'success' }))];
+      const cands = generateCandidates(witnessState(fixture, ev2, now + 10 * MIN)).candidates
+        .filter((c) => c.kind === KINDS.ASSESSMENT && c.capabilityId === capId);
+      return {
+        confirmed: transferred && assessTasks.length > 0 && cands.length > 0 && cands.every((c) => c.familyConsumed === true || c.consumed === true),
+        built: true, transferred, assessmentTasks: assessTasks.length,
+        familyConsumed: cands.map((c) => c.familyConsumed === true),
+        state: 'transferred_all_assessment_families_consumed'
+      };
+    }
+    /* no_assessment_task: at the post-transfer state the assessment
+     * loop has zero authored tasks to iterate — nothing can mint. */
+    const cands = generateCandidates(witnessState(fixture, history, now)).candidates
+      .filter((c) => c.kind === KINDS.ASSESSMENT && c.capabilityId === capId);
+    return {
+      confirmed: transferred && assessTasks.length === 0 && cands.length === 0,
+      built: true, transferred, minted: cands.length,
+      assessmentTasks: assessTasks.length,
+      state: 'transferred_no_assessment_task'
+    };
+  }
+
+  return { confirmed: false, built: false, reason: 'no_witness_builder_for_kind' };
 }
 
 export function runCoverageAudit(fixtures) {
   const perMission = fixtures.map(contentCoverageAudit);
+  const findings = perMission.flatMap((m) => m.findings.map((g) => ({ mission: m.mission, ...g })));
+  const byClass = {};
+  for (const f of findings) byClass[f.class] = (byClass[f.class] ?? 0) + 1;
   return {
     missions: perMission,
-    gaps: perMission.flatMap((m) => m.gaps.map((g) => ({ mission: m.mission, ...g })))
+    findings,
+    byClass,
+    gaps: findings.filter((f) => f.class === 'required')
   };
 }
 
@@ -385,10 +678,18 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   }
   if (rows.some((r) => r.class === 'BUG') || violations > 0) process.exitCode = 1;
 
-  /* HIGH-7 content coverage — trajectory-independent gaps. */
+  /* HIGH-7 + 008D content coverage — conservative semantic
+   * reachability audit (static surface model; required rows carry
+   * executable witnesses replayed through the real generator):
+   * required = learner-facing dead end on a claim/repair-bearing role;
+   * optional = degraded carrier recovery; not_mintable = structurally
+   * unreachable under the authored surface (reason code on the row). */
   const coverage = runCoverageAudit(FIXTURES);
-  console.log(`\ncontent coverage: ${coverage.gaps.length} gaps across ${FIXTURES.length} missions`);
-  for (const g of coverage.gaps) {
-    console.log(`  ${g.mission} ${g.capabilityId} [${g.role}] ${g.kind}${g.backlog ? ' (' + g.backlog + ')' : ''} needs ${g.neededPurposes.join('|')}`);
+  console.log(`\ncontent coverage (conservative semantic reachability): ${coverage.findings.length} findings ${JSON.stringify(coverage.byClass)} across ${FIXTURES.length} missions`);
+  for (const g of coverage.findings) {
+    const w = g.witness ? ` witness:${g.witness.confirmed ? 'CONFIRMED' : 'FAILED(' + (g.witness.reason ?? JSON.stringify(g.witness)) + ')'}` : '';
+    const r = g.reason ? ` reason:${g.reason}` : '';
+    console.log(`  [${g.class}] ${g.mission} ${g.capabilityId} [${g.role}] ${g.kind}${g.backlog ? ' (' + g.backlog + ')' : ''}${g.blockedOn ? ' blockedOn:' + g.blockedOn : ''}${r}${w}`);
   }
+  if (coverage.findings.some((g) => g.class === 'required' && g.witness && g.witness.confirmed !== true)) process.exitCode = 1;
 }

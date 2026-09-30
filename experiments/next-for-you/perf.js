@@ -23,6 +23,12 @@ import { validateDecision } from '../../src/vnext/next-for-you/validator.js';
 import { emptyContext } from '../../src/vnext/next-for-you/decision-context.js';
 import { attemptEvent, observeEvent } from './scenarios.js';
 import { nextMissionTask } from '../../src/vnext/mission-runner.js';
+import { buildLearnerModel } from '../../src/vnext/learner-model.js';
+import { projectLearnerState } from '../../src/vnext/projection.js';
+import { deriveSupportLifecycle } from '../../src/vnext/planner.js';
+import { decisionInputSnapshot } from '../../src/vnext/next-for-you/decision-log.js';
+import { sha256 } from '../../src/vnext/next-for-you/canonical.js';
+import { resolvePolicy } from '../../src/vnext/policy.js';
 
 const MIN = 60_000;
 const T0 = Date.parse('2026-02-01T09:00:00Z');
@@ -93,13 +99,63 @@ export function measure(target, iters = 21) {
   return { events: events.length, generate: gen, policyB: pol, validate: val, b0, shadow, reference: ref };
 }
 
+/* 008D P2 — stage-level breakdown inside one B0 select. The composite
+ * "b0" number splits into: learner-model replay, projection replay,
+ * support-lifecycle replay, the canonical input digest, candidate
+ * generation (contains the first three + candidacy minting), policy
+ * ordering, and the independent validator (which re-derives state —
+ * by design, see §21). */
+export function profileStages(target, iters = 15) {
+  const events = synthEvents(target);
+  const base = {
+    learnerId: 'SIM', mission: MISSION, tasks: TASKS, capabilities: CAPABILITIES,
+    events, riskPriors: RISK_PRIORS, policy: LEARNING_POLICY_V1,
+    selection: {}, decisionContext: emptyContext('ep.perf', 'ses.perf'), now: T0 + 1e12
+  };
+  const state = engineState(base);
+  const pol = resolvePolicy(LEARNING_POLICY_V1);
+  const stages = {
+    learnerModel: time(() => buildLearnerModel({
+      learnerId: 'SIM', events, capabilities: CAPABILITIES, tasks: TASKS, policy: pol, now: base.now, roles: state.roles
+    }), iters),
+    projection: time(() => projectLearnerState('SIM', events, CAPABILITIES, TASKS, { policy: pol }), iters),
+    supportLifecycle: time(() => deriveSupportLifecycle('SIM', events, { capabilities: CAPABILITIES, tasks: TASKS, roles: state.roles, policy: pol }), iters),
+    digest: time(() => sha256(decisionInputSnapshot({ ...state })), iters),
+    generate: time(() => generateCandidates(state), iters),
+    policyB: null,
+    validate: null,
+    b0: time(() => selectNextTask({ ...base, mode: 'b0' }), iters),
+    shadow: time(() => selectNextTask({ ...base, mode: 'shadow_b0' }), iters),
+    reference: time(() => nextMissionTask({
+      learnerId: 'SIM', mission: MISSION, tasks: TASKS, capabilities: CAPABILITIES,
+      events, riskPriors: RISK_PRIORS, now: base.now, policy: LEARNING_POLICY_V1
+    }), iters)
+  };
+  const candidates = generateCandidates(state);
+  stages.policyB = time(() => policyB({ ...state, candidates }), iters);
+  const decision = policyB({ ...state, candidates });
+  stages.validate = time(() => validateDecision(decision, {
+    events, tasks: TASKS, capabilities: CAPABILITIES, roles: state.roles, mission: MISSION,
+    learnerId: 'SIM', now: base.now, policy: LEARNING_POLICY_V1, selection: {}, decisionContext: base.decisionContext
+  }), iters);
+  return { events: events.length, stages };
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
+  const stageOnly = process.argv.includes('--stages');
   for (const n of [100, 500, 2000]) {
     const r = measure(n);
     console.log(`events=${r.events}`);
     for (const stage of ['generate', 'policyB', 'validate', 'b0', 'shadow', 'reference']) {
       const s = r[stage];
       console.log(`  ${stage.padEnd(10)} median ${s.median.toFixed(1)}ms  p95 ${s.p95.toFixed(1)}ms`);
+    }
+    if (stageOnly || n === 2000) {
+      const p = profileStages(n);
+      console.log('  — stage breakdown —');
+      for (const [k, s] of Object.entries(p.stages)) {
+        console.log(`    ${k.padEnd(16)} median ${s.median.toFixed(1)}ms  p95 ${s.p95.toFixed(1)}ms`);
+      }
     }
   }
 }

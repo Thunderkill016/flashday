@@ -46,8 +46,9 @@ import {
   SELECTION_MODES, selectNextTask, decisionAuditRecord
 } from './next-for-you/selector.js';
 import { emptyContext, normalizeContext, consumeDecision } from './next-for-you/decision-context.js';
-import { createDecisionLog } from './next-for-you/decision-log.js';
+import { createDecisionLog, stateDigest } from './next-for-you/decision-log.js';
 import { POLICY_VERSIONS } from './next-for-you/constants.js';
+import { deepFreezeAll, sha256 } from './next-for-you/canonical.js';
 
 /* Purposes that may offer pre-commit support in v0. A used control
  * always leaves a support_use event plus a stamped snapshot — the offer
@@ -167,6 +168,18 @@ export function createMissionSession({
     return stamped;
   };
 
+  /* 008D r2 BLOCKER-2 — decide-time snapshot. sel.engineInput aliases
+   * the LIVE session state: its `events` is the same array support()
+   * and play() keep appending to, so a hint taken AFTER selection
+   * silently rewrote "the state the decision was made against" and the
+   * consume-time recompute could disagree with the decisionId's digest.
+   * Clone the exact input once at selection and deep-freeze the copy:
+   * post-selection evidence can never leak into decide-time provenance,
+   * and direct mutation throws instead of drifting the digest. (Set
+   * internals — roles — cannot be Object.frozen; the consume-time
+   * digest check below still catches that channel.) */
+  const freezeDecisionInput = (input) => deepFreezeAll(structuredClone(input));
+
   const select = () => {
     selectionCalls += 1;
     if (mode === SELECTION_MODES.REFERENCE) {
@@ -221,7 +234,7 @@ export function createMissionSession({
      * roles + the pre-consume context) — the exact object the decision,
      * its validation, and its digest all saw. Never the raw input:
      * the audit digest must equal the state bound into decisionId. */
-    const decisionInput = sel.engineInput ?? null;
+    const decisionInput = sel.engineInput ? freezeDecisionInput(sel.engineInput) : null;
     if (sel.status !== 'ready') return { sel, task: null, cap: null, input: decisionInput, digest: sel.inputDigest ?? null };
     const task = taskByKey.get(`${sel.taskId}@${sel.taskRevision}`);
     const cap = task ? capById.get(task.capabilityId) : null;
@@ -257,6 +270,17 @@ export function createMissionSession({
       if (bound?.length) await appendAll(bound);
       return;
     }
+    /* Decide-time provenance check (008D r2 BLOCKER-2): the frozen
+     * snapshot must still hash to the digest bound into the decisionId
+     * and stamped on the audit record — a mismatch means the stored
+     * input drifted after selection, so consuming against it would
+     * mint provenance that cannot be verified. Refuse instead. */
+    if (input && liveTask?.decisionDigest != null
+        && stateDigest(input) !== liveTask.decisionDigest) {
+      throw new Error(
+        `decision_input_drift: stored decide-time input no longer hashes to ${liveTask.decisionDigest} — refusing to consume against unverifiable provenance`
+      );
+    }
     /* Fail-closed audit boundary (008B decision-log semantics): append
      * recomputes the digest from the recorded decide-time input and
      * throws on missing provenance — an unverifiable record never lands. */
@@ -264,7 +288,11 @@ export function createMissionSession({
     const record = decisionAuditRecord(d, {
       learnerId,
       missionId: mission.id,
-      missionRevision: mission.revision ?? null,
+      /* The RUN's pinned surface revision, not whatever mission object
+       * is currently in scope — init() guarantees they are equal for a
+       * live run, so stamping the run's value keeps the audit honest
+       * even if a future caller passes a drifted mission. */
+      missionRevision: run?.missionRevision ?? mission.revision ?? null,
       missionRunId: run?.id ?? null,
       sessionId: input?.decisionContext?.sessionId ?? sessionIdFor(),
       timestamp: consumedAt,
@@ -275,13 +303,16 @@ export function createMissionSession({
     if (run?.selection) {
       /* The journal pins the CONTENT it expects, not just ids (HIGH-3):
        * an id-only marker would bless any bytes that happen to share
-       * the id. The fingerprint is over the stamped event (missionRunId
-       * included) — exactly what appendAll will persist. */
+       * the id. The expectation is a sha256 digest over the stamped
+       * event's canonical fingerprint (missionRunId included) — the
+       * journal holds an opaque hash, never the learner's response
+       * text (008D data minimization: response lives only in the
+       * append-only evidence log). */
       const stamped = (bound ?? []).map((e) => ({ ...e, missionRunId: run?.id ?? null }));
       run.selection.pendingConsumption = {
         decisionId: d.decisionId,
         decisionDigest: liveTask?.decisionDigest ?? null,
-        expectedEvents: stamped.map((e) => ({ id: e.id, fingerprint: eventFingerprint(e) })),
+        expectedEvents: stamped.map((e) => ({ id: e.id, digest: `sha256:${sha256(eventFingerprint(e))}` })),
         auditRecord: record,
         nextContext: next,
         consumedAt
@@ -426,13 +457,109 @@ export function createMissionSession({
       }
       events.sort((a, b) => a.occurredAt - b.occurredAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
       run = await runStore.getOpenRun(learnerId, mission.id);
+      /* BLOCKER-2 — recoverable consumption journal. A pending marker
+       * means the process died between pending-write and the final
+       * context save. Reconcile against the durable evidence log before
+       * any new selection — id PRESENCE is not the trust boundary, the
+       * landed event must match the journaled fingerprint (HIGH-3):
+       *   all expected evidence present AND content-identical → finish
+       *     audit + apply the journaled next context (idempotent —
+       *     audit append dedupes);
+       *   no evidence landed → the consumption never happened; clear
+       *     the marker and leave the decision unconsumed;
+       *   partial evidence, empty journal, or same-id/different-content
+       *     → ambiguous boundary, fail closed.
+       *
+       * Ordering (008D r2 BLOCKER-1): reconcile runs BEFORE the mission
+       * revision pin below. Crash recovery is surface-agnostic — the
+       * journaled decision was minted under whatever revision the run
+       * pinned, and its evidence/audit boundary must resolve before
+       * that run is allowed to close. */
+      let reconciledCtx = null;
+      let inheritedName = null;
+      if (run) {
+        const pending = run.selection?.pendingConsumption;
+        if (pending) {
+          const byId = new Map(events.filter((e) => e.learnerId === learnerId).map((e) => [e.id, e]));
+          const expected = pending.expectedEvents ?? [];
+          const reconcileConflict = (why) => {
+            throw new Error(`consumption_reconcile_conflict: ${why} — refusing to guess the consumption outcome`);
+          };
+          if (expected.length === 0) {
+            reconcileConflict(`journal '${pending.decisionId}' carries no expected evidence`);
+          }
+          const missing = [];
+          const mismatched = [];
+          for (const x of expected) {
+            const landed = byId.get(x.id);
+            if (!landed) missing.push(x.id);
+            else if (x.digest == null || `sha256:${sha256(eventFingerprint(landed))}` !== x.digest) mismatched.push(x.id);
+          }
+          if (mismatched.length > 0) {
+            reconcileConflict(
+              `journal '${pending.decisionId}' found ${mismatched.length} expected event(s) with altered content (${mismatched.join(', ')})`
+            );
+          }
+          if (missing.length === 0) {
+            await auditStore?.append?.(pending.auditRecord);
+            reconciledCtx = normalizeContext(pending.nextContext);
+          } else if (missing.length === expected.length) {
+            reconciledCtx = null;
+          } else {
+            reconcileConflict(
+              `journal '${pending.decisionId}' landed ${expected.length - missing.length}/${expected.length} expected events — ambiguous partial boundary`
+            );
+          }
+          /* The marker is cleared by the selBlock rewrite below (its
+           * JSON diff is what persists the clear) — clearing it here
+           * in memory would make that compare a no-op and leave the
+           * marker durable. The supersede path clears it explicitly. */
+        }
+
+        /* 008D r2 BLOCKER-1 — mission revision pin. A run minted against
+         * a different task-surface revision — or a legacy run that
+         * cannot prove its surface (field absent, predates this pin) —
+         * must never share one open trajectory with the current mission
+         * object: same missionId + different revision never resumes.
+         * The run is explicitly SUPERSEDED — recorded with reason and
+         * timestamp, never deleted — and a fresh run mints below pinned
+         * to the current revision. Evidence is untouched: events live
+         * in the append-only log, not on the run. This precedes the
+         * mode pin deliberately: surface drift supersedes under ANY
+         * requested mode, which self-heals instead of stranding the
+         * learner on a mode-pin throw for a run that must close anyway. */
+        const missionRev = mission.revision ?? null;
+        if ((run.missionRevision ?? null) !== missionRev) {
+          /* Finalize bookkeeping on the closing record: the reconciled
+           * context is the honest end-state of its consumption history,
+           * and the journal marker must not dangle on a closed run. */
+          if (run.selection && reconciledCtx) run.selection.decisionContext = reconciledCtx;
+          if (run.selection) run.selection.pendingConsumption = null;
+          run.status = 'superseded';
+          run.endedAt = now();
+          run.supersedeReason = run.missionRevision == null
+            ? `mission_revision_unversioned_run->${missionRev ?? 'none'}`
+            : `mission_revision_changed:${run.missionRevision}->${missionRev ?? 'none'}`;
+          inheritedName = run.learnerName ?? null;
+          await runStore.saveRun(run);
+          run = null;
+          reconciledCtx = null;
+        }
+      }
       if (!run) {
         run = {
           id: idGen(),
           learnerId,
           missionId: mission.id,
+          /* 008D r2 BLOCKER-1: the run pins the exact task surface it
+           * serves. A later surface edit (mission.revision bump) can
+           * never be reinterpreted as this run's input. */
+          missionRevision: mission.revision ?? null,
           status: 'open',
-          learnerName: null,
+          /* A superseded run hands its learner name forward — identity
+           * is learner state, not surface state; re-asking after a
+           * deploy would mint a pointless second naming event. */
+          learnerName: inheritedName ?? null,
           startedAt: now(),
           endedAt: null
         };
@@ -455,7 +582,8 @@ export function createMissionSession({
        * creation. Reopening an open run under another ?mode= must never
        * silently switch policy inside one trajectory (a B0 run reopened
        * as reference contaminates the pilot/control record). A mode
-       * change requires an explicit new run. */
+       * change requires an explicit new run. Reachable only by
+       * same-revision runs — revision drift was superseded above. */
       const pinnedMode = run.selection?.mode ?? null;
       const expectedPolicyVersion = mode === SELECTION_MODES.REFERENCE
         ? 'production.nextMissionTask'
@@ -480,53 +608,6 @@ export function createMissionSession({
         throw new Error(
           `selection_policy_version_pinned: run '${run.id}' is pinned to selection policy '${pinnedVersion}' but '${mode}' implies '${expectedPolicyVersion}' — refusing to change policy semantics inside an open run`
         );
-      }
-
-      /* BLOCKER-2 — recoverable consumption journal. A pending marker
-       * means the process died between pending-write and the final
-       * context save. Reconcile against the durable evidence log before
-       * any new selection — id PRESENCE is not the trust boundary, the
-       * landed event must match the journaled fingerprint (HIGH-3):
-       *   all expected evidence present AND content-identical → finish
-       *     audit + apply the journaled next context (idempotent —
-       *     audit append dedupes);
-       *   no evidence landed → the consumption never happened; clear
-       *     the marker and leave the decision unconsumed;
-       *   partial evidence, empty journal, or same-id/different-content
-       *     → ambiguous boundary, fail closed. */
-      const pending = run.selection?.pendingConsumption;
-      let reconciledCtx = null;
-      if (pending) {
-        const byId = new Map(events.filter((e) => e.learnerId === learnerId).map((e) => [e.id, e]));
-        const expected = pending.expectedEvents ?? [];
-        const reconcileConflict = (why) => {
-          throw new Error(`consumption_reconcile_conflict: ${why} — refusing to guess the consumption outcome`);
-        };
-        if (expected.length === 0) {
-          reconcileConflict(`journal '${pending.decisionId}' carries no expected evidence`);
-        }
-        const missing = [];
-        const mismatched = [];
-        for (const x of expected) {
-          const landed = byId.get(x.id);
-          if (!landed) missing.push(x.id);
-          else if (x.fingerprint == null || eventFingerprint(landed) !== x.fingerprint) mismatched.push(x.id);
-        }
-        if (mismatched.length > 0) {
-          reconcileConflict(
-            `journal '${pending.decisionId}' found ${mismatched.length} expected event(s) with altered content (${mismatched.join(', ')})`
-          );
-        }
-        if (missing.length === 0) {
-          await auditStore?.append?.(pending.auditRecord);
-          reconciledCtx = normalizeContext(pending.nextContext);
-        } else if (missing.length === expected.length) {
-          reconciledCtx = null;
-        } else {
-          reconcileConflict(
-            `journal '${pending.decisionId}' landed ${expected.length - missing.length}/${expected.length} expected events — ambiguous partial boundary`
-          );
-        }
       }
 
       /* §5/§32: the run carries versioned selection bookkeeping. A run
@@ -596,6 +677,16 @@ export function createMissionSession({
 
     selectionContext() {
       return decisionContext ? structuredClone(decisionContext) : null;
+    },
+
+    /* 008D r2 introspection seam: the frozen decide-time input bound to
+     * the live decision — returned by REFERENCE on purpose so tests can
+     * verify freeze + digest identity. Mutating object/array fields
+     * throws outright (deep freeze); mutating Set internals is caught
+     * by the consume-time digest check. Null under REFERENCE (no
+     * engine state exists to snapshot). */
+    liveDecisionInput() {
+      return liveTask?.decisionInput ?? null;
     },
 
     /* §7 introspection: how many real selector evaluations ran. One

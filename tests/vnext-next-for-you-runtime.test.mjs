@@ -33,9 +33,10 @@ import { LEARNING_POLICY_V1 } from '../src/vnext/policy.js';
 import { nextMissionTask } from '../src/vnext/mission-runner.js';
 import { sha256, canon, sha256HexOfString } from '../src/vnext/next-for-you/canonical.js';
 import { emptyContext, consumeDecision, recordChoice, normalizeContext } from '../src/vnext/next-for-you/decision-context.js';
-import { selectNextTask, engineState, SELECTION_MODES } from '../src/vnext/next-for-you/selector.js';
+import { selectNextTask, engineState, SELECTION_MODES, POLICY_VERSIONS } from '../src/vnext/next-for-you/selector.js';
 import { policyB } from '../src/vnext/next-for-you/policies.js';
 import { KINDS } from '../src/vnext/next-for-you/constants.js';
+import { stateDigest } from '../src/vnext/next-for-you/decision-log.js';
 import { attemptEvent, observeEvent } from '../experiments/next-for-you/scenarios.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -888,24 +889,51 @@ const consumedKinds = (session) => (session.selectionContext()?.actionsChosen ??
   say('JOURNAL: crash-injection at every boundary converges honestly (BLOCKER-2)');
 }
 
-/* COVERAGE (HIGH-7): the static audit enumerates every mintable intent
- * × capability gap independent of any trajectory — the differential
- * corpus is reference-driven and cannot see B0-only states. */
+/* COVERAGE (HIGH-7 + 008D): the static audit enumerates every
+ * mintable intent × capability pair independent of any trajectory —
+ * the differential corpus is reference-driven and cannot see B0-only
+ * states. Rows are SEMANTICALLY classified against the generator's
+ * real mint conditions: required = claim/repair-bearing role with a
+ * mintable intent and nothing servable; optional = carrier recovery
+ * degradation; not_mintable = structurally unreachable surface. */
 {
   const { runCoverageAudit } = await import('../experiments/next-for-you/differential.js');
   const cov = runCoverageAudit(FIXTURES);
   ok(cov.missions.length === FIXTURES.length, 'coverage audit skipped missions');
-  ok(cov.gaps.length > 0, 'coverage audit reported zero gaps — suspicious for the authored surface');
-  /* The known correction authoring gap survives as named findings —
-   * remediation content does not exist for every attributing cap. */
+  ok(cov.gaps.length > 0, 'coverage audit reported zero required gaps — suspicious for the authored surface');
+  ok(cov.gaps.every((g) => g.class === 'required' && g.mintable && !g.servable), 'required rows must be mintable-but-unservable');
+  /* Carrier rows can never be 'required' — carriers own no claim. */
+  ok(!cov.findings.some((f) => f.role === 'carrier' && f.class === 'required'), 'carrier row classified required');
+  /* The known semantic results: carrier diagnostic_probe is never
+   * mintable (self-suppressing paths), and correction gaps only exist
+   * where a choice contract can attribute the miss. */
+  ok(cov.findings.some((f) => f.kind === 'diagnostic_probe' && f.role === 'carrier' && f.class === 'not_mintable'),
+    'carrier diagnostic_probe should be classified not_mintable');
   const correctionGaps = cov.gaps.filter((g) => g.kind === 'correction');
   ok(correctionGaps.length > 0, 'correction remediation gaps vanished — audit not seeing the known gap');
+  /* The 008D vertical slice closed clock-time's correction gap — the
+   * remaining required correction rows are named findings on the other
+   * attributing listening targets. */
+  ok(!correctionGaps.some((g) => g.capabilityId === 'reception.listen.understand_clock_time' && g.mission === 'mission.meet_at_a_time'),
+    'authored remediation task did not close the clock-time correction gap');
   /* Assessment backlog is enumerated per-claim-target, not inferred
    * from whichever trajectory happened to reach it. */
   const backlog = cov.gaps.filter((g) => g.kind === 'assessment');
   ok(backlog.some((g) => g.backlog === 'no_assessment_task'), 'assessment-family backlog not enumerated');
-  ok(cov.gaps.every((g) => g.neededPurposes?.length > 0), 'gap rows missing needed purposes');
-  say('COVERAGE: static intent×capability gap audit runs (HIGH-7)');
+  /* Review 008D-R1: every required finding carries an executable
+   * witness — a built engine state where mint preconditions hold and
+   * the REAL generator confirms nothing servable. A witness that
+   * cannot build the precondition state, or builds it but the
+   * generator serves content, fails the row. */
+  ok(cov.gaps.every((g) => g.witness?.built === true),
+    `required row without a built witness: ${JSON.stringify(cov.gaps.find((g) => g.witness?.built !== true) ?? null)}`);
+  ok(cov.gaps.every((g) => g.witness?.confirmed === true),
+    `required row whose witness FAILED — the gap is not proven: ${JSON.stringify(cov.gaps.find((g) => g.witness?.confirmed !== true)?.witness ?? null)}`);
+  /* Every not_mintable row names its structural reason — the class is
+   * a concrete derivation, never an inference from aggregate counts. */
+  ok(cov.findings.every((f) => f.class !== 'not_mintable' || typeof f.reason === 'string' && f.reason.length > 0),
+    'not_mintable row missing its structural reason code');
+  say('COVERAGE: conservative reachability audit — required findings carry confirmed executable witnesses');
 }
 
 /* LEGACY-PIN (BLOCKER-1 re-review): an open run predating selection
@@ -914,7 +942,12 @@ const consumedKinds = (session) => (session.selectionContext()?.actionsChosen ??
  * Policy VERSION is pinned too — a semantic bump cannot slide into an
  * open run. */
 {
-  /* Legacy open run + B0 → fail closed; + REFERENCE → continues pinned */
+  /* Legacy open run — predates BOTH the mode pin and the mission
+   * revision pin (no selection block, no missionRevision). It can never
+   * prove which task surface it was minted against, so EVERY reopen
+   * explicitly supersedes it and mints a fresh run pinned to the
+   * current revision + requested mode — the record is never deleted
+   * and never silently reinterpreted as the current surface. */
   const mkLegacyStores = () => ({
     es: createMemoryEventStore(),
     rs: createMemoryRunStore([{
@@ -925,28 +958,26 @@ const consumedKinds = (session) => (session.selectionContext()?.actionsChosen ??
       learnerName: 'A',
       startedAt: 1,
       endedAt: null
-      /* no selection — a pre-008C run */
+      /* no selection, no missionRevision — a pre-008C/pre-008D run */
     }]),
     ds: createMemoryDecisionStore()
   });
-  {
+  for (const legacyMode of ['b0', 'shadow_b0', 'reference']) {
     const { es, rs, ds } = mkLegacyStores();
-    const s = makeSession({ eventStore: es, runStore: rs, decisionStore: ds, mode: 'b0' });
-    await assert.rejects(() => s.init(), /selection_mode_legacy/, 'B0 silently reinterpreted a legacy open run');
-    const sh = makeSession({ eventStore: es, runStore: rs, decisionStore: ds, mode: 'shadow_b0' });
-    await assert.rejects(() => sh.init(), /selection_mode_legacy/, 'SHADOW silently reinterpreted a legacy open run');
-    const legacyRun = (await rs.list()).find((r) => r.id === 'run.legacy');
-    assert.equal(legacyRun.selection ?? null, null, 'refused reopen still stamped selection bookkeeping');
-    ok(true, 'LEGACY-PIN: B0/SHADOW reopen of a pre-bookkeeping run fails closed');
-  }
-  {
-    const { es, rs, ds } = mkLegacyStores();
-    const s = makeSession({ eventStore: es, runStore: rs, decisionStore: ds, mode: 'reference' });
+    const s = makeSession({ eventStore: es, runStore: rs, decisionStore: ds, mode: legacyMode });
     await s.init();
-    const run = (await rs.list()).find((r) => r.id === 'run.legacy');
-    assert.equal(run.selection?.mode, 'reference', 'legacy run not pinned to its historical mode');
-    assert.equal(run.selection?.selectionPolicyVersion, 'production.nextMissionTask', 'legacy run not pinned to production policy version');
-    ok(true, 'LEGACY-PIN: reference continues a legacy run and pins it honestly');
+    const runs = await rs.list();
+    const legacyRun = runs.find((r) => r.id === 'run.legacy');
+    assert.equal(legacyRun.status, 'superseded', `${legacyMode}: unversioned open run was resumed instead of superseded`);
+    assert.equal(legacyRun.selection ?? null, null, 'supersede stamped selection bookkeeping onto a legacy run');
+    assert.match(legacyRun.supersedeReason ?? '', /mission_revision_unversioned_run/, 'supersede reason does not record unversioned provenance');
+    assert.ok(legacyRun.endedAt != null, 'superseded run missing endedAt');
+    const live = runs.find((r) => r.status === 'open');
+    assert.ok(live && live.id !== 'run.legacy', `${legacyMode}: no fresh run minted after legacy supersede`);
+    assert.equal(live.missionRevision, MEET.mission.revision ?? null, 'fresh run did not pin the current mission revision');
+    assert.equal(live.selection?.mode, legacyMode, 'fresh run not pinned to the requested mode');
+    assert.equal(live.learnerName, 'A', 'supersede dropped the learner name instead of handing it forward');
+    ok(true, `LEGACY-PIN: ${legacyMode} reopen supersedes the unversioned run and mints a pinned trajectory`);
   }
   /* Policy-version drift inside one mode also fails closed */
   {
@@ -962,7 +993,156 @@ const consumedKinds = (session) => (session.selectionContext()?.actionsChosen ??
     await assert.rejects(() => stale.init(), /selection_policy_version_pinned/, 'policy version drift inside an open run was not refused');
     ok(true, 'LEGACY-PIN: selection policy version drift fails closed');
   }
-  say('LEGACY-PIN: legacy runs stay reference; mode+version pinned (BLOCKER-1 re-review)');
+  say('LEGACY-PIN: unversioned runs supersede; mode+version pinned (008D r2 BLOCKER-1)');
+}
+
+/* REV-PIN (008D r2 BLOCKER-1): the mission task surface is versioned
+ * and open runs pin the revision they were minted against. Same
+ * missionId + different revision never shares one open trajectory —
+ * the stale run is explicitly superseded (auditable, never deleted)
+ * and a fresh run mints pinned to the current revision. */
+{
+  const seededOpenRun = (rev) => createMemoryRunStore([{
+    id: 'run.rev1',
+    learnerId: 'RT.learner',
+    missionId: TIME.mission.id,
+    missionRevision: rev,
+    status: 'open',
+    learnerName: 'A',
+    startedAt: 1,
+    endedAt: null,
+    selection: {
+      version: 'vnext.run-selection.v1',
+      mode: 'b0',
+      selectionPolicyVersion: POLICY_VERSIONS.B,
+      decisionEpisodeId: 'ep:run.rev1',
+      config: {},
+      decisionContext: null,
+      pendingConsumption: null
+    }
+  }]);
+  const curRev = TIME.mission.revision ?? null;
+  {
+    /* rev-(cur-1) open run + rev-cur mission → supersede + fresh run */
+    const rs = seededOpenRun(curRev - 1);
+    const s = makeSession({ fixture: TIME, runStore: rs, mode: 'b0' });
+    await s.init();
+    const runs = await rs.list();
+    const old = runs.find((r) => r.id === 'run.rev1');
+    assert.equal(old.status, 'superseded', 'stale-revision open run silently resumed under the new surface');
+    assert.equal(old.supersedeReason, `mission_revision_changed:${curRev - 1}->${curRev}`, 'supersede reason does not record the revision edge');
+    assert.ok(old.endedAt != null, 'superseded run missing endedAt');
+    const open = runs.filter((r) => r.status === 'open');
+    assert.equal(open.length, 1, 'supersede left multiple open runs for the same mission');
+    assert.equal(open[0].missionRevision, curRev, 'fresh run not pinned to the current mission revision');
+    assert.equal(open[0].learnerName, 'A', 'supersede dropped the learner name');
+    assert.equal(s.runInfo().id, open[0].id, 'session did not bind the fresh run');
+    assert.notEqual(s.runInfo().id, 'run.rev1', 'the stale trajectory was reused under a new revision');
+    ok(true, 'REV-PIN: stale-revision open run supersedes; fresh run pins current revision');
+  }
+  {
+    /* matching revision → the SAME run resumes (pin is sticky, not brittle) */
+    const rs = seededOpenRun(curRev);
+    const s = makeSession({ fixture: TIME, runStore: rs, mode: 'b0' });
+    await s.init();
+    assert.equal(s.runInfo().id, 'run.rev1', 'same-revision open run was not resumed');
+    assert.equal(s.runInfo().status, 'open', 'same-revision run was superseded anyway');
+    assert.equal(s.runInfo().missionRevision, curRev, 'resumed run lost its pinned revision');
+    ok(true, 'REV-PIN: matching revision resumes the pinned run');
+  }
+  {
+    /* a fresh mint stamps the revision and reloads into the same run */
+    const rs = createMemoryRunStore();
+    const es = createMemoryEventStore();
+    const ds = createMemoryDecisionStore();
+    const s1 = makeSession({ fixture: TIME, eventStore: es, runStore: rs, decisionStore: ds, mode: 'b0' });
+    await s1.init();
+    const runId = s1.runInfo().id;
+    assert.equal(s1.runInfo().missionRevision, curRev, 'minted run did not stamp missionRevision');
+    const s2 = makeSession({ fixture: TIME, eventStore: es, runStore: rs, decisionStore: ds, mode: 'b0' });
+    await s2.init();
+    assert.equal(s2.runInfo().id, runId, 'reload did not resume the revision-pinned run');
+    assert.equal(s2.runInfo().missionRevision, curRev, 'resumed run lost its revision pin');
+    ok(true, 'REV-PIN: minted run stores the revision and survives reload');
+  }
+  {
+    /* the persisted audit stamps the run's pinned revision */
+    const rs = createMemoryRunStore();
+    const es = createMemoryEventStore();
+    const ds = createMemoryDecisionStore();
+    const s = makeSession({ fixture: TIME, eventStore: es, runStore: rs, decisionStore: ds, mode: 'b0' });
+    await s.init();
+    await drive(s, (x) => x.type === 'task' && x.phase === 'feedback', {
+      /* TIME tasks aren't in SCRIPT — any non-empty response consumes
+       * the decision and mints the audit, which is all this asserts. */
+      answer: (x) => x.responseType === 'choice' ? (x.options?.[0]?.id ?? 'opt') : 'three pm'
+    });
+    const audits = await s.auditTrail();
+    const rec = audits.at(-1);
+    assert.ok(rec, 'consumed decision minted no audit record');
+    assert.equal(rec.missionRevision, s.runInfo().missionRevision, 'audit not stamped with the pinned run revision');
+    assert.equal(rec.missionRevision, curRev, 'audit revision disagrees with the mission surface');
+    assert.equal(rec.missionRunId, s.runInfo().id, 'audit not stamped with the run id');
+    ok(true, 'REV-PIN: consumed-decision audit stamps the pinned run revision');
+  }
+  say('REV-PIN: mission revision pinned per run; drift supersedes (008D r2 BLOCKER-1)');
+}
+
+/* SNAP-FREEZE (008D r2 BLOCKER-2): the decide-time input is an
+ * immutable snapshot, not a live alias — support events appended AFTER
+ * selection land in learner evidence but can never leak into the state
+ * the decision, its digest, and its audit all describe. */
+{
+  const es = createMemoryEventStore();
+  const rs = createMemoryRunStore();
+  const ds = createMemoryDecisionStore();
+  const s = makeSession({ eventStore: es, runStore: rs, decisionStore: ds, mode: 'b0' });
+  await s.init();
+  const scr = await drive(s, (x) => x.type === 'task' && x.phase === 'prompt' && (x.supportOffered ?? []).length > 0);
+  const snap = s.liveDecisionInput();
+  ok(snap != null && Object.isFrozen(snap) && Object.isFrozen(snap.events), 'live decision input is not a frozen snapshot');
+  const digestAtSelect = stateDigest(snap);
+  const snapEventCount = snap.events.length;
+  const preIds = new Set(snap.events.map((e) => e.id));
+  /* support AFTER selection: the events land in the learner log but
+   * must not exist inside the recorded decide-time input */
+  await s.support(scr.supportOffered.includes('hint') ? 'hint' : scr.supportOffered[0]);
+  if ((scr.supportOffered ?? []).length > 1) await s.support(scr.supportOffered[1]);
+  const supportEvents = s.log().filter((e) => e.eventType === 'support_use');
+  ok(supportEvents.length >= 1, 'support() produced no learner evidence');
+  ok(snap.events.length === snapEventCount && supportEvents.every((e) => !preIds.has(e.id)),
+    'post-selection support events leaked into the decide-time snapshot');
+  ok(stateDigest(snap) === digestAtSelect, 'snapshot digest drifted after post-selection support');
+  assert.throws(() => snap.events.push(supportEvents[0]), 'frozen decision input accepted an array mutation');
+  /* commit the on-screen task — consume must succeed AND bind the
+   * original decide-time digest across every provenance surface */
+  const cur = s.screen();
+  if (cur.responseType === 'choice') await s.commit({ optionId: SCRIPT[cur.taskId] ?? cur.options?.[0]?.id });
+  else await s.commit({ text: SCRIPT[cur.taskId] ?? 'hello' });
+  const entry = s.decisions().at(-1);
+  const audit = (await s.auditTrail()).at(-1);
+  ok(entry?.stateFingerprint === digestAtSelect, 'decision-log fingerprint ≠ decide-time digest');
+  ok(audit?.decisionInputDigest === digestAtSelect, 'audit decisionInputDigest ≠ decide-time digest');
+  ok((audit?.decisionId ?? '').includes(digestAtSelect.slice('sha256:'.length, 'sha256:'.length + 16)),
+    'decisionId does not embed the decide-time digest');
+  ok(audit?.missionRevision === s.runInfo()?.missionRevision, 'audit not stamped with the pinned run revision');
+  say('SNAP-FREEZE: support-after-selection stays out of decide-time provenance; digests agree');
+}
+{
+  /* deliberate mutation of the stored snapshot must fail closed —
+   * object/array fields throw on write (deep freeze); Set internals
+   * cannot be frozen, so the consume-time digest check is the second
+   * line of defense and it MUST fire */
+  const s = makeSession({ mode: 'b0' });
+  await s.init();
+  await drive(s, (x) => x.type === 'task' && x.phase === 'prompt' && x.responseType === 'text');
+  const snap = s.liveDecisionInput();
+  ok(snap != null, 'no live decision input to mutate');
+  assert.throws(() => { snap.mission.revision = 999; }, 'frozen snapshot accepted a field write');
+  snap.roles.targets.add('cap.bogus');
+  await assert.rejects(() => s.commit({ text: 'hi there' }), /decision_input_drift/,
+    'mutated decide-time input was consumed without rejection');
+  say('SNAP-FREEZE: mutated decide-time input fails closed at consume');
 }
 
 /* READ-FAIL (HIGH-2): absent key → fallback; inaccessible/corrupt
@@ -1029,9 +1209,19 @@ const consumedKinds = (session) => (session.selectionContext()?.actionsChosen ??
   const s = makeSession({ eventStore: es, runStore: flaky, decisionStore: ds });
   await s.init();
   await drive(s, (x) => x.type === 'task' && x.phase === 'prompt', { steps: 10 });
-  await assert.rejects(() => s.commit({ text: 'x' }), /injected commit-save/);
+  await assert.rejects(() => s.commit({ text: 's3cr3t-resp0nse' }), /injected commit-save/);
   const pendingRun = (await rs.list())[0];
   assert.ok(pendingRun.selection?.pendingConsumption, 'journal marker missing');
+  /* 008D minimization: the journal stores opaque digests, never the
+   * learner's response text — the evidence log alone holds it. */
+  assert.ok(
+    !JSON.stringify(pendingRun.selection.pendingConsumption).includes('s3cr3t-resp0nse'),
+    'journal leaked the learner response text'
+  );
+  assert.ok(
+    (pendingRun.selection.pendingConsumption.expectedEvents ?? []).every((x) => /^sha256:[0-9a-f]{64}$/.test(x.digest ?? '')),
+    'journal expectation is not a sha256 digest'
+  );
   /* tamper: same event id, altered outcome — the journal fingerprint
    * must catch it even though the id is present. Memory store returns
    * live references, so mutating the listed event edits the log. */
@@ -1093,6 +1283,130 @@ const consumedKinds = (session) => (session.selectionContext()?.actionsChosen ??
   assert.equal((await ref.auditTrail()).length, 0, 'reference unexpectedly carries an audit store');
   ok(true, 'AUDIT-REQUIRED: B0 never consumes audit-free; reference stays free of it');
   say('AUDIT-REQUIRED: B0/SHADOW default to a memory audit store (final invariant)');
+}
+
+/* ═══ SLICE — 008D vertical slice as a real session trajectory ════
+ * Review requirement (PR #71 R1/HIGH): prove the full reachable chain
+ * through createMissionSession with an injected test clock — real
+ * selections consumed in B0 order, not appended events. Baseline →
+ * +25h → lagged delayed retest MISSED (the retest is the attributed
+ * failure) → repair surface served (support probe and/or authored
+ * remediation, whichever B0 ranks first) → fresh transfer → fresh
+ * assessment. Session restarts on the same stores mirror the
+ * reload/episode-roll path. */
+{
+  const learner = 'RT.slice';
+  const eventStore = createMemoryEventStore();
+  const runStore = createMemoryRunStore();
+  const decisionStore = createMemoryDecisionStore();
+
+  /* Every task in the mission needs a scripted CORRECT response — the
+   * driver consumes whatever B0 actually serves. */
+  const TIME_ANSWERS = {
+    'task.time.diagnostic.hear': 'three',
+    'task.time.diagnostic.say': "it's three o'clock",
+    'task.time.retrieval.greeting': 'greeting',
+    'task.time.remediation.hear': 'eight',
+    'task.time.retrieval.hear': 'half_four',
+    'task.time.retrieval.say': "it's two o'clock",
+    'task.time.retrieval.greet': 'hi',
+    'task.time.interaction.ask_name': 'what is your name',
+    'task.time.interaction.guided': "it's four o'clock",
+    'task.time.interaction.unaided': "it's four o'clock",
+    'task.time.delayed.hear': 'six',
+    'task.time.delayed.say': "it's six o'clock",
+    'task.time.transfer.clinic': 'half_ten',
+    'task.time.transfer.event': "it's six o'clock",
+    'task.time.assessment.hear': 'nine',
+    'task.time.assessment.checkpoint': 'hi! it is three o clock. what is your name?',
+    'task.time.support.number_probe': 'ten'
+  };
+
+  const open = async () => {
+    const s = makeSession({ fixture: TIME, learner, eventStore, runStore, decisionStore });
+    await s.init();
+    return s;
+  };
+
+  const served = [];
+  const missed = new Set();
+  const driveSlice = async (session, { missOnce = null, steps = 120 } = {}) => {
+    for (let i = 0; i < steps; i += 1) {
+      const s = session.screen();
+      if (s.type === 'summary') return true;
+      if (s.type === 'error') throw new Error(`error screen: ${s.message ?? JSON.stringify(s)}`);
+      if (s.type === 'intro') { await session.start({ learnerName: 'linh' }); continue; }
+      if (s.type === 'input') { await session.view(); continue; }
+      if (s.type !== 'task') throw new Error(`unknown screen ${s.type}`);
+      if (s.phase === 'feedback') { await session.next(); continue; }
+      served.push(s.taskId);
+      let a = TIME_ANSWERS[s.taskId];
+      assert.ok(a != null, `no scripted answer for served task ${s.taskId}`);
+      if (missOnce === s.taskId && !missed.has(s.taskId)) {
+        missed.add(s.taskId);
+        a = 'seven'; /* deliberate wrong option → observed attributing miss */
+      }
+      if (s.responseType === 'choice') await session.commit({ optionId: a });
+      else await session.commit({ text: a });
+    }
+    return false;
+  };
+
+  /* Phase A (test clock T0): teach — the run may hit summary before the
+   * baseline lands, so reopen sessions until the clock-time diagnostic
+   * is served and passed. */
+  for (let round = 0; round < 4 && !served.includes('task.time.diagnostic.hear'); round += 1) {
+    if (await driveSlice(await open())) break;
+  }
+  ok(served.includes('task.time.diagnostic.hear'), 'SLICE: baseline diagnostic never served');
+  say('SLICE-A: baseline taught through real selections');
+
+  /* Phase B (test clock +25h): the delayed retest is due — that serve
+   * IS the retention check; the learner misses it. B0's real ordering
+   * then ranks the authored repair surface first (remediation under a
+   * repair kind), then fresh transfer, then fresh assessment — the
+   * mission closes once targets are assessed, so re-drilling the
+   * delayed task after repair is correctly never picked over the
+   * claim-bearing work. */
+  tick += DAY + HOUR;
+  const idx = (id, from = 0) => served.findIndex((t, i) => i >= from && t === id);
+  const chainHit = () => {
+    const miss = idx('task.time.delayed.hear');
+    if (miss < 0 || !missed.has('task.time.delayed.hear')) return false;
+    const repair = idx('task.time.remediation.hear', miss);
+    if (repair < 0) return false;
+    const tr = idx('task.time.transfer.clinic', repair);
+    if (tr < 0) return false;
+    return idx('task.time.assessment.hear', tr) >= 0;
+  };
+  for (let round = 0; round < 8 && !chainHit(); round += 1) {
+    await driveSlice(await open(), { missOnce: 'task.time.delayed.hear' });
+    tick += 2 * HOUR; /* each "visit" later in time — episodes roll honestly */
+  }
+  const miss = idx('task.time.delayed.hear');
+  ok(miss >= 0 && missed.has('task.time.delayed.hear'), `SLICE: post-lag delayed retest never served/missed — ${served.join(' → ')}`);
+  const repair = idx('task.time.remediation.hear', miss);
+  ok(repair >= 0, `SLICE: authored remediation never served after the miss — ${served.slice(miss).join(' → ')}`);
+  const tr = idx('task.time.transfer.clinic', repair);
+  ok(tr >= 0, 'SLICE: fresh transfer family never served after repair');
+  const as = idx('task.time.assessment.hear', tr);
+  ok(as >= 0, 'SLICE: fresh assessment family never served after transfer');
+  say('SLICE-B: lagged retest miss → authored remediation → fresh transfer → fresh assessment (real session)');
+
+  /* The repair segment must be reflected in the consumed-decision
+   * audit: some repair-intent decision (correction/refresh/support
+   * demand) precedes the remediation serve, and an assessment decision
+   * was consumed for the clock cap. */
+  const audits = await decisionStore.list();
+  const repairDecision = audits.find((r) =>
+    ['correction', 'refresh', 'support_demand'].includes(r.chosenKind) &&
+    (r.taskId === 'task.time.remediation.hear' || r.taskId === 'task.time.support.number_probe'));
+  ok(repairDecision != null, `SLICE: no repair-kind decision in audit — ${audits.map((r) => `${r.chosenKind}@${r.taskId}`).join(', ')}`);
+  ok(audits.some((r) => r.chosenKind === 'assessment' && r.taskId === 'task.time.assessment.hear'),
+    'SLICE: assessment decision missing from audit');
+  ok(audits.every((r) => typeof r.decisionInputDigest === 'string' && r.decisionInputDigest.startsWith('sha256:')),
+    'SLICE: audit record without decide-time sha256 digest');
+  say('SLICE-C: repair + assessment decisions audited with sha256 digests');
 }
 
 console.log(`vnext-next-for-you-runtime: ${check} checks — PASS`);

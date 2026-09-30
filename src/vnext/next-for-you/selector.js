@@ -203,6 +203,14 @@ export function selectNextTask(input) {
   }
 
   const state = engineState(input);
+  /* 008D perf — one canonicalization per select. The full input digest
+   * is computed once here; policyB reads state.inputDigestHex instead
+   * of re-canonicalizing every event inside finalize(). The field is
+   * ignored by decisionInputSnapshot (its field list is fixed), so
+   * carrying it cannot change the digest it summarizes. The consume-time
+   * recompute inside decisionLog.append stays intentionally uncached —
+   * that boundary is the fail-closed verifier, not a cache candidate. */
+  state.inputDigestHex = sha256(decisionInputSnapshot(state));
 
   if (mode === SELECTION_MODES.SHADOW_B0) {
     const reference = nextMissionTask(referenceArgs);
@@ -218,14 +226,14 @@ export function selectNextTask(input) {
      * audit record captures it (§11: shadow reference choice). */
     return {
       ...reference, shadow, engineInput: state,
-      inputDigest: stateDigest(state),
+      inputDigest: `sha256:${state.inputDigestHex}`,
       decision: { ...referenceDecision(reference, state), shadow }
     };
   }
 
   /* mode === B0 */
   const decision = policyB(state);
-  const inputDigest = stateDigest(state);
+  const inputDigest = `sha256:${state.inputDigestHex}`;
   if (input.validate !== false) {
     const violations = validateB0(decision, state);
     if (violations.length) {
