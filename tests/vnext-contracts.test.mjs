@@ -147,7 +147,7 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES, REG
     capabilityId: 'interaction.ask_name',
     modality: 'spoken_interaction',
     purpose: 'assessment',
-    promptFamily: 'pf.interaction.ask_name.cued_recall.personal.casual.f2f.v1', // SAME family the lesson taught
+    promptFamily: taskById('task.meet.retrieval.ask_name').promptFamily, // SAME family the lesson taught
     freshness: { required: true, familyClass: 'fresh_assessment' },
     supportPolicy: { allowed: [], revealModelAfterAttempt: false },
     evaluation: { authority: 'deterministic', contractId: 'eval.leaky.v1' },
@@ -199,7 +199,7 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES, REG
       const t = register(makeTask({
         id: 'task.meet.transfer.sneaky', missionId: 'mission.meet_new_person',
         capabilityId: 'interaction.ask_name', modality: 'spoken_interaction', purpose: 'transfer',
-        promptFamily: 'pf.interaction.ask_name.partner_exchange.personal.casual.f2f.v1', // rehearsed family!
+        promptFamily: taskById('task.meet.interaction.guided').promptFamily, // rehearsed family!
         freshness: { required: true, familyClass: 'fresh_transfer' },
         evaluation: { authority: 'deterministic', contractId: 'eval.sneaky.v1' },
         transfer: { changedDimensions: ['partner'] }
@@ -292,7 +292,7 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES, REG
   const smuggler = makeTask({
     id: 'task.drink.smuggler',
     missionId: 'mission.order_drink',
-    capabilityId: 'interaction.order_drink',
+    capabilityId: 'interaction.request_item',
     modality: 'spoken_interaction',
     purpose: 'interaction',
     promptFamily: 'drink.smuggler.v1',
@@ -324,7 +324,7 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES, REG
   const e = attemptOn('task.meet.assessment.checkpoint');
   assert.equal(e.eventType, 'checkpoint');
   assert.equal(e.context.practicedOrTransfer, 'assessment');
-  assert.equal(e.context.promptFamily, 'pf.interaction.ask_name.full_exchange.community.casual.f2f.v1');
+  assert.equal(e.context.promptFamily, taskById('task.meet.assessment.checkpoint').promptFamily);
   assert.equal(e.binding.purpose, 'assessment');
   assert.equal(e.binding.familyClass, 'fresh_assessment');
   assert.equal(e.binding.effectiveSupportAllowed.length, 0, 'assessment allows no support');
@@ -355,13 +355,13 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES, REG
   };
 
   // baseline diagnostic: cold fail → EXPOSED
-  push('task.meet.diagnostic.opening', {
+  push('task.meet.diagnostic.ask_name', {
     occurredAt: at(0),
     attempt: { observed: true, outcome: 'fail', response: '...', latencyMs: 5000, attemptId: 'd1' }
   });
   // input exposures
   observe('task.meet.input.scene', { occurredAt: at(1_000) });
-  observe('task.meet.input.questions', { occurredAt: at(2_000) });
+  observe('task.meet.input.ask_name', { occurredAt: at(2_000) });
   // guided interaction with model answer → SUPPORTED
   push('task.meet.interaction.guided', {
     occurredAt: at(3_000),
@@ -369,7 +369,7 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES, REG
     attempt: { observed: true, outcome: 'success', response: 'ok', latencyMs: 2000, attemptId: 'g1' }
   });
   // feedback record (non-attempt, cannot advance state)
-  observe('task.meet.remediation.repair', {
+  observe('task.meet.remediation.ask_name', {
     occurredAt: at(4_000), eventType: 'feedback',
     feedback: { given: true, target: 'word order' },
     attempt: { attemptId: 'g1', outcome: null, observed: true, response: null, latencyMs: null }
@@ -395,8 +395,8 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES, REG
   });
   const s = stateOf(log, 'interaction.ask_name');
   assert.equal(s.state, 'TRANSFERRED', 'FLUENT stays unreachable — no rule promotes into it');
-  assert.ok(s.transferPromptFamilies.includes('pf.interaction.ask_name.open_social.street.casual.f2f.v1'));
-  assert.ok(!s.transferPromptFamilies.includes('pf.interaction.ask_name.full_exchange.community.casual.f2f.v1'),
+  assert.ok(s.transferPromptFamilies.includes(taskById('task.meet.transfer.street').promptFamily));
+  assert.ok(!s.transferPromptFamilies.includes(taskById('task.meet.assessment.checkpoint').promptFamily),
     'assessment family must not be counted as a transfer context');
 
   // every event is contract-bound: forged fields were impossible, and
@@ -423,18 +423,18 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES, REG
 
   push('task.drink.retrieval.order', { occurredAt: at(0) });
   push('task.drink.interaction.guided', { occurredAt: at(1_000) });
-  assert.equal(stateOf(log, 'interaction.order_drink').state, 'INDEPENDENT');
+  assert.equal(stateOf(log, 'interaction.request_item').state, 'INDEPENDENT');
   push('task.drink.delayed.check', { occurredAt: at(1_000) + RETENTION_DELAY_MS });
-  assert.equal(stateOf(log, 'interaction.order_drink').state, 'RETAINED');
+  assert.equal(stateOf(log, 'interaction.request_item').state, 'RETAINED');
   push('task.drink.transfer.stall', { occurredAt: at(1_000) + RETENTION_DELAY_MS + HOUR });
   push('task.drink.assessment.checkpoint', { occurredAt: at(1_000) + RETENTION_DELAY_MS + 2 * HOUR });
-  const sB = stateOf(log, 'interaction.order_drink');
+  const sB = stateOf(log, 'interaction.request_item');
   assert.equal(sB.state, 'TRANSFERRED');
-  assert.deepEqual(sB.transferPromptFamilies, ['pf.interaction.order_drink.open_counter.stall.casual.f2f.v1'],
+  assert.deepEqual(sB.transferPromptFamilies, [taskById('task.drink.transfer.stall').promptFamily],
     'only the transfer task earned a transfer family — assessment stayed separate');
 
   // Foreign learner isolation still holds inside the contract layer.
-  const foreign = bindAttempt(taskById('task.drink.transfer.stall'), capabilityById('interaction.order_drink'), {
+  const foreign = bindAttempt(taskById('task.drink.transfer.stall'), capabilityById('interaction.request_item'), {
     id: 'foreign1', learnerId: 'someone-else', occurredAt: at(0),
     attempt: { observed: true, outcome: 'success', response: 'ok', latencyMs: 100, attemptId: 'f1' }
   });
@@ -528,7 +528,7 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES, REG
   const mProblems = validateMission(MISSION_MEET_PERSON, [...TASKS_MEET_PERSON, ghost], CAPABILITIES);
   assert.ok(mProblems.some((x) => /not declared in taskIds/.test(x)), mProblems.join(' | '));
   // And it must not count as the evidence path for a stripped taskIds.
-  const thin = { ...MISSION_MEET_PERSON, taskIds: ['task.meet.diagnostic.listen'] };
+  const thin = { ...MISSION_MEET_PERSON, taskIds: ['task.meet.diagnostic.own_name'] };
   const thinProblems = validateMission(thin, TASKS_MEET_PERSON, CAPABILITIES);
   assert.ok(thinProblems.some((x) => /no eliciting task/.test(x)),
     'tasks outside taskIds do not satisfy the evidence-path invariant');
@@ -555,16 +555,16 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES, REG
 
   // f. Attempt ids are scoped by task — the same attemptId on two tasks
   //    cannot carry support history across the boundary.
-  const hintTask = bindAttempt(taskById('task.drink.interaction.guided'), capabilityById('interaction.order_drink'), {
+  const hintTask = bindAttempt(taskById('task.drink.interaction.guided'), capabilityById('interaction.request_item'), {
     id: 'st1', learnerId: LEARNER, occurredAt: T0 + 300_000,
     attempt: { observed: true, outcome: 'fail', response: 'x', latencyMs: 2000, attemptId: 'shared.id' },
     support: { hint: true }
   });
-  const cleanOther = bindAttempt(taskById('task.drink.interaction.unaided'), capabilityById('interaction.order_drink'), {
+  const cleanOther = bindAttempt(taskById('task.drink.interaction.unaided'), capabilityById('interaction.request_item'), {
     id: 'st2', learnerId: LEARNER, occurredAt: T0 + 301_000,
     attempt: { observed: true, outcome: 'success', response: 'ok', latencyMs: 900, attemptId: 'shared.id' }
   });
-  const sSticky = stateOf([hintTask, cleanOther], 'interaction.order_drink');
+  const sSticky = stateOf([hintTask, cleanOther], 'interaction.request_item');
   assert.equal(sSticky.state, 'INDEPENDENT',
     'support on task A attempt "shared.id" does not leak into task B attempt "shared.id"');
   console.log('✓ round-2 blockers: authority derived, assessment≠transfer, binder-only independence, taskIds scope, declared language, task-scoped sticky');

@@ -53,7 +53,10 @@ const learner = (id, script) => {
     [{ attempt: { observed: true, outcome: 'success', response: resp, latencyMs: lat, attemptId: aid('a') }, ...extra }];
   return {
     id,
-    act: (task, ctx) => (script[task.id]?.(ctx, { aid, ok }) ?? ok())
+    /* Unscripted input/notice tasks are exposure by definition — an
+     * attempt-shaped spec could never bind under their contracts. */
+    act: (task, ctx) => (script[task.id]?.(ctx, { aid, ok })
+      ?? (task.purpose === 'input' || task.purpose === 'notice' ? [{ observe: 'exposure' }] : ok()))
   };
 };
 

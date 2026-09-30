@@ -101,8 +101,32 @@ export const SIGNATURE_FIELDS = [
 ];
 
 /* The signature fields embedded in a canonical prompt-family id:
- *   pf.<capabilityId>.<cueTopology>.<setting>.<register>.<channel>.vN */
+ *   pf.<capabilityId>.<cueTopology>.<setting>.<register>.<channel>.<sigHash8>.vN
+ * The readable segments name the context; the trailing 8-char hash is an
+ * injective fingerprint over the WHOLE signature, so two families that
+ * differ only in a non-id field (interlocutorRole, relationship, …)
+ * still get distinct ids — and an id that does not hash to its declared
+ * signature fails the curriculum gate. */
 export const SIGNATURE_ID_FIELDS = ['cueTopology', 'setting', 'register', 'channel'];
+
+/* fnv1a-32 over the canonicalized signature — deterministic, pure-JS
+ * (must run in the browser: fixtures are bundled into /vnext/). Not a
+ * security hash: it only needs to be stable + injective enough to make
+ * family ids self-consistent. */
+export function signatureHash(sig) {
+  const fields = SIGNATURE_FIELDS.filter((f) => sig?.[f] != null).sort();
+  const canonical = JSON.stringify(fields.map((f) => [f, sig[f]]));
+  let h = 0x811c9dc5;
+  for (let i = 0; i < canonical.length; i++) {
+    h ^= canonical.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, '0');
+}
+
+export function canonicalFamilyId(capabilityId, sig, version = 1) {
+  return `pf.${capabilityId}.${sig.cueTopology}.${sig.setting}.${sig.register}.${sig.channel}.${signatureHash(sig)}.v${version}`;
+}
 
 /* Family class → evidence context kind. 'assessment' is NOT 'transfer' —
  * a fresh assessment samples ability, it does not earn transfer credit.

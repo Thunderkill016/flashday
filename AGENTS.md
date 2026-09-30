@@ -120,14 +120,20 @@ tasks (`contracts.js`), and a thin honest UI at `/vnext/`
 Curriculum authoring is gated by `src/vnext/curriculum-checks.js`
 (run in `tests/vnext-curriculum.test.mjs`): capability ids are
 namespaced `reception.*`/`production.*`/`interaction.*`; missions
-declare `targetCapabilities` (claim-bearing, ≤3 — each owes practiced
-+ delayed + fresh_transfer + assessment-sample coverage),
-`carrierCapabilities` (rehearsed, never fresh_transfer), and
-`supportCapabilities`. Every task carries a `contextSignature` and a
-canonical `pf.<cap>.<cueTopology>.<setting>.<register>.<channel>.vN`
-prompt family; transfer `changedDimensions` must differ from every
-practiced family on real signature fields. Only verified events consume
-tasks; delayed re-checks reuse the rehearsed family.
+declare `targetCapabilities` (claim-bearing, ≤3 — each owes a baseline
+diagnostic plus practiced + delayed + fresh_transfer + assessment-
+sample coverage), `carrierCapabilities` (rehearsed opportunistically —
+no baseline probe, no fresh_transfer, no assessment of their own), and
+`supportCapabilities` (demand-driven only — declare one only when a
+mechanism can route learners to it). The active surface is capped at 6
+capabilities per mission; split beyond that. Every task carries a
+`contextSignature` and a canonical
+`pf.<cap>.<cueTopology>.<setting>.<register>.<channel>.<sigHash8>.vN`
+prompt family derived via `canonicalFamilyId` — the hash fingerprints
+the WHOLE signature so non-id fields still distinguish families;
+transfer `changedDimensions` must differ from every practiced family on
+real signature fields. Only verified events consume tasks; delayed
+re-checks reuse the rehearsed family.
 
 ## Pages and auth flow
 

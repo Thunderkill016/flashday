@@ -45,15 +45,14 @@ A completed Mission is not evidence by itself.
   // a capability may be a carrier in one mission and a target later.
   carrierCapabilities: [
     "reception.listen.greeting_basic",
-    "interaction.greet",
     "reception.listen.identity_question_basic",
     "interaction.respond_to_introduction"
   ],
 
   prerequisiteCapabilities: [],
-  supportCapabilities: [
-    "interaction.ask_repeat"
-  ],
+  // Demand-driven only — declare a support cap only when a mechanism
+  // exists to route learners to it; otherwise it is a dead surface.
+  supportCapabilities: [],
 
   language: {
     assumedKnown: [],
@@ -103,9 +102,14 @@ A completed Mission is not evidence by itself.
 
   purpose: "interaction",
 
-  // Canonical family id — re-derived from the contextSignature below:
-  //   pf.<capabilityId>.<cueTopology>.<setting>.<register>.<channel>.vN
-  promptFamily: "pf.interaction.ask_name.partner_exchange.personal.casual.f2f.v1",
+  // Canonical family id — derived FROM the contextSignature below by
+  // canonicalFamilyId(capabilityId, signature):
+  //   pf.<capabilityId>.<cueTopology>.<setting>.<register>.<channel>.<sigHash8>.vN
+  // The trailing hash is an injective fingerprint over the WHOLE
+  // signature, so two families that differ only in a non-id field
+  // (interlocutorRole, relationship, responseTopology, lexicalDomain)
+  // still get distinct ids.
+  promptFamily: "pf.interaction.ask_name.partner_exchange.personal.casual.f2f.<sigHash8>.v1",
 
   // The family's auditable identity: two prompts with the same
   // signature are the SAME family however differently they are worded;
@@ -489,7 +493,7 @@ Repair capabilities may be available as support.
 
 Target at least:
 - reception.listen.drink_order_question_basic
-- interaction.order_drink
+- interaction.request_item
 
 Must demonstrate:
 - different scenario;

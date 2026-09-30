@@ -152,7 +152,7 @@ interaction.ask_name
 interaction.respond_to_introduction
 interaction.ask_repeat
 interaction.signal_nonunderstanding
-interaction.order_drink
+interaction.request_item
 ```
 
 ### Spoken production
@@ -190,7 +190,7 @@ interaction.respond_to_introduction
 
 reception.listen.drink_order_question_basic
     ↓
-interaction.order_drink
+interaction.request_item
 
 interaction.ask_repeat
 interaction.signal_nonunderstanding

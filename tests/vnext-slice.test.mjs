@@ -34,22 +34,21 @@ const stateOf = (log, capId) =>
 let seq = 0;
 const nextId = () => `slice.${++seq}`;
 
-/* Scripted learner: understands greetings, identity questions and can
- * say her own name (baseline passes — skipping teaching for them is
- * itself an asserted behavior) but cannot yet ASK the question. Each
- * entry is a QUEUE of acts for one task id; every selector visit pops
- * the next act. This is how "feedback then retry" becomes two distinct
- * steps on the same remediation task. */
+/* Scripted learner: can say her own name (baseline pass — skipping
+ * teaching for it is itself an asserted behavior) but cannot yet ASK
+ * the question. Carriers rehearse opportunistically — they see input
+ * and a comprehension check, never a baseline probe. Each entry is a
+ * QUEUE of acts for one task id; every selector visit pops the next
+ * act. This is how "feedback then retry" becomes two distinct steps on
+ * the same remediation task. */
 const SCRIPT = {
-  'task.meet.diagnostic.opening': [[{ attempt: { observed: true, outcome: 'success', response: 'Hello!', latencyMs: 900, attemptId: 'd.greet' } }]],
-  'task.meet.diagnostic.listen': [[{ attempt: { observed: true, outcome: 'success', response: 'greeting', latencyMs: 800, attemptId: 'd.listen' } }]],
-  'task.meet.diagnostic.identity_q': [[{ attempt: { observed: true, outcome: 'success', response: 'name question', latencyMs: 1100, attemptId: 'd.iq' } }]],
   'task.meet.diagnostic.own_name': [[{ attempt: { observed: true, outcome: 'success', response: "I'm Linh", latencyMs: 1300, attemptId: 'd.name' } }]],
   'task.meet.diagnostic.ask_name': [[{ attempt: { observed: true, outcome: 'fail', response: '…', latencyMs: 5000, attemptId: 'd.ask' } }]],
-  // Support-capability baselines — the learner already has both, so no
-  // teaching should ever be routed to them (pre-existing, not learned).
-  'task.meet.diagnostic.repair': [[{ attempt: { observed: true, outcome: 'success', response: 'Sorry?', latencyMs: 800, attemptId: 'd.rep' } }]],
-  'task.meet.diagnostic.polite': [[{ attempt: { observed: true, outcome: 'success', response: 'Nice to meet you too', latencyMs: 800, attemptId: 'd.pol' } }]],
+  // Carrier rehearsal: comprehensible input, then a comprehension check
+  // — the carrier's only eliciting unit.
+  'task.meet.input.scene': [[{ observe: 'exposure' }]],
+  'task.meet.input.questions': [[{ observe: 'exposure' }]],
+  'task.meet.retrieval.questions': [[{ attempt: { observed: true, outcome: 'success', response: 'ask_name', latencyMs: 900, attemptId: 'r.iq' } }]],
   'task.meet.input.ask_name': [[{ observe: 'exposure' }]],
   // Retrieval succeeds but only with a hint — supported, not independent.
   'task.meet.retrieval.ask_name': [[{
@@ -71,18 +70,20 @@ const SCRIPT = {
   'task.meet.delayed.name': [[{ attempt: { observed: true, outcome: 'success', response: "I'm Linh", latencyMs: 1200, attemptId: 'dr.name' } }]],
   'task.meet.transfer.name': [[{ attempt: { observed: true, outcome: 'success', response: 'My name is Linh', latencyMs: 1500, attemptId: 'tr.name' } }]],
   'task.meet.transfer.street': [[{ attempt: { observed: true, outcome: 'success', response: "I'm Sam — and you? … What's your name?", latencyMs: 1600, attemptId: 'tr.ask' } }]],
+  // The polite-return carrier is rehearsed once the exchange exists.
+  'task.meet.interaction.polite': [[{ attempt: { observed: true, outcome: 'success', response: 'Nice to meet you too', latencyMs: 900, attemptId: 'i.pol' } }]],
   'task.meet.assessment.checkpoint': [[{ attempt: { observed: true, outcome: 'success', response: 'full exchange', latencyMs: 1900, attemptId: 'ck.ask' } }]]
 };
 
 // In-session work happens at T0+seconds; the delayed checks and beyond
 // land after the 24h retention window measured from first INDEPENDENT.
-// Steps 1–12 are the baseline + teaching + remediation phase; the jump
-// begins at the first delayed step so the remediation success stays
-// anchored at T0 — otherwise its occurredAt lands after the jump and
-// the capability is never due during the trace.
+// Steps 1–10 are the baseline + carrier rehearsal + teaching +
+// remediation phase; the jump begins at the first delayed step so the
+// remediation success stays anchored at T0 — otherwise its occurredAt
+// lands after the jump and the capability is never due during the trace.
 const STEP_TIME = (step) => {
-  if (step <= 12) return T0 + step * 1000;
-  return T0 + 10_000 + RETENTION_DELAY_MS + (step - 12) * HOUR;
+  if (step <= 10) return T0 + step * 1000;
+  return T0 + 10_000 + RETENTION_DELAY_MS + (step - 10) * HOUR;
 };
 
 const runSlice = () => {
@@ -109,38 +110,39 @@ const row = (step) => trace[step - 1];
 {
   const taskSeq = trace.filter((t) => t.taskId).map((t) => t.taskId);
   assert.deepEqual(taskSeq, [
-    'task.meet.diagnostic.opening',
-    'task.meet.diagnostic.listen',
-    'task.meet.diagnostic.identity_q',
-    'task.meet.diagnostic.own_name',
+    'task.meet.diagnostic.own_name',  // target baseline probes first
     'task.meet.diagnostic.ask_name',
-    'task.meet.diagnostic.repair',
-    'task.meet.diagnostic.polite',
+    'task.meet.input.scene',          // carriers rehearse: input, no baseline
+    'task.meet.input.questions',
+    'task.meet.retrieval.questions',  // carrier comprehension check
     'task.meet.input.ask_name',
     'task.meet.retrieval.ask_name',
     'task.meet.interaction.guided',
     'task.meet.remediation.ask_name', // feedback step
     'task.meet.remediation.ask_name', // retry step
-    'task.meet.delayed.name',         // say_own_name due first (independent at step 4)
+    'task.meet.delayed.name',         // say_own_name due first (independent at step 1)
     'task.meet.delayed.check',
     'task.meet.transfer.name',
     'task.meet.transfer.street',
+    'task.meet.interaction.polite',   // carrier rehearsal once the exchange exists
     'task.meet.assessment.checkpoint'
   ], `slice should walk the declared learning loop in order:\n${trace.map((t) => `${t.step}: ${t.taskId} [${t.beforeState}→${t.afterState}] ${t.reason}`).join('\n')}`);
 
   // State checkpoints (spec §6).
-  assert.equal(row(5).afterState, 'EXPOSED', 'baseline fail → EXPOSED');
-  assert.equal(row(9).afterState, 'SUPPORTED', 'hinted retrieval → SUPPORTED');
-  assert.equal(row(10).afterState, 'SUPPORTED', 'model-aided partial → SUPPORTED');
-  assert.equal(row(12).afterState, 'INDEPENDENT', 'clean unaided retry → INDEPENDENT');
-  assert.equal(row(13).afterState, 'RETAINED', 'say_own_name delayed success → RETAINED');
-  assert.equal(row(14).afterState, 'RETAINED', '24h+ delayed success → RETAINED');
-  assert.equal(row(15).afterState, 'TRANSFERRED', 'say_own_name changed-context success → TRANSFERRED');
-  assert.equal(row(16).afterState, 'TRANSFERRED', 'changed-context success → TRANSFERRED');
-  assert.equal(row(17).afterState, 'TRANSFERRED', 'fresh assessment does not change transfer state');
+  assert.equal(row(2).afterState, 'EXPOSED', 'baseline fail → EXPOSED');
+  assert.equal(row(5).afterState, 'INDEPENDENT', 'carrier comprehension check passes opportunistically');
+  assert.equal(row(7).afterState, 'SUPPORTED', 'hinted retrieval → SUPPORTED');
+  assert.equal(row(8).afterState, 'SUPPORTED', 'model-aided partial → SUPPORTED');
+  assert.equal(row(10).afterState, 'INDEPENDENT', 'clean unaided retry → INDEPENDENT');
+  assert.equal(row(11).afterState, 'RETAINED', 'say_own_name delayed success → RETAINED');
+  assert.equal(row(12).afterState, 'RETAINED', '24h+ delayed success → RETAINED');
+  assert.equal(row(13).afterState, 'TRANSFERRED', 'say_own_name changed-context success → TRANSFERRED');
+  assert.equal(row(14).afterState, 'TRANSFERRED', 'changed-context success → TRANSFERRED');
+  assert.equal(row(15).afterState, 'INDEPENDENT', 'carrier polite return rehearses opportunistically');
+  assert.equal(row(16).afterState, 'TRANSFERRED', 'fresh assessment does not change transfer state');
   const final = stateOf(events, 'interaction.ask_name');
   assert.equal(final.milestones.fluent, false, 'FLUENT unreachable in v0');
-  assert.ok(!final.transferPromptFamilies.includes('pf.interaction.ask_name.full_exchange.community.casual.f2f.v1'),
+  assert.ok(!final.transferPromptFamilies.includes(taskById('task.meet.assessment.checkpoint').promptFamily),
     'assessment family is not a transfer context');
 
   // Same-session success is never retention — the delayed check only
@@ -161,9 +163,11 @@ const row = (step) => trace[step - 1];
   //    serves an input/retrieval/interaction/remediation task to a
   //    capability whose diagnostic already passed. Delayed/transfer
   //    tasks are claim-path sampling, not teaching, so a baseline-passed
-  //    claim target (say_own_name) may still receive those.
+  //    claim target (say_own_name) may still receive those. Carriers
+  //    are deliberately rehearsed — their input/retrieval tasks are
+  //    the mission's context work, not a baseline-skipping violation.
   const TEACHING = new Set(['input', 'notice', 'retrieval', 'production', 'interaction', 'remediation']);
-  const baselinePassed = new Set(['reception.listen.greeting_basic', 'reception.listen.identity_question_basic', 'production.speak.say_own_name', 'interaction.greet']);
+  const baselinePassed = new Set(['production.speak.say_own_name']);
   for (const t of trace.filter((t) => t.taskId)) {
     const task = taskById(t.taskId);
     if (baselinePassed.has(task.capabilityId)) {
@@ -171,12 +175,21 @@ const row = (step) => trace[step - 1];
         `baseline-passed ${task.capabilityId} must never receive a teaching task, got ${task.id} [${task.purpose}]`);
     }
   }
-  console.log('✓ baseline pass skips teaching — passed capabilities only ever see their diagnostic');
+  // And no carrier ever receives a diagnostic or fresh-transfer task —
+  // that is the point of the role.
+  for (const t of trace.filter((t) => t.taskId)) {
+    const task = taskById(t.taskId);
+    if (MISSION_MEET_PERSON.carrierCapabilities.includes(task.capabilityId)) {
+      assert.ok(task.purpose !== 'diagnostic' && task.purpose !== 'transfer' && task.purpose !== 'assessment',
+        `carrier ${task.capabilityId} received a ${task.purpose} task — roles must hold`);
+    }
+  }
+  console.log('✓ baseline pass skips teaching; carriers never get probes, transfer or certification');
 
   // Prefix of the slice where ask_name just reached INDEPENDENT.
-  const throughIndependent = events.slice(0, row(12).eventCount);
+  const throughIndependent = events.slice(0, row(10).eventCount);
   // …and where it just reached RETAINED.
-  const throughRetained = events.slice(0, row(14).eventCount);
+  const throughRetained = events.slice(0, row(12).eventCount);
   const cap = capabilityById('interaction.ask_name');
 
   // 2. Support-aided retry inside the same attempt boundary cannot
@@ -217,10 +230,12 @@ const row = (step) => trace[step - 1];
   console.log('✓ failed delayed retrieval routes to remediation, not another delayed check');
 
   // 4. Missing transfer tasks → blocked, never a practiced-task
-  //    substitute.
+  //    substitute. (The carrier's polite rehearsal is also stripped —
+  //    otherwise it is legitimately serveable and the mission is not
+  //    blocked at all, which is correct but not what this proves.)
   const noTransferMission = {
     ...MISSION_MEET_PERSON,
-    taskIds: MISSION_MEET_PERSON.taskIds.filter((id) => !id.startsWith('task.meet.transfer.'))
+    taskIds: MISSION_MEET_PERSON.taskIds.filter((id) => !id.startsWith('task.meet.transfer.') && id !== 'task.meet.interaction.polite')
   };
   const sel4 = nextMissionTask({
     learnerId: LEARNER, mission: noTransferMission, tasks: TASKS,
@@ -289,8 +304,8 @@ const row = (step) => trace[step - 1];
   // 9. Consumption is revision-scoped and the selector is
   //    revision-aware: evidence bound under v1 never consumes the v2
   //    contract; selection resolves to the highest registered revision.
-  const diagV2 = { ...taskById('task.meet.diagnostic.opening'), revision: 2 };
-  const v1Diag = bindAttempt(taskById('task.meet.diagnostic.opening'), capabilityById('interaction.greet'), {
+  const diagV2 = { ...taskById('task.meet.diagnostic.own_name'), revision: 2 };
+  const v1Diag = bindAttempt(taskById('task.meet.diagnostic.own_name'), capabilityById('production.speak.say_own_name'), {
     id: 'rv.a', learnerId: LEARNER, occurredAt: T0,
     attempt: { observed: true, outcome: 'success', response: 'hi', latencyMs: 800, attemptId: 'rv.1' }
   });
@@ -299,7 +314,7 @@ const row = (step) => trace[step - 1];
     capabilities: CAPABILITIES, events: [v1Diag], riskPriors: RISK_PRIORS, now: T0 + 1000
   });
   assert.equal(sel9.status, 'ready');
-  assert.equal(sel9.taskId, 'task.meet.diagnostic.opening');
+  assert.equal(sel9.taskId, 'task.meet.diagnostic.own_name');
   assert.equal(sel9.taskRevision, 2, 'v1 evidence does not consume the v2 contract — v2 is still due');
 
   // 10. Only VERIFIED events mark a task consumed. A well-formed raw
@@ -307,8 +322,8 @@ const row = (step) => trace[step - 1];
   //     hide an unrun baseline.
   const forged = makeEvent({
     id: 'fg.1', learnerId: LEARNER, occurredAt: T0, eventType: 'checkpoint',
-    taskId: 'task.meet.diagnostic.opening', taskRevision: 1,
-    capabilityId: 'interaction.greet', modality: 'spoken_interaction',
+    taskId: 'task.meet.diagnostic.own_name', taskRevision: 1,
+    capabilityId: 'production.speak.say_own_name', modality: 'spoken_production',
     attempt: { observed: true, outcome: 'success', response: 'x', latencyMs: 100, attemptId: 'fg.1' },
     context: { missionId: 'mission.meet_new_person', promptFamily: 'meet.opening.baseline.v1', practicedOrTransfer: 'practiced' },
     evaluation: { authority: 'deterministic', contractId: 'eval.required_functions.v1' },
@@ -318,7 +333,7 @@ const row = (step) => trace[step - 1];
     learnerId: LEARNER, mission: MISSION_MEET_PERSON, tasks: TASKS,
     capabilities: CAPABILITIES, events: [forged], riskPriors: RISK_PRIORS, now: T0 + 1000
   });
-  assert.equal(sel10.taskId, 'task.meet.diagnostic.opening',
+  assert.equal(sel10.taskId, 'task.meet.diagnostic.own_name',
     'an unverifiable event must not consume the baseline diagnostic');
   console.log('✓ selection is revision-scoped and only verified evidence consumes a task');
 
@@ -333,7 +348,7 @@ const row = (step) => trace[step - 1];
   assert.equal(sel11a.status, 'blocked');
   assert.match(sel11a.reason, /task\.meet\.ghost.*absent/, 'missing declared task blocks the mission');
 
-  const invalidV2 = { ...taskById('task.meet.diagnostic.opening'), revision: 2, purpose: 'fluency' };
+  const invalidV2 = { ...taskById('task.meet.diagnostic.own_name'), revision: 2, purpose: 'fluency' };
   const sel11b = nextMissionTask({
     learnerId: LEARNER, mission: MISSION_MEET_PERSON, tasks: [...TASKS, invalidV2],
     capabilities: CAPABILITIES, events: [], riskPriors: RISK_PRIORS, now: T0
@@ -349,7 +364,7 @@ const row = (step) => trace[step - 1];
   const leanMission = {
     ...MISSION_MEET_PERSON,
     taskIds: [
-      'task.meet.diagnostic.identity_q',
+      'task.meet.retrieval.questions',
       'task.meet.diagnostic.own_name',
       'task.meet.diagnostic.ask_name',
       'task.meet.input.ask_name',
@@ -359,7 +374,7 @@ const row = (step) => trace[step - 1];
   };
   const capAsk = capabilityById('interaction.ask_name');
   const leanLog = [
-    bindAttempt(taskById('task.meet.diagnostic.identity_q'), capabilityById('reception.listen.identity_question_basic'), {
+    bindAttempt(taskById('task.meet.retrieval.questions'), capabilityById('reception.listen.identity_question_basic'), {
       id: 'lm.a', learnerId: LEARNER, occurredAt: T0,
       attempt: { observed: true, outcome: 'success', response: 'ok', latencyMs: 900, attemptId: 'lm.iq' }
     }),

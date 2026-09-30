@@ -6,7 +6,7 @@
  */
 import assert from 'node:assert/strict';
 import { CAPABILITIES, capabilityById } from '../src/vnext/capabilities.js';
-import { makeMission, makeTask } from '../src/vnext/contracts.js';
+import { canonicalFamilyId, makeMission, makeTask } from '../src/vnext/contracts.js';
 import {
   checkCurriculum, parseFamilyId, MAX_TARGETS_PER_MISSION
 } from '../src/vnext/curriculum-checks.js';
@@ -27,20 +27,28 @@ const run = (over = {}) => checkCurriculum({
 
 // ── 2. Canonical family ids parse losslessly ──────────────────
 {
-  const fam = parseFamilyId('pf.interaction.ask_name.open_social.street.casual.f2f.v1');
+  const street = {
+    communicativeFunction: 'ask_name', cueTopology: 'open_social', setting: 'street',
+    register: 'casual', channel: 'f2f', interlocutorRole: 'stranger',
+    relationship: 'stranger_contact', responseTopology: 'wh_question', lexicalDomain: 'identity'
+  };
+  const id = canonicalFamilyId('interaction.ask_name', street);
+  const fam = parseFamilyId(id);
   assert.deepEqual(fam, {
     capabilityId: 'interaction.ask_name',
     cueTopology: 'open_social', setting: 'street', register: 'casual',
-    channel: 'f2f', version: 1
+    channel: 'f2f', hash: id.split('.').at(-2), version: 1
   });
+  // The hash is injective over the FULL signature — two families that
+  // differ only in a non-id field still get distinct ids.
+  const other = canonicalFamilyId('interaction.ask_name', { ...street, interlocutorRole: 'vendor' });
+  assert.notEqual(other, id, 'interlocutorRole change must mint a different family id');
   assert.equal(parseFamilyId('meet.ask_name.street.v1'), null, 'legacy ids are not canonical');
-  assert.equal(parseFamilyId('pf.short.v1'), null, 'fewer than five segments cannot be a canonical id');
-  assert.equal(parseFamilyId('pf.interaction.ask_name.open_social.street.casual.f2f'), null, 'missing version');
-  // A short-but-legal form parses — the cap-id match check downstream is
-  // what rejects it, not the parser.
-  const wrongCap = parseFamilyId('pf.interaction.ask_name.street.casual.f2f.v1');
-  assert.equal(wrongCap.capabilityId, 'interaction', 'ambiguous tails parse; the cap match check rejects them');
-  console.log('✓ canonical prompt-family ids parse and reject malformed/legacy forms');
+  assert.equal(parseFamilyId('pf.short.v1'), null, 'fewer than six tail segments cannot be a canonical id');
+  assert.equal(parseFamilyId('pf.interaction.ask_name.open_social.street.casual.f2f.v1'), null, 'missing hash segment');
+  assert.equal(parseFamilyId(id.replace(/\.v\d+$/, '')), null, 'missing version');
+  assert.equal(parseFamilyId('pf.interaction.ask_name.open_social.street.casual.f2f.notahash.v1'), null, 'non-hex hash');
+  console.log('✓ canonical prompt-family ids parse, hash the full signature, and reject malformed forms');
 }
 
 // ── 3. DAG failures are caught ────────────────────────────────
@@ -91,15 +99,16 @@ const run = (over = {}) => checkCurriculum({
     carrierCapabilities: [...MISSION_MEET_PERSON.carrierCapabilities, 'interaction.ask_repeat'],
     supportCapabilities: []
   };
+  const sneakSig = {
+    communicativeFunction: 'ask_repeat', cueTopology: 'noisy_room', setting: 'street',
+    register: 'casual', channel: 'f2f', interlocutorRole: 'stranger',
+    relationship: 'stranger_contact', responseTopology: 'repair_request', lexicalDomain: 'repair'
+  };
   const carrierTask = makeTask({
     id: 'task.meet.transfer.repair_sneak', missionId: 'mission.meet_new_person',
     capabilityId: 'interaction.ask_repeat', modality: 'spoken_interaction', purpose: 'transfer',
-    promptFamily: 'pf.interaction.ask_repeat.noisy_room.street.casual.f2f.v1',
-    contextSignature: {
-      communicativeFunction: 'ask_repeat', cueTopology: 'noisy_room', setting: 'street',
-      register: 'casual', channel: 'f2f', interlocutorRole: 'stranger',
-      relationship: 'stranger_contact', responseTopology: 'repair_request', lexicalDomain: 'repair'
-    },
+    promptFamily: canonicalFamilyId('interaction.ask_repeat', sneakSig),
+    contextSignature: sneakSig,
     stimulus: { type: 'partner_turn', languageComponents: ['…'] },
     response: { type: 'spoken_turn', requiredFunctions: ['ask_repeat'] },
     evaluation: { authority: 'deterministic', contractId: 'eval.test.v1' },
@@ -121,7 +130,7 @@ const run = (over = {}) => checkCurriculum({
   const drifted = makeTask({
     id: 'task.meet.drift', missionId: 'mission.meet_new_person',
     capabilityId: 'interaction.ask_name', modality: 'spoken_interaction', purpose: 'retrieval',
-    promptFamily: 'pf.interaction.ask_name.cued_recall.personal.casual.f2f.v1',
+    promptFamily: ALL_TASKS.find((t) => t.id === 'task.meet.retrieval.ask_name').promptFamily,
     contextSignature: {
       communicativeFunction: 'ask_name', cueTopology: 'cued_recall', setting: 'street',
       register: 'casual', channel: 'f2f', interlocutorRole: 'new_peer',
@@ -138,15 +147,12 @@ const run = (over = {}) => checkCurriculum({
   );
 
   // A "new" family id with an unchanged signature → fake novelty.
+  const rehearsedSig = ALL_TASKS.find((t) => t.id === 'task.meet.retrieval.ask_name').contextSignature;
   const fakeNovel = makeTask({
     id: 'task.meet.fake_novel', missionId: 'mission.meet_new_person',
     capabilityId: 'interaction.ask_name', modality: 'spoken_interaction', purpose: 'retrieval',
-    promptFamily: 'pf.interaction.ask_name.cued_recall.personal.casual.f2f.v2',
-    contextSignature: {
-      communicativeFunction: 'ask_name', cueTopology: 'cued_recall', setting: 'personal',
-      register: 'casual', channel: 'f2f', interlocutorRole: 'new_peer',
-      relationship: 'first_meeting', responseTopology: 'wh_question', lexicalDomain: 'identity'
-    },
+    promptFamily: canonicalFamilyId('interaction.ask_name', rehearsedSig, 2),
+    contextSignature: rehearsedSig,
     stimulus: { type: 'cued_prompt', languageComponents: ["What is your name?"] },
     response: { type: 'spoken_turn', requiredFunctions: ['ask_name'] },
     evaluation: { authority: 'deterministic', contractId: 'eval.test.v1' },
@@ -159,15 +165,16 @@ const run = (over = {}) => checkCurriculum({
 
   // A transfer task whose declared "delta" does not exist in the
   // signature → the novelty claim is unverifiable.
+  const liarSig = {
+    communicativeFunction: 'ask_name', cueTopology: 'self_intro', setting: 'personal',
+    register: 'casual', channel: 'voice_note', interlocutorRole: 'new_peer',
+    relationship: 'first_meeting', responseTopology: 'wh_question', lexicalDomain: 'identity'
+  };
   const noDelta = makeTask({
     id: 'task.meet.transfer.liar', missionId: 'mission.meet_new_person',
     capabilityId: 'interaction.ask_name', modality: 'spoken_interaction', purpose: 'transfer',
-    promptFamily: 'pf.interaction.ask_name.self_intro.personal.casual.voice_note.v1',
-    contextSignature: {
-      communicativeFunction: 'ask_name', cueTopology: 'self_intro', setting: 'personal',
-      register: 'casual', channel: 'voice_note', interlocutorRole: 'new_peer',
-      relationship: 'first_meeting', responseTopology: 'wh_question', lexicalDomain: 'identity'
-    },
+    promptFamily: canonicalFamilyId('interaction.ask_name', liarSig),
+    contextSignature: liarSig,
     stimulus: { type: 'partner_turn', languageComponents: ["I'm Sam — and you are?"] },
     response: { type: 'spoken_turn', requiredFunctions: ['ask_name'] },
     evaluation: { authority: 'deterministic', contractId: 'eval.test.v1' },
@@ -181,15 +188,16 @@ const run = (over = {}) => checkCurriculum({
   );
 
   // A transfer with only non-context dims is not a context transfer.
+  const laterSig = {
+    communicativeFunction: 'ask_name', cueTopology: 'self_intro', setting: 'personal',
+    register: 'casual', channel: 'f2f', interlocutorRole: 'new_peer',
+    relationship: 'first_meeting', responseTopology: 'wh_question', lexicalDomain: 'identity'
+  };
   const delayOnly = makeTask({
     id: 'task.meet.transfer.later', missionId: 'mission.meet_new_person',
     capabilityId: 'interaction.ask_name', modality: 'spoken_interaction', purpose: 'transfer',
-    promptFamily: 'pf.interaction.ask_name.self_intro.personal.casual.f2f.v9',
-    contextSignature: {
-      communicativeFunction: 'ask_name', cueTopology: 'self_intro', setting: 'personal',
-      register: 'casual', channel: 'f2f', interlocutorRole: 'new_peer',
-      relationship: 'first_meeting', responseTopology: 'wh_question', lexicalDomain: 'identity'
-    },
+    promptFamily: canonicalFamilyId('interaction.ask_name', laterSig, 9),
+    contextSignature: laterSig,
     stimulus: { type: 'partner_turn', languageComponents: ["I'm Sam"] },
     response: { type: 'spoken_turn', requiredFunctions: ['ask_name'] },
     evaluation: { authority: 'deterministic', contractId: 'eval.test.v1' },

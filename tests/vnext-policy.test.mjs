@@ -109,7 +109,7 @@ const ev = (taskId, { outcome = 'success', at = T0, support = null, eventType } 
     id: 'l.able',
     act: (task) => {
       const aid = `l.able.${++n}`;
-      if (task.id === 'task.meet.input.ask_name') return [{ observe: 'exposure' }];
+      if (task.purpose === 'input' || task.purpose === 'notice') return [{ observe: 'exposure' }];
       if (task.id === 'task.meet.diagnostic.ask_name') {
         return [{ attempt: { observed: true, outcome: 'fail', response: '…', latencyMs: 4000, attemptId: aid } }];
       }

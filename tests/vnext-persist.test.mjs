@@ -68,6 +68,7 @@ const mkLearner = (id) => {
         'task.meet.transfer.street': [{ attempt: { observed: true, outcome: 'success', response: 'ok', latencyMs: 1600, attemptId: aid('tr') } }],
         'task.meet.assessment.checkpoint': [{ attempt: { observed: true, outcome: 'success', response: 'ok', latencyMs: 1800, attemptId: aid('ck') } }]
       };
+      if (task.purpose === 'input' || task.purpose === 'notice') return [{ observe: 'exposure' }];
       return script[task.id] ?? [{ attempt: { observed: true, outcome: 'success', response: 'ok', latencyMs: 900, attemptId: aid('x') } }];
     }
   };
@@ -142,8 +143,13 @@ const runLearner = () => runPilotLearner({
 {
   const run = runLearner();
   const fs = makeFakeFs();
-  await appendVnextEvents(fs, UID, run.events.slice(0, 5));
-  const forged = { ...run.events[4], attempt: { ...run.events[4].attempt, outcome: 'success' } };
+  const idx = run.events.findIndex((e) => e.attempt?.outcome != null);
+  assert.ok(idx >= 0, 'no attempt event to mutate');
+  await appendVnextEvents(fs, UID, run.events.slice(0, idx + 1));
+  const forged = {
+    ...run.events[idx],
+    attempt: { ...run.events[idx].attempt, outcome: run.events[idx].attempt.outcome === 'success' ? 'fail' : 'success' }
+  };
   await assert.rejects(
     () => appendVnextEvents(fs, UID, [forged]),
     /vnext event conflict/,

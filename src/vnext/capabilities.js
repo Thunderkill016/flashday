@@ -111,11 +111,11 @@ export const CAPABILITIES = [
     vietnameseRiskProbes: ['vn.speaking_anxiety_support', 'vn.consonant_clusters']
   }),
   cap({
-    id: 'interaction.order_drink',
-    performance: 'Order one drink politely in a cafe exchange.',
+    id: 'interaction.request_item',
+    performance: 'Request an item politely in a service exchange (drink, food, small goods).',
     modality: 'spoken_interaction',
     prerequisites: ['reception.listen.drink_order_question_basic'],
-    criteria: { meaningDelivered: true, intelligibleEnoughForPartner: true, requiredFunctions: ['order_item'] },
+    criteria: { meaningDelivered: true, intelligibleEnoughForPartner: true, requiredFunctions: ['request_item'] },
     language: { chunks: ['Can I have …?', 'A coffee, please'], vocabulary: ['coffee', 'tea', 'please'] },
     vietnameseRiskProbes: ['vn.inflectional_endings', 'vn.lexical_stress']
   }),

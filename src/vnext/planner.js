@@ -20,11 +20,22 @@ import { RETENTION_DELAY_MS, projectLearnerState } from './projection.js';
 import { priorById } from './risk-priors.js';
 import { resolvePolicy } from './policy.js';
 
-export function planNext(learnerId, events, { capabilities, tasks = [], riskPriors = [], now, retentionDelayMs, policy, skipIntentFor }) {
+export function planNext(learnerId, events, { capabilities, tasks = [], riskPriors = [], now, retentionDelayMs, policy, skipIntentFor, roles }) {
   const pol = resolvePolicy(policy);
   const lag = retentionDelayMs ?? pol.retention.minLagMs;
   const { byCapability } = projectLearnerState(learnerId, events, capabilities, tasks, { retentionDelayMs: lag, policy: pol });
   const priorMap = new Map(riskPriors.map((p) => [p.id, p]));
+
+  /* Mission roles decide how a never-seen capability is introduced
+   * (R6): targets owe a baseline probe; carriers — and declared
+   * prerequisites — rehearse context opportunistically with no
+   * baseline at all; supports are demand-driven only, so the planner
+   * leaves them alone until evidence exists (rules 1–6a can still
+   * reach them once an attempt produced some). Callers without a
+   * mission (null) keep the original probe-or-expose behavior. */
+  const roleOf = roles
+    ? (id) => (roles.targets?.has(id) ? 'target' : roles.supports?.has(id) ? 'support' : 'carrier')
+    : () => null;
 
   /* `skipIntentFor` holds 'capabilityId|intentKind' keys: it silences
    * ONE kind of intent for a capability (the selector has no servable
@@ -108,21 +119,29 @@ export function planNext(learnerId, events, { capabilities, tasks = [], riskPrio
     }
   }
 
-  /* 6b. Introduce the first eligible never-seen capability. Vietnamese
-   *     risk probes attached to it schedule diagnostics first;
-   *     population priors change what we ASK, never what we claim. */
+  /* 6b. Introduce the first eligible never-seen capability, by role:
+   *     a target always asks for a baseline probe first (falling back
+   *     to input only if the mission declared none — an authoring gap
+   *     the curriculum gate also flags); a carrier goes straight to
+   *     input; a support is skipped — demand-driven intents only. */
   for (const c of capabilities) {
     const s = byCapability.get(c.id);
     if (s.state !== 'NOT_SEEN') continue;
     const ready = (c.prerequisites || []).every((p) => byCapability.get(p)?.milestones.independent);
     if (!ready) continue;
+    const role = roleOf(c.id);
+    if (role === 'support') continue;
     const probes = (c.vietnameseRiskProbes || [])
       .map((id) => priorMap.get(id) || priorById(id))
       .filter((p) => p && p.mayTriggerProbe && p.appliesTo.includes(c.modality))
       .map((p) => p.id);
-    const kind = probes.length ? 'diagnostic_probe' : 'expose';
+    const kind = role === 'target' && !skipped(c.id, 'diagnostic_probe')
+      ? 'diagnostic_probe'
+      : role === 'carrier'
+        ? 'expose'
+        : probes.length ? 'diagnostic_probe' : 'expose';
     if (skipped(c.id, kind)) continue;
-    if (probes.length) {
+    if (kind === 'diagnostic_probe') {
       return { kind, capabilityId: c.id, probes, reason: 'eligible for introduction — probe known risk areas first' };
     }
     return { kind, capabilityId: c.id, reason: 'prerequisites met — comprehensible input first' };

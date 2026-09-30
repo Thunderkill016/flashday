@@ -28,6 +28,7 @@ import {
   ELICITING_PURPOSES,
   SIGNATURE_ID_FIELDS,
   SIGNATURE_FIELDS,
+  signatureHash,
   validateMission
 } from './contracts.js';
 import { validateGraph } from './capabilities.js';
@@ -36,6 +37,12 @@ import { validateGraph } from './capabilities.js';
  * causal attribution of evidence weak — treated as an authoring error
  * so mission authors must split instead of bloating. */
 export const MAX_TARGETS_PER_MISSION = 3;
+
+/* R6: the binding constraint on a mission is the ACTIVE SURFACE —
+ * targets + carriers + supports + prerequisites together. Beyond this
+ * the diagnostic/exposure phase explodes and attention dilutes; split
+ * the content into a second mission instead. */
+export const MAX_SURFACE_CAPABILITIES = 6;
 
 /* TRANSFER_DIMENSIONS are the contract's v0 vocabulary; the signature
  * fields they map to are what the novelty checker actually verifies.
@@ -50,20 +57,21 @@ export const TRANSFER_DIM_FIELD = {
 };
 
 /* Parse a canonical prompt-family id:
- *   pf.<capabilityId>.<cueTopology>.<setting>.<register>.<channel>.vN
+ *   pf.<capabilityId>.<cueTopology>.<setting>.<register>.<channel>.<sigHash8>.vN
  * The capability id itself contains dots, so the signature fields are
- * read from the tail: the last 5 segments are
- * cue/setting/register/channel/vN and everything before is the cap id. */
+ * read from the tail: the last 6 segments are
+ * cue/setting/register/channel/hash/vN and everything before is the
+ * cap id. */
 export function parseFamilyId(promptFamily) {
   if (typeof promptFamily !== 'string' || !promptFamily.startsWith('pf.')) return null;
   const m = promptFamily.slice(3).match(/\.v(\d+)$/);
   if (!m) return null;
   const segs = promptFamily.slice(3, promptFamily.length - m[0].length).split('.');
-  if (segs.length < 5) return null;
-  const [cueTopology, setting, register, channel] = segs.splice(-4);
+  if (segs.length < 6) return null;
+  const [cueTopology, setting, register, channel, hash] = segs.splice(-5);
   const capabilityId = segs.join('.');
-  if (!capabilityId) return null;
-  return { capabilityId, cueTopology, setting, register, channel, version: Number(m[1]) };
+  if (!capabilityId || !/^[0-9a-f]{8}$/.test(hash)) return null;
+  return { capabilityId, cueTopology, setting, register, channel, hash, version: Number(m[1]) };
 }
 
 const sigKey = (sig) =>
@@ -88,8 +96,21 @@ export function checkCurriculum({ capabilities = [], missions = [], tasks = [] }
     if (targets.length > MAX_TARGETS_PER_MISSION) {
       problems.push(`${tag}: ${targets.length} target capabilities — missions claim at most ${MAX_TARGETS_PER_MISSION} (prefer 2; split the rest into carriers or a later mission)`);
     }
+    const surface = targets.length +
+      (mission?.carrierCapabilities ?? []).length +
+      (mission?.supportCapabilities ?? []).length +
+      (mission?.prerequisiteCapabilities ?? []).length;
+    if (surface > MAX_SURFACE_CAPABILITIES) {
+      problems.push(`${tag}: ${surface} declared capabilities — the active surface is capped at ${MAX_SURFACE_CAPABILITIES}; split into another mission`);
+    }
     for (const capId of targets) {
       const capTasks = missionTasks.filter((t) => t.capabilityId === capId);
+      /* R6: targets owe a mandatory baseline probe — the planner's
+       * diagnostic_probe intent only stays honest if a task exists to
+       * serve it. */
+      if (!capTasks.some((t) => t.purpose === 'diagnostic')) {
+        problems.push(`${tag}: target '${capId}' has no diagnostic task — a claim-bearing capability must sample its baseline before teaching`);
+      }
       const taught = capTasks.some((t) => ELICITING_PURPOSES.has(t.purpose) && familyClass(t) === 'practiced');
       if (!taught) problems.push(`${tag}: target '${capId}' has no practiced-family eliciting task — there is nothing to retain`);
       if (!capTasks.some((t) => t.purpose === 'delayed_retrieval')) {
@@ -111,6 +132,13 @@ export function checkCurriculum({ capabilities = [], missions = [], tasks = [] }
       if (capTasks.some((t) => familyClass(t) === 'fresh_transfer')) {
         problems.push(`${tag}: carrier '${capId}' carries a fresh_transfer task — held-out transfer credit is reserved for claim-bearing targets`);
       }
+      /* R6: carriers are rehearsed, never baselined or certified —
+       * the planner never emits a diagnostic_probe intent for them
+       * and they can never reach the TRANSFERRED state an assessment
+       * waits on, so either task kind here is dead authoring. */
+      if (capTasks.some((t) => t.purpose === 'diagnostic' || t.purpose === 'assessment')) {
+        problems.push(`${tag}: carrier '${capId}' owns a diagnostic/assessment task — carriers get no baseline and no certification`);
+      }
     }
   }
 
@@ -122,7 +150,7 @@ export function checkCurriculum({ capabilities = [], missions = [], tasks = [] }
     }
     const fam = parseFamilyId(t.promptFamily);
     if (!fam) {
-      problems.push(`${tag}: promptFamily '${t.promptFamily}' is not canonical pf.<cap>.<cue>.<setting>.<register>.<channel>.vN form`);
+      problems.push(`${tag}: promptFamily '${t.promptFamily}' is not canonical pf.<cap>.<cue>.<setting>.<register>.<channel>.<sigHash8>.vN form`);
     } else {
       if (fam.capabilityId !== t.capabilityId) {
         problems.push(`${tag}: family id names capability '${fam.capabilityId}' but the task declares '${t.capabilityId}'`);
@@ -131,6 +159,9 @@ export function checkCurriculum({ capabilities = [], missions = [], tasks = [] }
         if (t.contextSignature != null && fam[f] !== t.contextSignature[f]) {
           problems.push(`${tag}: family id ${f} '${fam[f]}' contradicts contextSignature.${f} '${t.contextSignature[f]}'`);
         }
+      }
+      if (t.contextSignature != null && fam.hash !== signatureHash(t.contextSignature)) {
+        problems.push(`${tag}: family id hash '${fam.hash}' does not recompute from its contextSignature — id and signature disagree`);
       }
     }
   }
