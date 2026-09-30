@@ -1258,7 +1258,10 @@ try {
       const page = await context.newPage();
       const errors = [];
       page.on('pageerror', (error) => errors.push(error.message));
-      await page.goto(`${origin}vnext/?learner=browser.${width}`);
+      /* mode=reference pins the production-declared ordering this test
+       * was written against; the default B0 surface is covered in
+       * tests/vnext-browser.test.mjs. */
+      await page.goto(`${origin}vnext/?learner=browser.${width}&mode=reference`);
       await page.locator('.vnext-card[data-screen="intro"]').waitFor();
       if (await page.locator('[data-role="name-input"]').count()) {
         await page.locator('[data-role="name-input"]').fill('Linh');
@@ -1351,7 +1354,7 @@ try {
     const page = await context.newPage();
     const errors = [];
     page.on('pageerror', (error) => errors.push(error.message));
-    await page.goto(`${origin}vnext/?learner=browser.support&mission=mission.meet_at_a_time`);
+    await page.goto(`${origin}vnext/?learner=browser.support&mission=mission.meet_at_a_time&mode=reference`);
     /* This mission has no state_own_name task → needsName is false →
      * the session starts straight on the first task (no intro card). */
     await page.locator('.vnext-card[data-screen="task"]').waitFor();

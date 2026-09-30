@@ -9,7 +9,7 @@
  */
 import { createMissionSession } from '../ui-session.js';
 import { createLocalEventStore, createLocalRunStore, createLocalDecisionStore } from './local-store.js';
-import { SELECTION_MODES } from '../next-for-you/constants.js';
+import { SELECTION_MODES } from '../next-for-you/selector.js';
 import {
   PURPOSE_FRAME, FUNCTION_MODEL, FUNCTION_HINT, CAP_LABEL,
   TASK_SITUATION, MISSION_INTRO, progressCopy, SUMMARY_COPY,
