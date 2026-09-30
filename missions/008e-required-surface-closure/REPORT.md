@@ -240,8 +240,8 @@ change; digest remains the single dominant stage (112ms), unchanged.
 
 ## CI
 
-Exact-head green on `510f340` (push `36779272463`, pull_request
-`36779277695`). R2 head `d4def77` CI pending — updated after push.
+Exact-head green on `d9a5a4b` (push `36783078358`, pull_request
+`36783081341`, both success) — code head `d4def77`.
 
 ## OPEN OPTIONAL GAPS
 
