@@ -1,0 +1,8 @@
+$ npm run typecheck
+
+
+> flashday@0.1.0 typecheck
+> node scripts/typecheck.mjs
+
+typecheck: 126 files OK
+

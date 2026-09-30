@@ -6,14 +6,16 @@
 - finished: 2026-09-30T18:15:59.822Z
 - branch: devin/m008d-content-surface-perf
 - starting sha: `a13055698506160ed13e846f3d5fd5c7f293446c`
-- ending sha: `5c4c23d0e7a2a25bac61568dd42f0451e1093286`
+- ending sha: `be73ee1` (review round 1 applied; see checkpoint 002)
 
 ## Objective
 Mission 008D (ChatGPT control room): close the B0 content surface honestly — classify the 60-gap coverage audit semantically, land one genuinely complete A1 vertical slice (attributing failure → real remediation → correction → delayed retest → fresh transfer → fresh assessment family), profile and de-duplicate the B0 selection path (~285ms @ 2k events), and replace journal fingerprints with crypto digests — with zero Policy-B semantic change.
 
-## Commits (2)
-- `5c4c23d 008D: implementation checkpoint — semantic audit, slice, digests, perf`
+## Commits (4)
 - `b40c649 008D: semantic coverage audit, clock-time remediation slice, journal digests, shared input digest`
+- `5c4c23d 008D: implementation checkpoint — semantic audit, slice, digests, perf`
+- `f5cdf15 008D: mission report — DONE, verify:full PASS twice @ 5c4c23d`
+- `be73ee1 008D review R1: remove clockOffset seam, session-trajectory proof, audit witnesses`
 
 ## Files changed vs start (11)
 - `M	experiments/next-for-you/differential.js`
@@ -28,11 +30,13 @@ Mission 008D (ChatGPT control room): close the B0 content surface honestly — c
 - `M	tests/vnext-next-for-you-runtime.test.mjs`
 - `M	tests/vnext-next-for-you.test.mjs`
 
-## Verification runs (2)
+## Verification runs (3)
 - 2026-09-30T18:12:36.826Z @ `5c4c23d0e7a2` — **PASS**
   - `npm run verify:full` → exit 0 (logs/verify-1790791956818-0.log)
 - 2026-09-30T18:15:52.527Z @ `5c4c23d0e7a2` — **PASS**
   - `npm run verify:full` → exit 0 (logs/verify-1790792152521-0.log)
+- 2026-09-30T18:51 @ `be73ee1` — **PASS**
+  - `npm run verify:full` → exit 0 (post-review round 1)
 
 ## Commands executed (5)
 - 2026-09-30T17:27:36.055Z start: devin/m008d-content-surface-perf@a13055698506
@@ -41,8 +45,9 @@ Mission 008D (ChatGPT control room): close the B0 content surface honestly — c
 - 2026-09-30T18:15:52.528Z verify: PASS
 - 2026-09-30T18:15:59.822Z finish: done
 
-## Checkpoints (1)
+## Checkpoints (2)
 - #1 2026-09-30T18:08:05.368Z @ `b40c649ab53c` — checkpoints/001-checkpoint.md
+- #2 2026-09-30T18:55 @ `be73ee1` — checkpoints/002-checkpoint.md (review round 1)
 
 ## Acceptance criteria
 - [x] Coverage audit classifies every gap semantically (not a naive

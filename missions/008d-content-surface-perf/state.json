@@ -1,0 +1,81 @@
+{
+  "id": "008d-content-surface-perf",
+  "status": "DONE",
+  "startedAt": "2026-09-30T17:27:36.032Z",
+  "finishedAt": "2026-09-30T18:15:59.822Z",
+  "startSha": "a13055698506160ed13e846f3d5fd5c7f293446c",
+  "startBranch": "devin/m008d-content-surface-perf",
+  "missionSha256": "d79cdf5c340ed228671b21160eed290d3e18a6744140f9edd1ceb2ecabd04cf8",
+  "currentSha": "5c4c23d0e7a2a25bac61568dd42f0451e1093286",
+  "checkpoints": [
+    {
+      "n": 1,
+      "file": "checkpoints/001-checkpoint.md",
+      "at": "2026-09-30T18:08:05.368Z",
+      "sha": "b40c649ab53c43160ed469c8ab62388a81f181c3"
+    }
+  ],
+  "commands": [
+    {
+      "at": "2026-09-30T17:27:36.055Z",
+      "type": "start",
+      "detail": "devin/m008d-content-surface-perf@a13055698506"
+    },
+    {
+      "at": "2026-09-30T18:08:05.375Z",
+      "type": "checkpoint",
+      "detail": "cp 1"
+    },
+    {
+      "at": "2026-09-30T18:12:36.827Z",
+      "type": "verify",
+      "detail": "PASS"
+    },
+    {
+      "at": "2026-09-30T18:15:52.528Z",
+      "type": "verify",
+      "detail": "PASS"
+    },
+    {
+      "at": "2026-09-30T18:15:59.822Z",
+      "type": "finish",
+      "detail": "done"
+    }
+  ],
+  "verifications": [
+    {
+      "at": "2026-09-30T18:12:36.826Z",
+      "sha": "5c4c23d0e7a2a25bac61568dd42f0451e1093286",
+      "ok": true,
+      "results": [
+        {
+          "cmd": "npm run verify:full",
+          "exitCode": 0,
+          "ok": true,
+          "ms": 116782,
+          "log": "logs/verify-1790791956818-0.log"
+        }
+      ]
+    },
+    {
+      "at": "2026-09-30T18:15:52.527Z",
+      "sha": "5c4c23d0e7a2a25bac61568dd42f0451e1093286",
+      "ok": true,
+      "results": [
+        {
+          "cmd": "npm run verify:full",
+          "exitCode": 0,
+          "ok": true,
+          "ms": 121278,
+          "log": "logs/verify-1790792152521-0.log"
+        }
+      ]
+    }
+  ],
+  "knownFailures": [],
+  "browserVerification": "Playwright /vnext surface: a driven attributing miss now routes to a real authored remediation + correction pair (not blocked); the complete slice traverses input → failure → remediation → correction → retest → transfer → assessment without synthetic fixtures.",
+  "result": {
+    "status": "done",
+    "summary": "# Mission 008D — content-surface closure + runtime scalability"
+  }
+}
