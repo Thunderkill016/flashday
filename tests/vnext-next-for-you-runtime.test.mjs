@@ -38,7 +38,7 @@ import { policyB } from '../src/vnext/next-for-you/policies.js';
 import { KINDS } from '../src/vnext/next-for-you/constants.js';
 import { stateDigest } from '../src/vnext/next-for-you/decision-log.js';
 import { canonicalFamilyId } from '../src/vnext/contracts.js';
-import { contractAttributesFunctions } from '../src/vnext/evaluators.js';
+import { contractAttributesFunctions, evaluateAttempt } from '../src/vnext/evaluators.js';
 import { attemptEvent, observeEvent } from '../experiments/next-for-you/scenarios.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -110,7 +110,7 @@ const SCRIPT = {
   'task.order.assessment.request': 'a tea please',
   'task.price.remediation.hear': 'three',
   'task.place.remediation.follow': 'right',
-  'task.self.assessment.detail': 'i study at hanoi'
+  'task.self.assessment.detail': "i'm from vietnam"
 };
 
 async function drive(session, pred, { steps = 120, answer = (s) => SCRIPT[s.taskId], onScreen } = {}) {
@@ -1539,6 +1539,48 @@ const consumedKinds = (session) => (session.selectionContext()?.actionsChosen ??
   say('008E-FAM: remediation deliberately practiced; all three fresh families collide with nothing');
 }
 
+/* ═══ 008E CUE-ALIGNMENT (R1, §7): the three fresh assessment cues
+ * must solicit the capability they measure — no token outside the
+ * mission's practiced stimulus/language surface, every naturally
+ * invited answer scores under the deterministic evaluator, and a
+ * turn-taking-only reply earns no request_item evidence. These pin the
+ * construct validity, not just the family freshness. */
+{
+  const cueTokenCover = (fixture, task) => {
+    const norm = (s) => s.toLowerCase().replace(/[—–\-?.,!;'"]/g, ' ').split(/\s+/).filter(Boolean);
+    const cover = new Set();
+    for (const t of fixture.tasks) {
+      if (t.id === task.id) continue;
+      for (const c of t.stimulus?.languageComponents ?? []) for (const w of norm(c)) cover.add(w);
+      for (const c of t.language?.requiredChunks ?? []) for (const w of norm(c)) cover.add(w);
+      for (const v of t.language?.requiredVocabulary ?? []) for (const w of norm(v)) cover.add(w);
+    }
+    return (task.stimulus?.languageComponents ?? []).flatMap(norm).every((w) => cover.has(w));
+  };
+  for (const [fx, id, cue, accepts, nonEvidence] of [
+    [MEET, 'task.meet.assessment.name_signup', 'Hi — tell me your name.',
+      ['my name is linh', 'i am linh', 'linh'], null],
+    [ORDER, 'task.order.assessment.request', 'Yes? What can I get you?',
+      ['a tea please', 'can i have a tea', 'tea please'], 'i am next'],
+    [SELF, 'task.self.assessment.detail', 'And where are you from?',
+      ["i'm from vietnam", 'i am from vietnam', 'i come from vietnam'], null]
+  ]) {
+    const t = TASK_REGISTRY.find((x) => x.id === id);
+    ok(t.stimulus?.languageComponents?.[0] === cue,
+      `008E-CUE: ${id} prompt drifted — now '${t.stimulus?.languageComponents?.[0]}'`);
+    ok(cueTokenCover(fx, t), `008E-CUE: ${id} cue introduces vocabulary outside the mission's practiced surface`);
+    for (const ans of accepts) {
+      const r = evaluateAttempt(t, { text: ans }, { learnerName: 'linh' });
+      ok(r?.outcome === 'success', `008E-CUE: ${id} natural answer '${ans}' scored ${r?.outcome} — evaluator mismatch`);
+    }
+    if (nonEvidence) {
+      const r = evaluateAttempt(t, { text: nonEvidence }, { learnerName: 'linh' });
+      ok(r?.outcome !== 'success', `008E-CUE: turn-taking reply '${nonEvidence}' wrongly earns ${id} evidence`);
+    }
+  }
+  say('008E-CUE: fresh assessment prompts stay in-range and evaluator-aligned (R1)');
+}
+
 /* Answers shared by the 008E trajectory and REVPIN audit legs. */
 const ANSWERS_008E = {
     /* meet_new_person — name_signup assessment */
@@ -1607,7 +1649,7 @@ const ANSWERS_008E = {
     'task.self.delayed.family': 'my mother is a teacher',
     'task.self.transfer.office': 'i live in hanoi',
     'task.self.transfer.introduce': 'this is my sister',
-    'task.self.assessment.detail': 'i study at hanoi',
+    'task.self.assessment.detail': "i'm from vietnam",
     'task.self.assessment.checkpoint': 'my name is linh, i am from vietnam, this is my mother'
 };
 

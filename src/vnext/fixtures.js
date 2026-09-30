@@ -465,7 +465,10 @@ export const TASKS_MEET_PERSON = [
     purpose: 'assessment',
     promptFamily: pf('production.speak.say_own_name', F.ownNameSignup),
     contextSignature: F.ownNameSignup,
-    stimulus: { type: 'partner_turn', languageComponents: ['For the sign-up sheet — your name, please?'] },
+    /* The cue is an organizer's bare name request — every token is
+     * already inside this mission's practiced stimulus set, so the task
+     * measures stating one's name, never cue comprehension (008E R1). */
+    stimulus: { type: 'partner_turn', languageComponents: ['Hi — tell me your name.'] },
     response: { type: 'spoken_turn', requiredFunctions: ['state_own_name'] },
     freshness: { required: true, familyClass: 'fresh_assessment' },
     supportPolicy: { allowed: [], revealModelAfterAttempt: false },
@@ -1632,7 +1635,12 @@ export const TASKS_COMPLETE_ORDER = [
     purpose: 'assessment',
     promptFamily: pf('interaction.request_item', OF.requestCart),
     contextSignature: OF.requestCart,
-    stimulus: { type: 'partner_turn', languageComponents: ['Cold drinks! Who is next?'] },
+    /* The cue is the cart vendor's direct service invitation — every
+     * token already appears in this mission's practiced cues ("Yes?",
+     * "What can I get you?"), and a request is the immediate pragmatic
+     * response; a turn-taking-only answer ("I'm next") is NOT evidence
+     * of request_item and must score fail (008E R1). */
+    stimulus: { type: 'partner_turn', languageComponents: ['Yes? What can I get you?'] },
     response: { type: 'spoken_turn', requiredFunctions: ['request_item'] },
     freshness: { required: true, familyClass: 'fresh_assessment' },
     supportPolicy: { allowed: [], revealModelAfterAttempt: false },
@@ -2934,7 +2942,11 @@ export const TASKS_SELF_FAMILY = [
     purpose: 'assessment',
     promptFamily: pf('production.speak.state_basic_self_detail', MF.selfHost),
     contextSignature: MF.selfHost,
-    stimulus: { type: 'partner_turn', languageComponents: ['Welcome! Do you work, or are you a student?'] },
+    /* The cue is the host's direct personal-detail question — the same
+     * pragmatic move the mission already practices ("Where are you
+     * from?"), so every invited answer ("I'm from Vietnam") is inside
+     * the deterministic matcher's accepted forms (008E R1). */
+    stimulus: { type: 'partner_turn', languageComponents: ['And where are you from?'] },
     response: { type: 'spoken_turn', requiredFunctions: ['state_basic_self_detail'] },
     freshness: { required: true, familyClass: 'fresh_assessment' },
     supportPolicy: { allowed: [], revealModelAfterAttempt: false },
