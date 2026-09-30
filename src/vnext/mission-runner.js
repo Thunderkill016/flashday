@@ -144,13 +144,22 @@ export function nextMissionTask({ learnerId, mission, tasks, capabilities, event
 
   /* Planner intents are capability-scoped; the mission's declared
    * capability surface limits what the selector may route to — a
-   * capability outside the mission never gets a task from inside it. */
+   * capability outside the mission never gets a task from inside it.
+   * The role map also tells the planner HOW to introduce each cap
+   * (R6): targets owe a baseline probe, carriers and declared
+   * prerequisites rehearse opportunistically, supports wait for a
+   * demand signal rather than auto-introducing. */
   const surface = new Set([
     ...(mission.targetCapabilities ?? []),
+    ...(mission.carrierCapabilities ?? []),
     ...(mission.prerequisiteCapabilities ?? []),
     ...(mission.supportCapabilities ?? [])
   ]);
   const scopedCaps = capabilities.filter((c) => surface.has(c.id));
+  const roles = {
+    targets: new Set(mission.targetCapabilities ?? []),
+    supports: new Set(mission.supportCapabilities ?? [])
+  };
 
   /* Exposure-phase tasks are one-shot: re-running consumed input is
    * meaningless, so they only qualify while unrun. Eliciting tasks may
@@ -192,7 +201,8 @@ export function nextMissionTask({ learnerId, mission, tasks, capabilities, event
       riskPriors,
       now,
       policy,
-      skipIntentFor: excluded
+      skipIntentFor: excluded,
+      roles
     });
     if (plan.kind === 'idle') break;
     const task = (plan.kind === 'expose' || plan.kind === 'resume')

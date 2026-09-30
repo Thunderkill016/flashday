@@ -1243,16 +1243,12 @@ try {
   //        reload resumes the same run ──
   {
     const VNEXT_TEXT = {
-      'task.meet.diagnostic.opening': 'hi',
       'task.meet.diagnostic.own_name': 'i am linh',
       'task.meet.diagnostic.ask_name': 'uhhh',
-      'task.meet.diagnostic.repair': 'sorry',
-      'task.meet.diagnostic.polite': 'nice to meet you too',
       'task.meet.retrieval.ask_name': "what's your name",
     };
     const VNEXT_CHOICE = {
-      'task.meet.diagnostic.listen': 'greeting',
-      'task.meet.diagnostic.identity_q': 'ask_name',
+      'task.meet.retrieval.questions': 'ask_name',
     };
 
     for (const width of [1280, 390]) {

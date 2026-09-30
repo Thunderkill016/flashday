@@ -81,6 +81,53 @@ export const TRANSFER_DIMENSIONS = [
 
 export const FAMILY_CLASSES = ['practiced', 'fresh_transfer', 'fresh_assessment'];
 
+/* A context signature describes the communicative situation a prompt
+ * family lives in — WHO talks, WHERE, in WHICH register and channel,
+ * with WHAT cue shape. Two prompts that differ only in surface words
+ * or named entities are the SAME family; a family changes only when a
+ * signature field changes. This makes novelty auditable: a transfer
+ * task must differ from every rehearsed family on a declared signature
+ * field, not merely on prompt text. */
+export const SIGNATURE_FIELDS = [
+  'communicativeFunction',
+  'cueTopology',
+  'setting',
+  'register',
+  'channel',
+  'interlocutorRole',
+  'relationship',
+  'responseTopology',
+  'lexicalDomain'
+];
+
+/* The signature fields embedded in a canonical prompt-family id:
+ *   pf.<capabilityId>.<cueTopology>.<setting>.<register>.<channel>.<sigHash8>.vN
+ * The readable segments name the context; the trailing 8-char hash is an
+ * injective fingerprint over the WHOLE signature, so two families that
+ * differ only in a non-id field (interlocutorRole, relationship, …)
+ * still get distinct ids — and an id that does not hash to its declared
+ * signature fails the curriculum gate. */
+export const SIGNATURE_ID_FIELDS = ['cueTopology', 'setting', 'register', 'channel'];
+
+/* fnv1a-32 over the canonicalized signature — deterministic, pure-JS
+ * (must run in the browser: fixtures are bundled into /vnext/). Not a
+ * security hash: it only needs to be stable + injective enough to make
+ * family ids self-consistent. */
+export function signatureHash(sig) {
+  const fields = SIGNATURE_FIELDS.filter((f) => sig?.[f] != null).sort();
+  const canonical = JSON.stringify(fields.map((f) => [f, sig[f]]));
+  let h = 0x811c9dc5;
+  for (let i = 0; i < canonical.length; i++) {
+    h ^= canonical.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, '0');
+}
+
+export function canonicalFamilyId(capabilityId, sig, version = 1) {
+  return `pf.${capabilityId}.${sig.cueTopology}.${sig.setting}.${sig.register}.${sig.channel}.${signatureHash(sig)}.v${version}`;
+}
+
 /* Family class → evidence context kind. 'assessment' is NOT 'transfer' —
  * a fresh assessment samples ability, it does not earn transfer credit.
  * The projection re-derives this from the registry task; the stamped
@@ -179,6 +226,7 @@ export function makeTask(fields) {
     freshness: { required: false, familyClass: 'practiced' },
     transfer: null,
     assessment: null,
+    contextSignature: null,
     language: { requiredChunks: [], requiredVocabulary: [], requiredConstructions: [] },
     ...fields,
     supportPolicy: { allowed: [], revealModelAfterAttempt: false, ...(fields?.supportPolicy || {}) },
@@ -198,6 +246,23 @@ export function validateTask(task) {
   }
   if (!Number.isInteger(task?.revision) || task.revision < 1) p.push('revision must be a positive integer');
   if (!TASK_PURPOSES.includes(task?.purpose)) p.push(`unknown purpose ${task?.purpose}`);
+
+  /* A contextSignature, when present, is the family's auditable identity
+   * — partial or misshaped signatures are meaningless and rejected. */
+  const sig = task?.contextSignature;
+  if (sig != null) {
+    if (typeof sig !== 'object' || Array.isArray(sig)) {
+      p.push('contextSignature must be an object');
+    } else {
+      for (const k of Object.keys(sig)) {
+        if (!SIGNATURE_FIELDS.includes(k)) p.push(`contextSignature: unknown field '${k}'`);
+        else if (!isStr(sig[k])) p.push(`contextSignature.${k} must be a non-empty string`);
+      }
+      for (const k of SIGNATURE_ID_FIELDS) {
+        if (!isStr(sig[k])) p.push(`contextSignature.${k} is required`);
+      }
+    }
+  }
 
   const fc = task?.freshness?.familyClass;
   if (fc != null && !FAMILY_CLASSES.includes(fc)) p.push(`unknown freshness familyClass ${fc}`);
@@ -265,6 +330,12 @@ export function makeMission(fields) {
     revision: 1,
     targetCapabilities: [],
     prerequisiteCapabilities: [],
+    /* Carriers are capabilities the mission rehearses for retention and
+     * contextual diversity WITHOUT claiming them as acquisition targets:
+     * they may carry baseline/input/retrieval/delayed evidence, but the
+     * mission does not owe them transfer or assessment coverage (a cap
+     * may be a carrier here and a target in a later mission). */
+    carrierCapabilities: [],
     supportCapabilities: [],
     language: {
       assumedKnown: { chunks: [], vocabulary: [], constructions: [] },
@@ -298,27 +369,30 @@ export function validateMission(mission, tasks, capabilities) {
   const capIds = new Set(capabilities.map((c) => c.id));
   const declared = new Set([
     ...(mission?.targetCapabilities ?? []),
+    ...(mission?.carrierCapabilities ?? []),
     ...(mission?.prerequisiteCapabilities ?? []),
     ...(mission?.supportCapabilities ?? [])
   ]);
-  for (const list of ['targetCapabilities', 'prerequisiteCapabilities', 'supportCapabilities']) {
+  for (const list of ['targetCapabilities', 'carrierCapabilities', 'prerequisiteCapabilities', 'supportCapabilities']) {
     for (const id of mission?.[list] ?? []) {
       if (!capIds.has(id)) p.push(`${list}: unknown capability '${id}'`);
     }
   }
 
-  // Prerequisite closure: every transitive prerequisite of a target must
-  // be declared somewhere in the mission's capability surface.
+  // Prerequisite closure: every declared capability must have ITS
+  // transitive prerequisites somewhere on the mission surface — an
+  // undeclared prerequisite can never reach INDEPENDENT (it has no
+  // tasks and is not even projected), so its dependents deadlock.
   const byId = new Map(capabilities.map((c) => [c.id, c]));
   const closure = (id, seen = new Set()) => {
     if (seen.has(id)) return;
     seen.add(id);
     for (const pre of byId.get(id)?.prerequisites ?? []) {
-      if (!declared.has(pre)) p.push(`target '${id}' has undeclared prerequisite '${pre}'`);
+      if (!declared.has(pre)) p.push(`capability '${id}' has undeclared prerequisite '${pre}'`);
       closure(pre, seen);
     }
   };
-  for (const id of mission?.targetCapabilities ?? []) closure(id);
+  for (const id of declared) closure(id);
 
   // Tasks: every declared id resolves, every given task belongs to this
   // mission, and its declared capability is in the mission surface.

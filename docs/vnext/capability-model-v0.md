@@ -9,7 +9,7 @@ Implementation task: #42
 
 ```js
 {
-  id: "interact.ask_name",
+  id: "interaction.ask_name",
   version: 1,
 
   performance: "Ask another person's name in a short first-meeting exchange.",
@@ -30,8 +30,8 @@ Implementation task: #42
   modality: "spoken_interaction",
 
   prerequisites: [
-    "listen.identity_question_basic",
-    "speak.introduce_self_name"
+    "reception.listen.identity_question_basic",
+    "production.speak.say_own_name"
   ],
 
   language: {
@@ -139,61 +139,61 @@ Append-only. Learner state is a projection.
 ### Listening
 
 ```
-listen.greeting_basic
-listen.identity_question_basic
-listen.drink_order_question_basic
+reception.listen.greeting_basic
+reception.listen.identity_question_basic
+reception.listen.drink_order_question_basic
 ```
 
 ### Spoken interaction
 
 ```
-interact.greet
-interact.ask_name
-interact.respond_to_introduction
-interact.ask_repeat
-interact.signal_nonunderstanding
-interact.order_drink
+interaction.greet
+interaction.ask_name
+interaction.respond_to_introduction
+interaction.ask_repeat
+interaction.signal_nonunderstanding
+interaction.request_item
 ```
 
 ### Spoken production
 
 ```
-speak.say_own_name
+production.speak.say_own_name
 ```
 
 ### Reading
 
 ```
-read.simple_sign_or_menu_item
+reception.read.simple_sign_or_menu_item
 ```
 
 ### Writing
 
 ```
-write.personal_info_short
+production.write.personal_info_short
 ```
 
 ## 5. Example prerequisite graph
 
 ```
-listen.greeting_basic
+reception.listen.greeting_basic
     ↓
-interact.greet
+interaction.greet
 
-listen.identity_question_basic
+reception.listen.identity_question_basic
     ↓
-speak.say_own_name
+production.speak.say_own_name
     ↓
-interact.ask_name
+interaction.ask_name
     ↓
-interact.respond_to_introduction
+interaction.respond_to_introduction
 
-listen.drink_order_question_basic
+reception.listen.drink_order_question_basic
     ↓
-interact.order_drink
+interaction.request_item
 
-interact.ask_repeat
-interact.signal_nonunderstanding
+interaction.ask_repeat
+interaction.signal_nonunderstanding
     ↘
       supports many later missions
 ```

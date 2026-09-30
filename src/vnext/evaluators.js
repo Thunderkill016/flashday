@@ -63,7 +63,7 @@ const FUNCTION_MATCHERS = {
   signal_nonunderstanding: {
     match: ['i do not understand', 'i do not know', 'sorry i do not know', 'i do not get it']
   },
-  order_item: {
+  request_item: {
     match: [
       'a coffee please',
       'a tea please',
@@ -71,10 +71,14 @@ const FUNCTION_MATCHERS = {
       'tea please',
       'one coffee please',
       'one tea please',
+      'a sandwich please',
+      'some water please',
+      'this one please',
       'can i have a coffee',
       'can i have a tea',
       'can i have coffee',
       'can i have tea',
+      'can i have this',
       'could i have a coffee',
       'could i have a tea',
       'i would like a coffee',

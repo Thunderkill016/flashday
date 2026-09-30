@@ -54,7 +54,7 @@ export const FUNCTION_MODEL = {
   ask_repeat: 'Sorry?',
   respond_to_introduction: 'Nice to meet you too.',
   signal_nonunderstanding: "I don't understand.",
-  order_item: 'A coffee, please.'
+  request_item: 'A coffee, please.'
 };
 
 export const FUNCTION_HINT = {
@@ -64,22 +64,22 @@ export const FUNCTION_HINT = {
   ask_repeat: 'Chỉ cần “S…?” hoặc “Can you repeat …”',
   respond_to_introduction: '“Nice to meet you …”',
   signal_nonunderstanding: '“I don’t …”',
-  order_item: '“A coffee, please” hoặc “Can I have …?”'
+  request_item: '“A coffee, please” hoặc “Can I have …?”'
 };
 
 export const CAP_LABEL = {
-  'listen.greeting_basic': 'Nghe lời chào',
-  'listen.identity_question_basic': 'Nghe câu hỏi tên',
-  'listen.drink_order_question_basic': 'Nghe câu hỏi gọi đồ uống',
-  'speak.say_own_name': 'Nói tên của mình',
-  'interact.greet': 'Chào lại',
-  'interact.ask_name': 'Hỏi tên người khác',
-  'interact.respond_to_introduction': 'Đáp lại lời giới thiệu',
-  'interact.ask_repeat': 'Xin người khác nhắc lại',
-  'interact.signal_nonunderstanding': 'Báo là chưa hiểu',
-  'interact.order_drink': 'Gọi một thức uống',
-  'read.simple_sign_or_menu_item': 'Đọc biển/menu đơn giản',
-  'write.personal_info_short': 'Viết thông tin cá nhân ngắn'
+  'reception.listen.greeting_basic': 'Nghe lời chào',
+  'reception.listen.identity_question_basic': 'Nghe câu hỏi tên',
+  'reception.listen.drink_order_question_basic': 'Nghe câu hỏi gọi đồ uống',
+  'production.speak.say_own_name': 'Nói tên của mình',
+  'interaction.greet': 'Chào lại',
+  'interaction.ask_name': 'Hỏi tên người khác',
+  'interaction.respond_to_introduction': 'Đáp lại lời giới thiệu',
+  'interaction.ask_repeat': 'Xin người khác nhắc lại',
+  'interaction.signal_nonunderstanding': 'Báo là chưa hiểu',
+  'interaction.request_item': 'Yêu cầu một món',
+  'reception.read.simple_sign_or_menu_item': 'Đọc biển/menu đơn giản',
+  'production.write.personal_info_short': 'Viết thông tin cá nhân ngắn'
 };
 
 /* Per-task situation lines — only where the contract stimulus needs

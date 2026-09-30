@@ -30,13 +30,8 @@ const makeSession = ({ eventStore = createMemoryEventStore(), runStore = createM
  * is honest: the mission should not collapse just because a response
  * was missed. */
 const SCRIPT = {
-  'task.meet.diagnostic.opening': 'hi',
-  'task.meet.diagnostic.listen': 'greeting',
-  'task.meet.diagnostic.identity_q': 'ask_name',
   'task.meet.diagnostic.own_name': 'i am linh',
   'task.meet.diagnostic.ask_name': 'uhhh',
-  'task.meet.diagnostic.repair': 'sorry',
-  'task.meet.diagnostic.polite': 'nice to meet you too',
   'task.meet.retrieval.questions': 'ask_name',
   'task.meet.retrieval.phrases': 'my name is linh',
   'task.meet.retrieval.ask_name': "what's your name",
@@ -44,10 +39,11 @@ const SCRIPT = {
   'task.meet.interaction.unaided': "what's your name",
   'task.meet.interaction.polite': 'nice to meet you too',
   'task.meet.remediation.ask_name': "what's your name",
-  'task.meet.remediation.repair': 'sorry',
   'task.meet.delayed.check': "what's your name",
+  'task.meet.delayed.name': 'i am linh',
+  'task.meet.transfer.name': 'my name is linh',
   'task.meet.transfer.street': "what's your name",
-  'task.meet.assessment.checkpoint': 'hi what is your name',
+  'task.meet.assessment.checkpoint': "hi, i'm linh — what's your name?",
   'task.meet.input.scene': null,
   'task.meet.input.questions': null,
   'task.meet.input.ask_name': null
@@ -108,7 +104,7 @@ const ok = (name) => { check++; console.log(`  ✓ ${name}`); };
   const first = await session.start({ learnerName: 'linh' });
   assert.equal(first.type, 'task');
   assert.equal(first.purpose, 'diagnostic', 'baseline diagnostics come first');
-  assert.equal(first.taskId, 'task.meet.diagnostic.opening');
+  assert.equal(first.taskId, 'task.meet.diagnostic.own_name');
   assert.ok(!JSON.stringify(first).match(/INDEPENDENT|TRANSFERRED|RETAINED/i), 'screen leaks engine labels');
   ok('intro → start → selector-driven diagnostic first screen');
 }
@@ -120,7 +116,7 @@ const ok = (name) => { check++; console.log(`  ✓ ${name}`); };
   const runStore = createMemoryRunStore();
   const s1 = makeSession({ eventStore, runStore });
   await s1.init();
-  await drive(s1, untilTask('task.meet.diagnostic.identity_q'));
+  await drive(s1, untilTask('task.meet.diagnostic.ask_name'));
   const runId1 = s1.runInfo().id;
   const evBefore = s1.log().length;
 
@@ -152,7 +148,7 @@ const ok = (name) => { check++; console.log(`  ✓ ${name}`); };
   assert.ok(answerBearing(attempt.support), 'answer-bearing support not detected');
 
   const proj = session.projection();
-  const cap = proj.byCapability.get('interact.ask_name');
+  const cap = proj.byCapability.get('interaction.ask_name');
   assert.equal(cap.milestones.independent, false, 'hinted attempt minted INDEPENDENT — invariant broken');
   assert.equal(cap.milestones.supported, true, 'supported work not recorded');
   ok('pre-commit support → support_use + stamped snapshot → never unaided');
@@ -288,7 +284,7 @@ const ok = (name) => { check++; console.log(`  ✓ ${name}`); };
   const runStore = createMemoryRunStore();
   const s1 = makeSession({ eventStore, runStore });
   await s1.init();
-  await drive(s1, untilTask('task.meet.diagnostic.listen'));
+  await drive(s1, untilTask('task.meet.diagnostic.ask_name'));
   const oldRun = s1.runInfo().id;
   await s1.abandon();
 
@@ -312,9 +308,9 @@ const ok = (name) => { check++; console.log(`  ✓ ${name}`); };
   const session = makeSession();
   await session.init();
   const summary = await drive(session, (s) => s.type === 'summary');
-  const greet = summary.progress.find((p) => p.capabilityId === 'interact.greet');
-  assert.equal(greet.baselinePassed, true, 'baseline pass not attributed as pre-existing');
-  const ask = summary.progress.find((p) => p.capabilityId === 'interact.ask_name');
+  const ownName = summary.progress.find((p) => p.capabilityId === 'production.speak.say_own_name');
+  assert.equal(ownName.baselinePassed, true, 'baseline pass not attributed as pre-existing');
+  const ask = summary.progress.find((p) => p.capabilityId === 'interaction.ask_name');
   assert.ok(ask.unaidedCount >= 1, 'unaided successes not counted');
   assert.ok(!JSON.stringify(summary).match(/thành thạo|mastered|learned/i), 'progress copy claims mastery');
   ok('summary reports observed evidence — baseline attributed, no mastery claims');

@@ -228,6 +228,7 @@ export function createMissionSession({
     const { byCapability } = projectLearnerState(learnerId, events, capabilities, tasks, { policy });
     const ids = [
       ...(mission.targetCapabilities ?? []),
+      ...(mission.carrierCapabilities ?? []),
       ...(mission.prerequisiteCapabilities ?? []),
       ...(mission.supportCapabilities ?? [])
     ];
