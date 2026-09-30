@@ -199,7 +199,8 @@ change; digest remains the single dominant stage (112ms), unchanged.
 
 ## CI
 
-Pending — see PR.
+GREEN on exact head `804d925` — push `36777075743`, pull_request
+`36777114226` (both `success`, ~2m35s).
 
 ## OPEN OPTIONAL GAPS
 
