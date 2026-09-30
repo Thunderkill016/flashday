@@ -18,7 +18,7 @@ import { MISSION_MEET_PERSON, TASKS_MEET_PERSON } from '../src/vnext/fixtures.js
 const T0 = Date.parse('2026-03-02T09:00:00Z');
 const HOUR = 3600_000;
 const UID = 'learner.persist';
-const ASK = 'interact.ask_name';
+const ASK = 'interaction.ask_name';
 const TASKS = TASKS_MEET_PERSON;
 
 /* Fake firebase surface — same call shape as { ...sdk, db }. */

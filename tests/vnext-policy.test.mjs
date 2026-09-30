@@ -19,7 +19,7 @@ import { MISSION_MEET_PERSON, TASKS_MEET_PERSON } from '../src/vnext/fixtures.js
 
 const T0 = Date.parse('2026-03-02T09:00:00Z');
 const HOUR = 3600_000;
-const ASK = 'interact.ask_name';
+const ASK = 'interaction.ask_name';
 const TASKS = TASKS_MEET_PERSON;
 const taskById = (id) => TASKS.find((t) => t.id === id);
 const capById = (id) => CAPABILITIES.find((c) => c.id === id);

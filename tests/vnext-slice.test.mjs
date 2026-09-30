@@ -1,6 +1,6 @@
 /*
  * vNext headless vertical slice (issue #47): mission "meet a new
- * person", target capability interact.ask_name.
+ * person", target capability interaction.ask_name.
  *
  * A synthetic learner is driven end-to-end by the mission runner —
  * nextMissionTask picks concrete registered tasks, bindAttempt/
@@ -66,21 +66,23 @@ const SCRIPT = {
     [{ eventType: 'retry', attempt: { observed: true, outcome: 'success', response: "What's your name?", latencyMs: 1100, attemptId: 'rem.ask' } }]
   ],
   'task.meet.delayed.check': [[{ attempt: { observed: true, outcome: 'success', response: "What's your name?", latencyMs: 1400, attemptId: 'dr.ask' } }]],
+  // say_own_name is a claim-bearing target too: its delayed re-check
+  // and held-out transfer must also pass before the mission closes.
+  'task.meet.delayed.name': [[{ attempt: { observed: true, outcome: 'success', response: "I'm Linh", latencyMs: 1200, attemptId: 'dr.name' } }]],
+  'task.meet.transfer.name': [[{ attempt: { observed: true, outcome: 'success', response: 'My name is Linh', latencyMs: 1500, attemptId: 'tr.name' } }]],
   'task.meet.transfer.street': [[{ attempt: { observed: true, outcome: 'success', response: "I'm Sam — and you? … What's your name?", latencyMs: 1600, attemptId: 'tr.ask' } }]],
   'task.meet.assessment.checkpoint': [[{ attempt: { observed: true, outcome: 'success', response: 'full exchange', latencyMs: 1900, attemptId: 'ck.ask' } }]]
 };
 
-// In-session work happens at T0+seconds; the delayed check and beyond
+// In-session work happens at T0+seconds; the delayed checks and beyond
 // land after the 24h retention window measured from first INDEPENDENT.
 // Steps 1–12 are the baseline + teaching + remediation phase; the jump
-// begins at the delayed step so the remediation success stays anchored
-// at T0 — otherwise its occurredAt lands after the jump and the
-// capability is never due during the trace.
+// begins at the first delayed step so the remediation success stays
+// anchored at T0 — otherwise its occurredAt lands after the jump and
+// the capability is never due during the trace.
 const STEP_TIME = (step) => {
   if (step <= 12) return T0 + step * 1000;
-  if (step === 13) return T0 + 10_000 + RETENTION_DELAY_MS + HOUR;
-  if (step === 14) return T0 + 10_000 + RETENTION_DELAY_MS + 2 * HOUR;
-  return T0 + 10_000 + RETENTION_DELAY_MS + 3 * HOUR;
+  return T0 + 10_000 + RETENTION_DELAY_MS + (step - 12) * HOUR;
 };
 
 const runSlice = () => {
@@ -101,7 +103,7 @@ const runSlice = () => {
   });
 };
 
-// ── The slice: full mission loop for interact.ask_name ───────
+// ── The slice: full mission loop for interaction.ask_name ───────
 const { trace, events } = runSlice();
 const row = (step) => trace[step - 1];
 {
@@ -119,7 +121,9 @@ const row = (step) => trace[step - 1];
     'task.meet.interaction.guided',
     'task.meet.remediation.ask_name', // feedback step
     'task.meet.remediation.ask_name', // retry step
+    'task.meet.delayed.name',         // say_own_name due first (independent at step 4)
     'task.meet.delayed.check',
+    'task.meet.transfer.name',
     'task.meet.transfer.street',
     'task.meet.assessment.checkpoint'
   ], `slice should walk the declared learning loop in order:\n${trace.map((t) => `${t.step}: ${t.taskId} [${t.beforeState}→${t.afterState}] ${t.reason}`).join('\n')}`);
@@ -129,12 +133,14 @@ const row = (step) => trace[step - 1];
   assert.equal(row(9).afterState, 'SUPPORTED', 'hinted retrieval → SUPPORTED');
   assert.equal(row(10).afterState, 'SUPPORTED', 'model-aided partial → SUPPORTED');
   assert.equal(row(12).afterState, 'INDEPENDENT', 'clean unaided retry → INDEPENDENT');
-  assert.equal(row(13).afterState, 'RETAINED', '24h+ delayed success → RETAINED');
-  assert.equal(row(14).afterState, 'TRANSFERRED', 'changed-context success → TRANSFERRED');
-  assert.equal(row(15).afterState, 'TRANSFERRED', 'fresh assessment does not change transfer state');
-  const final = stateOf(events, 'interact.ask_name');
+  assert.equal(row(13).afterState, 'RETAINED', 'say_own_name delayed success → RETAINED');
+  assert.equal(row(14).afterState, 'RETAINED', '24h+ delayed success → RETAINED');
+  assert.equal(row(15).afterState, 'TRANSFERRED', 'say_own_name changed-context success → TRANSFERRED');
+  assert.equal(row(16).afterState, 'TRANSFERRED', 'changed-context success → TRANSFERRED');
+  assert.equal(row(17).afterState, 'TRANSFERRED', 'fresh assessment does not change transfer state');
+  const final = stateOf(events, 'interaction.ask_name');
   assert.equal(final.milestones.fluent, false, 'FLUENT unreachable in v0');
-  assert.ok(!final.transferPromptFamilies.includes('assess.meet.exchange.v1'),
+  assert.ok(!final.transferPromptFamilies.includes('pf.interaction.ask_name.full_exchange.community.casual.f2f.v1'),
     'assessment family is not a transfer context');
 
   // Same-session success is never retention — the delayed check only
@@ -152,14 +158,17 @@ const row = (step) => trace[step - 1];
 // ── Negative paths (spec §7) ─────────────────────────────────
 {
   // 1. Baseline pass skips unnecessary teaching — the trace above never
-  //    serves an input/retrieval/interaction task to a capability whose
-  //    diagnostic already passed.
-  const taught = new Set(['listen.greeting_basic', 'listen.identity_question_basic', 'speak.say_own_name', 'interact.greet']);
+  //    serves an input/retrieval/interaction/remediation task to a
+  //    capability whose diagnostic already passed. Delayed/transfer
+  //    tasks are claim-path sampling, not teaching, so a baseline-passed
+  //    claim target (say_own_name) may still receive those.
+  const TEACHING = new Set(['input', 'notice', 'retrieval', 'production', 'interaction', 'remediation']);
+  const baselinePassed = new Set(['reception.listen.greeting_basic', 'reception.listen.identity_question_basic', 'production.speak.say_own_name', 'interaction.greet']);
   for (const t of trace.filter((t) => t.taskId)) {
     const task = taskById(t.taskId);
-    if (taught.has(task.capabilityId)) {
-      assert.equal(task.purpose, 'diagnostic',
-        `baseline-passed ${task.capabilityId} must never receive a teaching task, got ${task.id}`);
+    if (baselinePassed.has(task.capabilityId)) {
+      assert.ok(!TEACHING.has(task.purpose),
+        `baseline-passed ${task.capabilityId} must never receive a teaching task, got ${task.id} [${task.purpose}]`);
     }
   }
   console.log('✓ baseline pass skips teaching — passed capabilities only ever see their diagnostic');
@@ -167,8 +176,8 @@ const row = (step) => trace[step - 1];
   // Prefix of the slice where ask_name just reached INDEPENDENT.
   const throughIndependent = events.slice(0, row(12).eventCount);
   // …and where it just reached RETAINED.
-  const throughRetained = events.slice(0, row(13).eventCount);
-  const cap = capabilityById('interact.ask_name');
+  const throughRetained = events.slice(0, row(14).eventCount);
+  const cap = capabilityById('interaction.ask_name');
 
   // 2. Support-aided retry inside the same attempt boundary cannot
   //    launder into INDEPENDENT — sticky provenance holds.
@@ -186,14 +195,19 @@ const row = (step) => trace[step - 1];
   console.log('✓ aided retry inside one attempt boundary stays SUPPORTED');
 
   // 3. Failed delayed retrieval routes to remediation, never to another
-  //    delayed check.
+  //    delayed check. say_own_name's delayed check is already consumed
+  //    (RETAINED), so the due-retrieval rule cannot outrank remediation.
+  const nameDelayed = bindAttempt(taskById('task.meet.delayed.name'), capabilityById('production.speak.say_own_name'), {
+    id: 'fdr.n', learnerId: LEARNER, occurredAt: T0 + 10_000 + RETENTION_DELAY_MS + HOUR,
+    attempt: { observed: true, outcome: 'success', response: "I'm Linh", latencyMs: 1200, attemptId: 'fdr.n' }
+  });
   const delayedFail = bindAttempt(taskById('task.meet.delayed.check'), cap, {
     id: 'fdr.a', learnerId: LEARNER, occurredAt: T0 + 10_000 + RETENTION_DELAY_MS + HOUR,
     attempt: { observed: true, outcome: 'fail', response: 'umm', latencyMs: 3000, attemptId: 'fdr.1' }
   });
   const sel3 = nextMissionTask({
     learnerId: LEARNER, mission: MISSION_MEET_PERSON, tasks: TASKS,
-    capabilities: CAPABILITIES, events: [...throughIndependent, delayedFail],
+    capabilities: CAPABILITIES, events: [...throughIndependent, nameDelayed, delayedFail],
     riskPriors: RISK_PRIORS, now: T0 + 10_000 + RETENTION_DELAY_MS + 2 * HOUR
   });
   assert.equal(sel3.status, 'ready');
@@ -202,11 +216,11 @@ const row = (step) => trace[step - 1];
   assert.equal(sel3.purpose, 'remediation');
   console.log('✓ failed delayed retrieval routes to remediation, not another delayed check');
 
-  // 4. Missing transfer task → blocked, never a practiced-task
+  // 4. Missing transfer tasks → blocked, never a practiced-task
   //    substitute.
   const noTransferMission = {
     ...MISSION_MEET_PERSON,
-    taskIds: MISSION_MEET_PERSON.taskIds.filter((id) => id !== 'task.meet.transfer.street')
+    taskIds: MISSION_MEET_PERSON.taskIds.filter((id) => !id.startsWith('task.meet.transfer.'))
   };
   const sel4 = nextMissionTask({
     learnerId: LEARNER, mission: noTransferMission, tasks: TASKS,
@@ -215,7 +229,7 @@ const row = (step) => trace[step - 1];
   });
   assert.equal(sel4.status, 'blocked', 'retained ability with no transfer task must block, not substitute');
   assert.match(sel4.reason, /transfer/);
-  assert.match(sel4.reason, /interact\.ask_name/);
+  assert.match(sel4.reason, /say_own_name|ask_name/);
   console.log('✓ missing transfer task → blocked with an explicit reason, never a substitute');
 
   // 5. Fresh assessment is gated on TRANSFERRED and even when bound it
@@ -254,7 +268,8 @@ const row = (step) => trace[step - 1];
     capabilities: CAPABILITIES, events: [...throughRetained].reverse(), riskPriors: RISK_PRIORS, now: at28h
   });
   assert.deepEqual(sel7a, sel7b, 'same evidence in any order → same selected task');
-  assert.equal(sel7a.taskId, 'task.meet.transfer.street');
+  assert.equal(sel7a.taskId, 'task.meet.transfer.name',
+    'say_own_name reached RETAINED before ask_name — its transfer is served first');
 
   // 8. Foreign learner events cannot shift the selection.
   const foreign = bindAttempt(taskById('task.meet.retrieval.ask_name'), cap, {
@@ -275,7 +290,7 @@ const row = (step) => trace[step - 1];
   //    revision-aware: evidence bound under v1 never consumes the v2
   //    contract; selection resolves to the highest registered revision.
   const diagV2 = { ...taskById('task.meet.diagnostic.opening'), revision: 2 };
-  const v1Diag = bindAttempt(taskById('task.meet.diagnostic.opening'), capabilityById('interact.greet'), {
+  const v1Diag = bindAttempt(taskById('task.meet.diagnostic.opening'), capabilityById('interaction.greet'), {
     id: 'rv.a', learnerId: LEARNER, occurredAt: T0,
     attempt: { observed: true, outcome: 'success', response: 'hi', latencyMs: 800, attemptId: 'rv.1' }
   });
@@ -293,7 +308,7 @@ const row = (step) => trace[step - 1];
   const forged = makeEvent({
     id: 'fg.1', learnerId: LEARNER, occurredAt: T0, eventType: 'checkpoint',
     taskId: 'task.meet.diagnostic.opening', taskRevision: 1,
-    capabilityId: 'interact.greet', modality: 'spoken_interaction',
+    capabilityId: 'interaction.greet', modality: 'spoken_interaction',
     attempt: { observed: true, outcome: 'success', response: 'x', latencyMs: 100, attemptId: 'fg.1' },
     context: { missionId: 'mission.meet_new_person', promptFamily: 'meet.opening.baseline.v1', practicedOrTransfer: 'practiced' },
     evaluation: { authority: 'deterministic', contractId: 'eval.required_functions.v1' },
@@ -342,13 +357,13 @@ const row = (step) => trace[step - 1];
       'task.meet.assessment.checkpoint'
     ]
   };
-  const capAsk = capabilityById('interact.ask_name');
+  const capAsk = capabilityById('interaction.ask_name');
   const leanLog = [
-    bindAttempt(taskById('task.meet.diagnostic.identity_q'), capabilityById('listen.identity_question_basic'), {
+    bindAttempt(taskById('task.meet.diagnostic.identity_q'), capabilityById('reception.listen.identity_question_basic'), {
       id: 'lm.a', learnerId: LEARNER, occurredAt: T0,
       attempt: { observed: true, outcome: 'success', response: 'ok', latencyMs: 900, attemptId: 'lm.iq' }
     }),
-    bindAttempt(taskById('task.meet.diagnostic.own_name'), capabilityById('speak.say_own_name'), {
+    bindAttempt(taskById('task.meet.diagnostic.own_name'), capabilityById('production.speak.say_own_name'), {
       id: 'lm.b', learnerId: LEARNER, occurredAt: T0 + 1000,
       attempt: { observed: true, outcome: 'success', response: 'ok', latencyMs: 900, attemptId: 'lm.on' }
     }),
@@ -365,7 +380,7 @@ const row = (step) => trace[step - 1];
     capabilities: CAPABILITIES, events: leanLog, riskPriors: RISK_PRIORS, now: T0 + 9000
   });
   assert.equal(sel12.status, 'blocked', 'no eliciting task left → blocked, not a semantic leap');
-  assert.match(sel12.reason, /interact\.ask_name.*expose/, 'the uncovered expose intent is named');
+  assert.match(sel12.reason, /interaction\.ask_name.*expose/, 'the uncovered expose intent is named');
   assert.notEqual(sel12.taskId, 'task.meet.transfer.street');
   assert.notEqual(sel12.taskId, 'task.meet.assessment.checkpoint');
   console.log('✓ expose/resume fallback never drifts into remediation, delayed, transfer or assessment');

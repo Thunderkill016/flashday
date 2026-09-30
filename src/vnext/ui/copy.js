@@ -68,18 +68,18 @@ export const FUNCTION_HINT = {
 };
 
 export const CAP_LABEL = {
-  'listen.greeting_basic': 'Nghe lời chào',
-  'listen.identity_question_basic': 'Nghe câu hỏi tên',
-  'listen.drink_order_question_basic': 'Nghe câu hỏi gọi đồ uống',
-  'speak.say_own_name': 'Nói tên của mình',
-  'interact.greet': 'Chào lại',
-  'interact.ask_name': 'Hỏi tên người khác',
-  'interact.respond_to_introduction': 'Đáp lại lời giới thiệu',
-  'interact.ask_repeat': 'Xin người khác nhắc lại',
-  'interact.signal_nonunderstanding': 'Báo là chưa hiểu',
-  'interact.order_drink': 'Gọi một thức uống',
-  'read.simple_sign_or_menu_item': 'Đọc biển/menu đơn giản',
-  'write.personal_info_short': 'Viết thông tin cá nhân ngắn'
+  'reception.listen.greeting_basic': 'Nghe lời chào',
+  'reception.listen.identity_question_basic': 'Nghe câu hỏi tên',
+  'reception.listen.drink_order_question_basic': 'Nghe câu hỏi gọi đồ uống',
+  'production.speak.say_own_name': 'Nói tên của mình',
+  'interaction.greet': 'Chào lại',
+  'interaction.ask_name': 'Hỏi tên người khác',
+  'interaction.respond_to_introduction': 'Đáp lại lời giới thiệu',
+  'interaction.ask_repeat': 'Xin người khác nhắc lại',
+  'interaction.signal_nonunderstanding': 'Báo là chưa hiểu',
+  'interaction.order_drink': 'Gọi một thức uống',
+  'reception.read.simple_sign_or_menu_item': 'Đọc biển/menu đơn giản',
+  'production.write.personal_info_short': 'Viết thông tin cá nhân ngắn'
 };
 
 /* Per-task situation lines — only where the contract stimulus needs

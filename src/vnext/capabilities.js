@@ -25,12 +25,17 @@ const cap = (c) => ({
   ...c
 });
 
-/* The graph follows spec §5: perception capabilities ground production,
- * production grounds interaction, repair acts as a cross-mission support.
+/* Capability ids are namespaced by CEFR activity type (R5):
+ *   reception.listen.* / reception.read.*   — reception
+ *   production.speak.* / production.write.* — production
+ *   interaction.*                            — interaction
+ * Prerequisites exist ONLY where a downstream capability genuinely
+ * depends on the upstream one — never a blanket "all reception before
+ * all production" ordering. repair acts as a cross-mission support.
  */
 export const CAPABILITIES = [
   cap({
-    id: 'listen.greeting_basic',
+    id: 'reception.listen.greeting_basic',
     performance: 'Understand a basic greeting said to them.',
     modality: 'listening',
     criteria: { meaningDelivered: true, intelligibleEnoughForPartner: false, requiredFunctions: ['recognize_greeting'] },
@@ -38,7 +43,7 @@ export const CAPABILITIES = [
     vietnameseRiskProbes: ['vn.english_intonation']
   }),
   cap({
-    id: 'listen.identity_question_basic',
+    id: 'reception.listen.identity_question_basic',
     performance: "Understand a simple identity question ('What's your name?', 'Where are you from?').",
     modality: 'listening',
     criteria: { meaningDelivered: true, intelligibleEnoughForPartner: false, requiredFunctions: ['understand_identity_question'] },
@@ -46,7 +51,7 @@ export const CAPABILITIES = [
     vietnameseRiskProbes: ['vn.theta_eth', 'vn.english_intonation']
   }),
   cap({
-    id: 'listen.drink_order_question_basic',
+    id: 'reception.listen.drink_order_question_basic',
     performance: "Understand a basic drink-order question ('What would you like?').",
     modality: 'listening',
     criteria: { meaningDelivered: true, intelligibleEnoughForPartner: false, requiredFunctions: ['understand_offer_or_order_question'] },
@@ -54,43 +59,43 @@ export const CAPABILITIES = [
     vietnameseRiskProbes: ['vn.english_intonation']
   }),
   cap({
-    id: 'speak.say_own_name',
+    id: 'production.speak.say_own_name',
     performance: 'Say their own name intelligibly when asked.',
     modality: 'spoken_production',
-    prerequisites: ['listen.identity_question_basic'],
+    prerequisites: ['reception.listen.identity_question_basic'],
     criteria: { meaningDelivered: true, intelligibleEnoughForPartner: true, requiredFunctions: ['state_own_name'] },
     language: { chunks: ["I'm …", 'My name is …'], vocabulary: ['name'] },
     vietnameseRiskProbes: ['vn.word_final_consonants', 'vn.lexical_stress']
   }),
   cap({
-    id: 'interact.greet',
+    id: 'interaction.greet',
     performance: 'Return a greeting in a short first-meeting exchange.',
     modality: 'spoken_interaction',
-    prerequisites: ['listen.greeting_basic'],
+    prerequisites: ['reception.listen.greeting_basic'],
     criteria: { meaningDelivered: true, intelligibleEnoughForPartner: true, requiredFunctions: ['greet'] },
     language: { chunks: ['Hi', 'Hello'], vocabulary: ['hi', 'hello'] },
     vietnameseRiskProbes: ['vn.lexical_stress', 'vn.speaking_anxiety_support']
   }),
   cap({
-    id: 'interact.ask_name',
+    id: 'interaction.ask_name',
     performance: "Ask another person's name in a short first-meeting exchange.",
     modality: 'spoken_interaction',
-    prerequisites: ['listen.identity_question_basic', 'speak.say_own_name'],
+    prerequisites: ['reception.listen.identity_question_basic', 'production.speak.say_own_name'],
     criteria: { meaningDelivered: true, intelligibleEnoughForPartner: true, requiredFunctions: ['ask_name'] },
     language: { chunks: ["What's your name?"], constructions: ['wh_question_name'], vocabulary: ['name'] },
     vietnameseRiskProbes: ['vn.question_formation', 'vn.lexical_stress']
   }),
   cap({
-    id: 'interact.respond_to_introduction',
+    id: 'interaction.respond_to_introduction',
     performance: "Respond politely to an introduction ('Nice to meet you').",
     modality: 'spoken_interaction',
-    prerequisites: ['interact.ask_name'],
+    prerequisites: ['interaction.ask_name'],
     criteria: { meaningDelivered: true, intelligibleEnoughForPartner: true, requiredFunctions: ['respond_to_introduction'] },
     language: { chunks: ['Nice to meet you', 'Nice to meet you too'], vocabulary: ['nice', 'meet'] },
     vietnameseRiskProbes: ['vn.word_final_consonants', 'vn.theta_eth']
   }),
   cap({
-    id: 'interact.ask_repeat',
+    id: 'interaction.ask_repeat',
     performance: 'Ask a partner to repeat when they did not catch something.',
     modality: 'spoken_interaction',
     criteria: { meaningDelivered: true, intelligibleEnoughForPartner: true, requiredFunctions: ['ask_repeat'] },
@@ -98,7 +103,7 @@ export const CAPABILITIES = [
     vietnameseRiskProbes: ['vn.speaking_anxiety_support', 'vn.inflectional_endings']
   }),
   cap({
-    id: 'interact.signal_nonunderstanding',
+    id: 'interaction.signal_nonunderstanding',
     performance: "Signal that they did not understand ('I don't understand').",
     modality: 'spoken_interaction',
     criteria: { meaningDelivered: true, intelligibleEnoughForPartner: true, requiredFunctions: ['signal_nonunderstanding'] },
@@ -106,26 +111,26 @@ export const CAPABILITIES = [
     vietnameseRiskProbes: ['vn.speaking_anxiety_support', 'vn.consonant_clusters']
   }),
   cap({
-    id: 'interact.order_drink',
+    id: 'interaction.order_drink',
     performance: 'Order one drink politely in a cafe exchange.',
     modality: 'spoken_interaction',
-    prerequisites: ['listen.drink_order_question_basic'],
+    prerequisites: ['reception.listen.drink_order_question_basic'],
     criteria: { meaningDelivered: true, intelligibleEnoughForPartner: true, requiredFunctions: ['order_item'] },
     language: { chunks: ['Can I have …?', 'A coffee, please'], vocabulary: ['coffee', 'tea', 'please'] },
     vietnameseRiskProbes: ['vn.inflectional_endings', 'vn.lexical_stress']
   }),
   cap({
-    id: 'read.simple_sign_or_menu_item',
+    id: 'reception.read.simple_sign_or_menu_item',
     performance: 'Read a very simple sign or menu item (EXIT, OPEN, coffee, tea).',
     modality: 'reading',
     criteria: { meaningDelivered: true, intelligibleEnoughForPartner: false, requiredFunctions: ['read_sign_item'] },
     language: { vocabulary: ['open', 'closed', 'coffee', 'tea', 'exit'] }
   }),
   cap({
-    id: 'write.personal_info_short',
+    id: 'production.write.personal_info_short',
     performance: 'Write one short personal-information response (name, country).',
     modality: 'writing',
-    prerequisites: ['speak.say_own_name'],
+    prerequisites: ['production.speak.say_own_name'],
     criteria: { meaningDelivered: true, intelligibleEnoughForPartner: false, requiredFunctions: ['write_identity_response'] },
     language: { chunks: ["I'm …", "I'm from …"], vocabulary: ['name', 'from'] },
     vietnameseRiskProbes: ['vn.copula_be', 'vn.articles']

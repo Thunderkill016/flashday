@@ -79,7 +79,7 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES, REG
 
 // ── 2. Task support may narrow but never broaden capability ──
 {
-  const cap = capabilityById('interact.greet'); // supportAllowed: []
+  const cap = capabilityById('interaction.greet'); // supportAllowed: []
   const narrow = register(makeTask({
     id: 't.narrow', missionId: 'm.x', capabilityId: cap.id, modality: cap.modality,
     purpose: 'interaction', promptFamily: 'p.x',
@@ -108,12 +108,12 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES, REG
   const forge = (fields) =>
     assert.throws(() => bindAttempt(task, cap, { id: 'f', learnerId: LEARNER, occurredAt: T0, ...fields }), /may not author|cannot emit|mismatch/);
 
-  forge({ context: { promptFamily: 'assess.meet.exchange.v1' } });
+  forge({ context: { promptFamily: 'pf.interaction.ask_name.full_exchange.community.casual.f2f.v1' } });
   forge({ purpose: 'assessment' });
   forge({ practicedOrTransfer: 'transfer' });
-  forge({ promptFamily: 'assess.meet.exchange.v1' });
+  forge({ promptFamily: 'pf.interaction.ask_name.full_exchange.community.casual.f2f.v1' });
   forge({ taskId: 'task.meet.assessment.checkpoint' });
-  forge({ capabilityId: 'interact.greet' });
+  forge({ capabilityId: 'interaction.greet' });
   forge({ modality: 'listening' });
   forge({ binding: { purpose: 'assessment' } });
 
@@ -130,7 +130,7 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES, REG
 
   // And an exposure/purpose mismatch: input tasks cannot produce attempts.
   assert.throws(
-    () => bindAttempt(taskById('task.meet.input.scene'), capabilityById('listen.greeting_basic'),
+    () => bindAttempt(taskById('task.meet.input.scene'), capabilityById('reception.listen.greeting_basic'),
       { id: 'f4', learnerId: LEARNER, occurredAt: T0, attempt: { attemptId: 'a' } }),
     /cannot produce attempts/
   );
@@ -144,14 +144,14 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES, REG
   const leakyTask = makeTask({
     id: 'task.meet.assessment.leaky',
     missionId: 'mission.meet_new_person',
-    capabilityId: 'interact.ask_name',
+    capabilityId: 'interaction.ask_name',
     modality: 'spoken_interaction',
     purpose: 'assessment',
-    promptFamily: 'meet.ask_name.practice.v1', // SAME family the lesson taught
+    promptFamily: 'pf.interaction.ask_name.cued_recall.personal.casual.f2f.v1', // SAME family the lesson taught
     freshness: { required: true, familyClass: 'fresh_assessment' },
     supportPolicy: { allowed: [], revealModelAfterAttempt: false },
     evaluation: { authority: 'deterministic', contractId: 'eval.leaky.v1' },
-    assessment: { capabilitySample: ['interact.ask_name'], allowedLanguageRange: 'declared_target_range', answerRevealDuringAttempt: false }
+    assessment: { capabilitySample: ['interaction.ask_name'], allowedLanguageRange: 'declared_target_range', answerRevealDuringAttempt: false }
   });
   // The leaky task must be DECLARED for the collision check — an
   // undeclared task is flagged as a ghost, never as a freshness leak.
@@ -163,9 +163,9 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES, REG
   // And the task-level shape is enforced: 'practiced' familyClass can
   // never carry freshness.required.
   assert.throws(() => makeTask({
-    id: 't.bad', missionId: 'm', capabilityId: 'interact.greet', modality: 'spoken_interaction',
+    id: 't.bad', missionId: 'm', capabilityId: 'interaction.greet', modality: 'spoken_interaction',
     purpose: 'assessment', promptFamily: 'x', freshness: { required: true, familyClass: 'practiced' },
-    assessment: { capabilitySample: ['interact.greet'], answerRevealDuringAttempt: false }
+    assessment: { capabilitySample: ['interaction.greet'], answerRevealDuringAttempt: false }
   }), /familyClass practiced|freshness/);
   console.log('✓ teaching family cannot collide with fresh assessment family');
 }
@@ -174,7 +174,7 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES, REG
 {
   // No changed dimensions → invalid task contract.
   assert.throws(() => makeTask({
-    id: 't.tr.bad', missionId: 'mission.meet_new_person', capabilityId: 'interact.ask_name',
+    id: 't.tr.bad', missionId: 'mission.meet_new_person', capabilityId: 'interaction.ask_name',
     modality: 'spoken_interaction', purpose: 'transfer', promptFamily: 'x.v1',
     freshness: { required: true, familyClass: 'fresh_transfer' },
     evaluation: { authority: 'deterministic', contractId: 'eval.trbad.v1' },
@@ -183,7 +183,7 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES, REG
 
   // Unknown dimension → invalid.
   assert.throws(() => makeTask({
-    id: 't.tr.bad2', missionId: 'mission.meet_new_person', capabilityId: 'interact.ask_name',
+    id: 't.tr.bad2', missionId: 'mission.meet_new_person', capabilityId: 'interaction.ask_name',
     modality: 'spoken_interaction', purpose: 'transfer', promptFamily: 'x.v1',
     freshness: { required: true, familyClass: 'fresh_transfer' },
     evaluation: { authority: 'deterministic', contractId: 'eval.trbad.v1' },
@@ -198,19 +198,19 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES, REG
     (() => {
       const t = register(makeTask({
         id: 'task.meet.transfer.sneaky', missionId: 'mission.meet_new_person',
-        capabilityId: 'interact.ask_name', modality: 'spoken_interaction', purpose: 'transfer',
-        promptFamily: 'meet.ask_name.practice.v1', // rehearsed family!
+        capabilityId: 'interaction.ask_name', modality: 'spoken_interaction', purpose: 'transfer',
+        promptFamily: 'pf.interaction.ask_name.partner_exchange.personal.casual.f2f.v1', // rehearsed family!
         freshness: { required: true, familyClass: 'fresh_transfer' },
         evaluation: { authority: 'deterministic', contractId: 'eval.sneaky.v1' },
         transfer: { changedDimensions: ['partner'] }
       }));
-      return bindAttempt(t, capabilityById('interact.ask_name'), {
+      return bindAttempt(t, capabilityById('interaction.ask_name'), {
         id: `c${++seq}`, learnerId: LEARNER, occurredAt: T0 + 52 * HOUR,
         attempt: { observed: true, outcome: 'success', response: 'ok', latencyMs: 800, attemptId: 'aS' }
       });
     })()
   ];
-  const s = stateOf(log, 'interact.ask_name');
+  const s = stateOf(log, 'interaction.ask_name');
   assert.equal(s.milestones.transferred, false, 'a rehearsed family flagged transfer is still practiced evidence');
   assert.equal(s.state, 'RETAINED');
   console.log('✓ transfer requires a changed dimension AND a genuinely novel family');
@@ -292,7 +292,7 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES, REG
   const smuggler = makeTask({
     id: 'task.drink.smuggler',
     missionId: 'mission.order_drink',
-    capabilityId: 'interact.order_drink',
+    capabilityId: 'interaction.order_drink',
     modality: 'spoken_interaction',
     purpose: 'interaction',
     promptFamily: 'drink.smuggler.v1',
@@ -324,7 +324,7 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES, REG
   const e = attemptOn('task.meet.assessment.checkpoint');
   assert.equal(e.eventType, 'checkpoint');
   assert.equal(e.context.practicedOrTransfer, 'assessment');
-  assert.equal(e.context.promptFamily, 'assess.meet.exchange.v1');
+  assert.equal(e.context.promptFamily, 'pf.interaction.ask_name.full_exchange.community.casual.f2f.v1');
   assert.equal(e.binding.purpose, 'assessment');
   assert.equal(e.binding.familyClass, 'fresh_assessment');
   assert.equal(e.binding.effectiveSupportAllowed.length, 0, 'assessment allows no support');
@@ -376,15 +376,15 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES, REG
   });
   // clean unaided attempt on a NEW attemptId → INDEPENDENT
   push('task.meet.interaction.unaided', { occurredAt: at(5_000), attempt: { attemptId: 'u1' } });
-  assert.equal(stateOf(log, 'interact.ask_name').state, 'INDEPENDENT');
+  assert.equal(stateOf(log, 'interaction.ask_name').state, 'INDEPENDENT');
 
   // delayed retrieval past the window → RETAINED
   push('task.meet.delayed.check', { occurredAt: at(5_000) + RETENTION_DELAY_MS, eventType: 'delayed_retrieval' });
-  assert.equal(stateOf(log, 'interact.ask_name').state, 'RETAINED');
+  assert.equal(stateOf(log, 'interaction.ask_name').state, 'RETAINED');
 
   // changed-context transfer on a fresh family → TRANSFERRED
   push('task.meet.transfer.street', { occurredAt: at(5_000) + RETENTION_DELAY_MS + HOUR });
-  assert.equal(stateOf(log, 'interact.ask_name').state, 'TRANSFERRED');
+  assert.equal(stateOf(log, 'interaction.ask_name').state, 'TRANSFERRED');
 
   // fresh assessment — its own context kind; it can confirm retention
   // but it is NOT transfer evidence.
@@ -393,10 +393,10 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES, REG
     eventType: 'checkpoint',
     attempt: { attemptId: 'ck1' }
   });
-  const s = stateOf(log, 'interact.ask_name');
+  const s = stateOf(log, 'interaction.ask_name');
   assert.equal(s.state, 'TRANSFERRED', 'FLUENT stays unreachable — no rule promotes into it');
-  assert.ok(s.transferPromptFamilies.includes('meet.ask_name.street.v1'));
-  assert.ok(!s.transferPromptFamilies.includes('assess.meet.exchange.v1'),
+  assert.ok(s.transferPromptFamilies.includes('pf.interaction.ask_name.open_social.street.casual.f2f.v1'));
+  assert.ok(!s.transferPromptFamilies.includes('pf.interaction.ask_name.full_exchange.community.casual.f2f.v1'),
     'assessment family must not be counted as a transfer context');
 
   // every event is contract-bound: forged fields were impossible, and
@@ -423,18 +423,18 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES, REG
 
   push('task.drink.retrieval.order', { occurredAt: at(0) });
   push('task.drink.interaction.guided', { occurredAt: at(1_000) });
-  assert.equal(stateOf(log, 'interact.order_drink').state, 'INDEPENDENT');
+  assert.equal(stateOf(log, 'interaction.order_drink').state, 'INDEPENDENT');
   push('task.drink.delayed.check', { occurredAt: at(1_000) + RETENTION_DELAY_MS });
-  assert.equal(stateOf(log, 'interact.order_drink').state, 'RETAINED');
+  assert.equal(stateOf(log, 'interaction.order_drink').state, 'RETAINED');
   push('task.drink.transfer.stall', { occurredAt: at(1_000) + RETENTION_DELAY_MS + HOUR });
   push('task.drink.assessment.checkpoint', { occurredAt: at(1_000) + RETENTION_DELAY_MS + 2 * HOUR });
-  const sB = stateOf(log, 'interact.order_drink');
+  const sB = stateOf(log, 'interaction.order_drink');
   assert.equal(sB.state, 'TRANSFERRED');
-  assert.deepEqual(sB.transferPromptFamilies, ['drink.order.stall.v1'],
+  assert.deepEqual(sB.transferPromptFamilies, ['pf.interaction.order_drink.open_counter.stall.casual.f2f.v1'],
     'only the transfer task earned a transfer family — assessment stayed separate');
 
   // Foreign learner isolation still holds inside the contract layer.
-  const foreign = bindAttempt(taskById('task.drink.transfer.stall'), capabilityById('interact.order_drink'), {
+  const foreign = bindAttempt(taskById('task.drink.transfer.stall'), capabilityById('interaction.order_drink'), {
     id: 'foreign1', learnerId: 'someone-else', occurredAt: at(0),
     attempt: { observed: true, outcome: 'success', response: 'ok', latencyMs: 100, attemptId: 'f1' }
   });
@@ -454,8 +454,8 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES, REG
 // ── 12. Round-2 review blockers ──────────────────────────────
 {
   const guided = taskById('task.meet.interaction.guided');
-  const greetCap = capabilityById('interact.greet');
-  const nameCap = capabilityById('interact.ask_name');
+  const greetCap = capabilityById('interaction.greet');
+  const nameCap = capabilityById('interaction.ask_name');
 
   // a. evaluation.authority is contract-derived — the caller cannot
   //    report a stronger authority than the task declares.
@@ -470,7 +470,7 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES, REG
   );
   // A task authored for ASR cannot be reported as human either.
   const asrTask = register(makeTask({
-    id: 't.asr', missionId: 'm.x', capabilityId: 'interact.greet', modality: 'spoken_interaction',
+    id: 't.asr', missionId: 'm.x', capabilityId: 'interaction.greet', modality: 'spoken_interaction',
     purpose: 'interaction', promptFamily: 'p.asr', evaluation: { authority: 'asr', contractId: 'eval.asr.v1' }
   }));
   assert.throws(
@@ -488,7 +488,7 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES, REG
     attempt: { observed: true, outcome: 'success', response: 'ok', latencyMs: 900, attemptId: 'auth.c' }
   });
   assert.equal(asrBound.evaluation.authority, 'asr');
-  assert.equal(stateOf([asrBound], 'interact.greet').state, 'SUPPORTED',
+  assert.equal(stateOf([asrBound], 'interaction.greet').state, 'SUPPORTED',
     'ASR transcript is not independent evidence even when honestly tagged');
 
   // b. An assessment-context success must not feed the transfer milestone.
@@ -499,21 +499,21 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES, REG
       occurredAt: T0 + 51 * HOUR,
       attempt: { attemptId: 'ck.solo' }
     })
-  ], 'interact.ask_name');
+  ], 'interaction.ask_name');
   assert.equal(assessOnly.milestones.transferred, false, 'assessment success is not transfer evidence');
   assert.equal(assessOnly.state, 'RETAINED', 'assessment still counts as a real ability check');
 
   // c. An unbound makeEvent() success cannot reach INDEPENDENT — the
   //    binder is the only path to independent evidence.
   const unbound = makeEventRaw({
-    id: 'unbound.1', learnerId: LEARNER, capabilityId: 'interact.greet',
+    id: 'unbound.1', learnerId: LEARNER, capabilityId: 'interaction.greet',
     taskId: 'fake.task', taskRevision: 1, eventType: 'production_attempt',
     modality: 'spoken_interaction', occurredAt: T0,
     context: { missionId: 'm', practicedOrTransfer: 'practiced', promptFamily: 'p.x', partnerType: null },
     attempt: { observed: true, outcome: 'success', response: 'hi', latencyMs: 100, attemptId: 'ub.1' },
     evaluation: { authority: 'deterministic', contractId: 'x' }
   });
-  const sUnbound = stateOf([unbound], 'interact.greet');
+  const sUnbound = stateOf([unbound], 'interaction.greet');
   assert.equal(sUnbound.state, 'SUPPORTED', 'unbound event never proves independence');
   assert.equal(sUnbound.milestones.independent, false);
 
@@ -521,7 +521,7 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES, REG
   //    integrity violation — it cannot quietly supply evidence paths.
   const ghost = makeTask({
     id: 'task.meet.ghost', missionId: 'mission.meet_new_person',
-    capabilityId: 'interact.greet', modality: 'spoken_interaction',
+    capabilityId: 'interaction.greet', modality: 'spoken_interaction',
     purpose: 'interaction', promptFamily: 'meet.ghost.v1',
     evaluation: { authority: 'deterministic', contractId: 'eval.ghost.v1' }
   });
@@ -538,7 +538,7 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES, REG
   //    capability's language but not the mission's.
   const greedy = makeTask({
     id: 'task.meet.greedy', missionId: 'mission.meet_new_person',
-    capabilityId: 'listen.greeting_basic', modality: 'listening',
+    capabilityId: 'reception.listen.greeting_basic', modality: 'listening',
     purpose: 'retrieval', promptFamily: 'meet.greedy.v1',
     evaluation: { authority: 'deterministic', contractId: 'eval.greedy.v1' },
     language: { requiredChunks: ['Good morning'], requiredVocabulary: [], requiredConstructions: [] }
@@ -555,16 +555,16 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES, REG
 
   // f. Attempt ids are scoped by task — the same attemptId on two tasks
   //    cannot carry support history across the boundary.
-  const hintTask = bindAttempt(taskById('task.drink.interaction.guided'), capabilityById('interact.order_drink'), {
+  const hintTask = bindAttempt(taskById('task.drink.interaction.guided'), capabilityById('interaction.order_drink'), {
     id: 'st1', learnerId: LEARNER, occurredAt: T0 + 300_000,
     attempt: { observed: true, outcome: 'fail', response: 'x', latencyMs: 2000, attemptId: 'shared.id' },
     support: { hint: true }
   });
-  const cleanOther = bindAttempt(taskById('task.drink.interaction.unaided'), capabilityById('interact.order_drink'), {
+  const cleanOther = bindAttempt(taskById('task.drink.interaction.unaided'), capabilityById('interaction.order_drink'), {
     id: 'st2', learnerId: LEARNER, occurredAt: T0 + 301_000,
     attempt: { observed: true, outcome: 'success', response: 'ok', latencyMs: 900, attemptId: 'shared.id' }
   });
-  const sSticky = stateOf([hintTask, cleanOther], 'interact.order_drink');
+  const sSticky = stateOf([hintTask, cleanOther], 'interaction.order_drink');
   assert.equal(sSticky.state, 'INDEPENDENT',
     'support on task A attempt "shared.id" does not leak into task B attempt "shared.id"');
   console.log('✓ round-2 blockers: authority derived, assessment≠transfer, binder-only independence, taskIds scope, declared language, task-scoped sticky');
@@ -577,7 +577,7 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES, REG
   //    field against the registered task, not the stamp.
   const real = taskById('task.meet.interaction.unaided'); // purpose: interaction
   const forged = makeEventRaw({
-    id: 'forge.1', learnerId: LEARNER, capabilityId: 'interact.ask_name',
+    id: 'forge.1', learnerId: LEARNER, capabilityId: 'interaction.ask_name',
     taskId: real.id, taskRevision: real.revision,
     eventType: 'transfer_attempt', // interaction tasks cannot emit this
     modality: 'spoken_interaction', occurredAt: T0,
@@ -586,7 +586,7 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES, REG
     evaluation: { authority: 'deterministic', contractId: real.evaluation.contractId },
     binding: { purpose: 'transfer', familyClass: 'fresh_transfer', freshnessRequired: true, effectiveSupportAllowed: [] }
   });
-  const sForge = stateOf([forged], 'interact.ask_name');
+  const sForge = stateOf([forged], 'interaction.ask_name');
   assert.equal(sForge.milestones.independent, false, 'a forged binding does not verify against the registry task');
   assert.equal(sForge.milestones.transferred, false, 'forged transfer context earns no transfer credit');
   assert.equal(sForge.state, 'SUPPORTED', 'forgery is recorded honestly but never credited');
@@ -594,7 +594,7 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES, REG
   // A subtler forgery: the right eventType and purpose, but the caller
   // upgraded the evaluator past what the task declares.
   const forgedEval = makeEventRaw({
-    id: 'forge.2', learnerId: LEARNER, capabilityId: 'interact.ask_name',
+    id: 'forge.2', learnerId: LEARNER, capabilityId: 'interaction.ask_name',
     taskId: real.id, taskRevision: real.revision, eventType: 'interaction_turn',
     modality: 'spoken_interaction', occurredAt: T0,
     context: { missionId: real.missionId, practicedOrTransfer: 'practiced', promptFamily: real.promptFamily, partnerType: null },
@@ -602,33 +602,33 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES, REG
     evaluation: { authority: 'human', contractId: real.evaluation.contractId }, // task declares deterministic
     binding: { purpose: 'interaction', familyClass: 'practiced', freshnessRequired: false, effectiveSupportAllowed: [] }
   });
-  assert.equal(stateOf([forgedEval], 'interact.ask_name').milestones.independent, false,
+  assert.equal(stateOf([forgedEval], 'interaction.ask_name').milestones.independent, false,
     'authority inflated past the task contract fails verification');
 
   // b. Eliciting purposes require a real evaluator contract id — a
   //    task without one cannot be constructed via makeTask…
   assert.throws(() => makeTask({
-    id: 't.nocid', missionId: 'm.x', capabilityId: 'interact.greet', modality: 'spoken_interaction',
+    id: 't.nocid', missionId: 'm.x', capabilityId: 'interaction.greet', modality: 'spoken_interaction',
     purpose: 'retrieval', promptFamily: 'p.x' // evaluation.contractId stays null
   }), /contractId/);
 
   // …and a hand-rolled registry task without one still cannot mint
   // independent evidence, even when every event field matches it.
   const rawTask = {
-    id: 't.raw', revision: 1, missionId: 'm.x', capabilityId: 'interact.greet',
+    id: 't.raw', revision: 1, missionId: 'm.x', capabilityId: 'interaction.greet',
     modality: 'spoken_interaction', purpose: 'retrieval', promptFamily: 'p.x',
     freshness: { required: false, familyClass: 'practiced' },
     supportPolicy: { allowed: [] }, evaluation: { authority: 'deterministic', contractId: null }
   };
   const rawBound = makeEventRaw({
-    id: 'raw.1', learnerId: LEARNER, capabilityId: 'interact.greet', taskId: 't.raw', taskRevision: 1,
+    id: 'raw.1', learnerId: LEARNER, capabilityId: 'interaction.greet', taskId: 't.raw', taskRevision: 1,
     eventType: 'recall_attempt', modality: 'spoken_interaction', occurredAt: T0,
     context: { missionId: 'm.x', practicedOrTransfer: 'practiced', promptFamily: 'p.x', partnerType: null },
     attempt: { observed: true, outcome: 'success', response: 'ok', latencyMs: 100, attemptId: 'r.1' },
     evaluation: { authority: 'deterministic', contractId: null },
     binding: { purpose: 'retrieval', familyClass: 'practiced', freshnessRequired: false, effectiveSupportAllowed: [] }
   });
-  const sRaw = projectLearnerState(LEARNER, [rawBound], CAPABILITIES, [rawTask]).byCapability.get('interact.greet');
+  const sRaw = projectLearnerState(LEARNER, [rawBound], CAPABILITIES, [rawTask]).byCapability.get('interaction.greet');
   assert.equal(sRaw.milestones.independent, false,
     'an eliciting task without evaluator contractId cannot mint independent evidence, however shaped');
   console.log('✓ trust boundary: forged bindings fail registry verification; eliciting tasks require a real evaluator contract');
@@ -636,7 +636,7 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES, REG
 
 // ── 14. Registry integrity: revision keying + valid contracts ──
 {
-  const cap = capabilityById('interact.greet');
+  const cap = capabilityById('interaction.greet');
 
   // a. Revisions coexist: a v2 registration under the same task id must
   //    NOT overwrite v1 — historical evidence keeps verifying under the

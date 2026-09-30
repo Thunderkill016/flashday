@@ -33,19 +33,26 @@ A completed Mission is not evidence by itself.
   scenario: "Meet another learner for the first time.",
   learnerGoal: "Exchange a greeting and names politely.",
 
+  // Claim-bearing targets only — the mission owes each of them
+  // practiced, delayed, held-out transfer and fresh-assessment
+  // coverage (prefer ~2, never more than 3).
   targetCapabilities: [
-    "listen.greeting_basic",
-    "interact.greet",
-    "listen.identity_question_basic",
-    "speak.say_own_name",
-    "interact.ask_name",
-    "interact.respond_to_introduction"
+    "production.speak.say_own_name",
+    "interaction.ask_name"
+  ],
+
+  // Rehearsed for retention and context, but not claimed here —
+  // a capability may be a carrier in one mission and a target later.
+  carrierCapabilities: [
+    "reception.listen.greeting_basic",
+    "interaction.greet",
+    "reception.listen.identity_question_basic",
+    "interaction.respond_to_introduction"
   ],
 
   prerequisiteCapabilities: [],
   supportCapabilities: [
-    "interact.ask_repeat",
-    "interact.signal_nonunderstanding"
+    "interaction.ask_repeat"
   ],
 
   language: {
@@ -91,12 +98,30 @@ A completed Mission is not evidence by itself.
   revision: 1,
 
   missionId: "mission.meet_new_person",
-  capabilityId: "interact.ask_name",
+  capabilityId: "interaction.ask_name",
   modality: "spoken_interaction",
 
   purpose: "interaction",
 
-  promptFamily: "meet.ask_name.practice.v1",
+  // Canonical family id — re-derived from the contextSignature below:
+  //   pf.<capabilityId>.<cueTopology>.<setting>.<register>.<channel>.vN
+  promptFamily: "pf.interaction.ask_name.partner_exchange.personal.casual.f2f.v1",
+
+  // The family's auditable identity: two prompts with the same
+  // signature are the SAME family however differently they are worded;
+  // a transfer family must differ from every practiced family on a
+  // declared signature field.
+  contextSignature: {
+    communicativeFunction: "ask_name",
+    cueTopology: "partner_exchange",
+    setting: "personal",
+    register: "casual",
+    channel: "f2f",
+    interlocutorRole: "new_peer",
+    relationship: "first_meeting",
+    responseTopology: "wh_question",
+    lexicalDomain: "identity"
+  },
 
   stimulus: {
     type: "partner_turn",
@@ -303,6 +328,11 @@ delay
 - At least one meaningful dimension changes.
 - Exact rehearsed promptFamily cannot count as transfer.
 - A superficial text variant inside a practiced family remains practiced.
+- Declared changed dimensions must name real signature deltas: each
+  signature-mappable dimension (`wording→cueTopology`,
+  `partner→interlocutorRole`, `setting→setting`, `medium→channel`,
+  `response_form→responseTopology`) must differ from EVERY practiced
+  family of the capability — `curriculum-checks.js` enforces this.
 - Transfer success does not imply fluency.
 - Transfer success does not erase whether retention was separately observed.
 
@@ -331,7 +361,7 @@ Assessment is a Task with additional restrictions.
   },
 
   assessment: {
-    capabilitySample: ["interact.ask_name"],
+    capabilitySample: ["interaction.ask_name"],
     allowedLanguageRange: "declared_target_range",
     answerRevealDuringAttempt: false
   }
@@ -444,12 +474,12 @@ baseline diagnostic
 ```
 
 Target capabilities:
-- listen.greeting_basic
-- interact.greet
-- listen.identity_question_basic
-- speak.say_own_name
-- interact.ask_name
-- interact.respond_to_introduction
+- reception.listen.greeting_basic
+- interaction.greet
+- reception.listen.identity_question_basic
+- production.speak.say_own_name
+- interaction.ask_name
+- interaction.respond_to_introduction
 
 Repair capabilities may be available as support.
 
@@ -458,8 +488,8 @@ Repair capabilities may be available as support.
 ## 14. Fixture B — Order a drink
 
 Target at least:
-- listen.drink_order_question_basic
-- interact.order_drink
+- reception.listen.drink_order_question_basic
+- interaction.order_drink
 
 Must demonstrate:
 - different scenario;

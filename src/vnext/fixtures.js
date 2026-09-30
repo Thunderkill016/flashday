@@ -8,6 +8,14 @@
  * transfer → fresh assessment.
  *
  * Fixture A: meet a new person.  Fixture B: order one drink.
+ *
+ * Prompt families use the canonical id scheme
+ *   pf.<capabilityId>.<cueTopology>.<setting>.<register>.<channel>.vN
+ * and every task carries a contextSignature — the family's auditable
+ * identity. Tasks that share a family share a signature; a transfer or
+ * assessment family must differ from every rehearsed family on a
+ * declared signature field. `tests/vnext-curriculum.test.mjs` enforces
+ * all of this via curriculum-checks.js.
  */
 import { capabilityById } from './capabilities.js';
 import { makeMission, makeTask } from './contracts.js';
@@ -28,25 +36,49 @@ const task = (fields) => makeTask({
   ...fields
 });
 
+/* The practiced communicative situation both missions start from: a
+ * casual, face-to-face first meeting between new peers. Baseline
+ * diagnostics deliberately sample the SAME families the teaching
+ * rehearses, so the delta between baseline and later evidence is the
+ * teaching, not the context. */
+const FIRST_MEETING = {
+  setting: 'personal',
+  register: 'casual',
+  channel: 'f2f',
+  interlocutorRole: 'new_peer',
+  relationship: 'first_meeting'
+};
+
+const sig = (fields) => ({ ...FIRST_MEETING, ...fields });
+
+/* Canonical prompt-family id: the signature fields ARE the id —
+ *   pf.<capabilityId>.<cueTopology>.<setting>.<register>.<channel>.vN
+ * The curriculum checker re-derives them, so an id that does not match
+ * its declared signature fails validation. */
+
 /* ── Fixture A — Meet a new person ─────────────────────────── */
 
 export const MISSION_MEET_PERSON = makeMission({
   id: 'mission.meet_new_person',
-  revision: 1,
+  revision: 2,
   scenario: 'Meet another learner for the first time.',
   learnerGoal: 'Exchange a greeting and names politely.',
+  /* Claim-bearing targets: the mission owes each of them practiced,
+   * delayed, held-out transfer, and fresh-assessment coverage. */
   targetCapabilities: [
-    'listen.greeting_basic',
-    'interact.greet',
-    'listen.identity_question_basic',
-    'speak.say_own_name',
-    'interact.ask_name',
-    'interact.respond_to_introduction'
+    'production.speak.say_own_name',
+    'interaction.ask_name'
   ],
-  // signal_nonunderstanding is intentionally NOT declared: no task in
-  // this mission can probe or teach it, so listing it would leave the
-  // planner demanding a diagnostic the mission can never serve.
-  supportCapabilities: ['interact.ask_repeat'],
+  /* Carriers are rehearsed for retention and context — they get
+   * baseline/input/retrieval evidence but this mission makes no
+   * transfer-level claim about them. */
+  carrierCapabilities: [
+    'reception.listen.greeting_basic',
+    'interaction.greet',
+    'reception.listen.identity_question_basic',
+    'interaction.respond_to_introduction'
+  ],
+  supportCapabilities: ['interaction.ask_repeat'],
   language: {
     assumedKnown: { chunks: [], vocabulary: [], constructions: [] },
     introduced: {
@@ -78,7 +110,9 @@ export const MISSION_MEET_PERSON = makeMission({
     'task.meet.interaction.unaided',
     'task.meet.interaction.polite',
     'task.meet.delayed.check',
+    'task.meet.delayed.name',
     'task.meet.transfer.street',
+    'task.meet.transfer.name',
     'task.meet.assessment.checkpoint'
   ],
   transferPlan: { required: true, dimensions: ['wording', 'partner', 'setting'] },
@@ -89,10 +123,16 @@ export const TASKS_MEET_PERSON = [
   task({
     id: 'task.meet.diagnostic.opening',
     missionId: 'mission.meet_new_person',
-    capabilityId: 'interact.greet',
+    capabilityId: 'interaction.greet',
     modality: 'spoken_interaction',
     purpose: 'diagnostic',
-    promptFamily: 'meet.greet.baseline.v1',
+    promptFamily: 'pf.interaction.greet.opening_exchange.personal.casual.f2f.v1',
+    contextSignature: sig({
+      communicativeFunction: 'greet',
+      cueTopology: 'opening_exchange',
+      responseTopology: 'greeting_return',
+      lexicalDomain: 'greetings'
+    }),
     stimulus: { type: 'partner_turn', languageComponents: ['Hi'] },
     response: { type: 'spoken_turn', requiredFunctions: ['greet'] },
     language: { requiredChunks: ['Hi'], requiredVocabulary: ['hi'], requiredConstructions: [] }
@@ -100,10 +140,16 @@ export const TASKS_MEET_PERSON = [
   task({
     id: 'task.meet.diagnostic.listen',
     missionId: 'mission.meet_new_person',
-    capabilityId: 'listen.greeting_basic',
+    capabilityId: 'reception.listen.greeting_basic',
     modality: 'listening',
     purpose: 'diagnostic',
-    promptFamily: 'meet.listen.baseline.v1',
+    promptFamily: 'pf.reception.listen.greeting_basic.greeting_audio.personal.casual.f2f.v1',
+    contextSignature: sig({
+      communicativeFunction: 'recognize_greeting',
+      cueTopology: 'greeting_audio',
+      responseTopology: 'mc_meaning',
+      lexicalDomain: 'greetings'
+    }),
     stimulus: { type: 'audio_line', languageComponents: ['Hello'] },
     response: {
       type: 'choice',
@@ -119,10 +165,16 @@ export const TASKS_MEET_PERSON = [
   task({
     id: 'task.meet.diagnostic.identity_q',
     missionId: 'mission.meet_new_person',
-    capabilityId: 'listen.identity_question_basic',
+    capabilityId: 'reception.listen.identity_question_basic',
     modality: 'listening',
     purpose: 'diagnostic',
-    promptFamily: 'meet.identity_q.baseline.v1',
+    promptFamily: 'pf.reception.listen.identity_question_basic.identity_q_audio.personal.casual.f2f.v1',
+    contextSignature: sig({
+      communicativeFunction: 'understand_identity_question',
+      cueTopology: 'identity_q_audio',
+      responseTopology: 'mc_meaning',
+      lexicalDomain: 'identity'
+    }),
     stimulus: { type: 'audio_line', languageComponents: ["What's your name?"] },
     response: {
       type: 'choice',
@@ -138,10 +190,16 @@ export const TASKS_MEET_PERSON = [
   task({
     id: 'task.meet.diagnostic.own_name',
     missionId: 'mission.meet_new_person',
-    capabilityId: 'speak.say_own_name',
+    capabilityId: 'production.speak.say_own_name',
     modality: 'spoken_production',
     purpose: 'diagnostic',
-    promptFamily: 'meet.own_name.baseline.v1',
+    promptFamily: 'pf.production.speak.say_own_name.asked_own_name.personal.casual.f2f.v1',
+    contextSignature: sig({
+      communicativeFunction: 'state_own_name',
+      cueTopology: 'asked_own_name',
+      responseTopology: 'name_statement',
+      lexicalDomain: 'identity'
+    }),
     stimulus: { type: 'partner_turn', languageComponents: ["What's your name?"] },
     response: { type: 'spoken_turn', requiredFunctions: ['state_own_name'] },
     language: { requiredChunks: ["I'm …"], requiredVocabulary: ['name'], requiredConstructions: [] }
@@ -149,10 +207,16 @@ export const TASKS_MEET_PERSON = [
   task({
     id: 'task.meet.diagnostic.ask_name',
     missionId: 'mission.meet_new_person',
-    capabilityId: 'interact.ask_name',
+    capabilityId: 'interaction.ask_name',
     modality: 'spoken_interaction',
     purpose: 'diagnostic',
-    promptFamily: 'meet.ask_name.baseline.v1',
+    promptFamily: 'pf.interaction.ask_name.self_intro.personal.casual.f2f.v1',
+    contextSignature: sig({
+      communicativeFunction: 'ask_name',
+      cueTopology: 'self_intro',
+      responseTopology: 'wh_question',
+      lexicalDomain: 'identity'
+    }),
     stimulus: { type: 'partner_turn', languageComponents: ['Hi'] },
     response: { type: 'spoken_turn', requiredFunctions: ['ask_name'] },
     language: { requiredChunks: ["What's your name?"], requiredVocabulary: ['name'], requiredConstructions: ['wh_question_name'] }
@@ -160,10 +224,16 @@ export const TASKS_MEET_PERSON = [
   task({
     id: 'task.meet.diagnostic.repair',
     missionId: 'mission.meet_new_person',
-    capabilityId: 'interact.ask_repeat',
+    capabilityId: 'interaction.ask_repeat',
     modality: 'spoken_interaction',
     purpose: 'diagnostic',
-    promptFamily: 'meet.repair.baseline.v1',
+    promptFamily: 'pf.interaction.ask_repeat.missed_line.personal.casual.f2f.v1',
+    contextSignature: sig({
+      communicativeFunction: 'ask_repeat',
+      cueTopology: 'missed_line',
+      responseTopology: 'repair_request',
+      lexicalDomain: 'repair'
+    }),
     stimulus: { type: 'partner_turn', languageComponents: ['(mumbled) … Sam'] },
     response: { type: 'spoken_turn', requiredFunctions: ['ask_repeat'] },
     language: { requiredChunks: ['Sorry?', 'Can you repeat that?'], requiredVocabulary: ['sorry', 'repeat'], requiredConstructions: [] }
@@ -171,10 +241,16 @@ export const TASKS_MEET_PERSON = [
   task({
     id: 'task.meet.diagnostic.polite',
     missionId: 'mission.meet_new_person',
-    capabilityId: 'interact.respond_to_introduction',
+    capabilityId: 'interaction.respond_to_introduction',
     modality: 'spoken_interaction',
     purpose: 'diagnostic',
-    promptFamily: 'meet.polite.baseline.v1',
+    promptFamily: 'pf.interaction.respond_to_introduction.nice_to_meet_you.personal.casual.f2f.v1',
+    contextSignature: sig({
+      communicativeFunction: 'respond_to_introduction',
+      cueTopology: 'nice_to_meet_you',
+      responseTopology: 'politeness_return',
+      lexicalDomain: 'greetings'
+    }),
     stimulus: { type: 'partner_turn', languageComponents: ['Nice to meet you'] },
     response: { type: 'spoken_turn', requiredFunctions: ['respond_to_introduction'] },
     language: { requiredChunks: ['Nice to meet you too'], requiredVocabulary: ['nice', 'meet'], requiredConstructions: [] }
@@ -182,10 +258,16 @@ export const TASKS_MEET_PERSON = [
   task({
     id: 'task.meet.input.scene',
     missionId: 'mission.meet_new_person',
-    capabilityId: 'listen.greeting_basic',
+    capabilityId: 'reception.listen.greeting_basic',
     modality: 'listening',
     purpose: 'input',
-    promptFamily: 'meet.scene.v1',
+    promptFamily: 'pf.reception.listen.greeting_basic.greeting_exchange.personal.casual.f2f.v1',
+    contextSignature: sig({
+      communicativeFunction: 'recognize_greeting',
+      cueTopology: 'greeting_exchange',
+      responseTopology: 'none',
+      lexicalDomain: 'greetings'
+    }),
     stimulus: { type: 'dialogue', languageComponents: ['Hi', 'Hello'] },
     response: { type: 'none', requiredFunctions: [] },
     language: { requiredChunks: ['Hi', 'Hello'], requiredVocabulary: ['hi', 'hello'], requiredConstructions: [] }
@@ -193,10 +275,16 @@ export const TASKS_MEET_PERSON = [
   task({
     id: 'task.meet.input.questions',
     missionId: 'mission.meet_new_person',
-    capabilityId: 'listen.identity_question_basic',
+    capabilityId: 'reception.listen.identity_question_basic',
     modality: 'listening',
     purpose: 'input',
-    promptFamily: 'meet.questions.v1',
+    promptFamily: 'pf.reception.listen.identity_question_basic.identity_q_exchange.personal.casual.f2f.v1',
+    contextSignature: sig({
+      communicativeFunction: 'understand_identity_question',
+      cueTopology: 'identity_q_exchange',
+      responseTopology: 'none',
+      lexicalDomain: 'identity'
+    }),
     stimulus: { type: 'dialogue', languageComponents: ["What's your name?"] },
     response: { type: 'none', requiredFunctions: [] },
     language: { requiredChunks: ["What's your name?"], requiredVocabulary: ['name'], requiredConstructions: ['wh_question_name'] }
@@ -204,10 +292,16 @@ export const TASKS_MEET_PERSON = [
   task({
     id: 'task.meet.input.ask_name',
     missionId: 'mission.meet_new_person',
-    capabilityId: 'interact.ask_name',
+    capabilityId: 'interaction.ask_name',
     modality: 'spoken_interaction',
     purpose: 'input',
-    promptFamily: 'meet.ask_name.input.v1',
+    promptFamily: 'pf.interaction.ask_name.model_exchange.personal.casual.f2f.v1',
+    contextSignature: sig({
+      communicativeFunction: 'ask_name',
+      cueTopology: 'model_exchange',
+      responseTopology: 'none',
+      lexicalDomain: 'identity'
+    }),
     stimulus: { type: 'dialogue', languageComponents: ["What's your name?", 'My name is …'] },
     response: { type: 'none', requiredFunctions: [] },
     language: { requiredChunks: ["What's your name?", 'My name is …'], requiredVocabulary: ['name'], requiredConstructions: ['wh_question_name'] }
@@ -215,10 +309,16 @@ export const TASKS_MEET_PERSON = [
   task({
     id: 'task.meet.retrieval.questions',
     missionId: 'mission.meet_new_person',
-    capabilityId: 'listen.identity_question_basic',
+    capabilityId: 'reception.listen.identity_question_basic',
     modality: 'listening',
     purpose: 'retrieval',
-    promptFamily: 'meet.questions.practice.v1',
+    promptFamily: 'pf.reception.listen.identity_question_basic.identity_q_audio.personal.casual.f2f.v1',
+    contextSignature: sig({
+      communicativeFunction: 'understand_identity_question',
+      cueTopology: 'identity_q_audio',
+      responseTopology: 'mc_meaning',
+      lexicalDomain: 'identity'
+    }),
     stimulus: { type: 'audio_line', languageComponents: ["What's your name?"] },
     response: {
       type: 'choice',
@@ -234,10 +334,16 @@ export const TASKS_MEET_PERSON = [
   task({
     id: 'task.meet.retrieval.phrases',
     missionId: 'mission.meet_new_person',
-    capabilityId: 'speak.say_own_name',
+    capabilityId: 'production.speak.say_own_name',
     modality: 'spoken_production',
     purpose: 'retrieval',
-    promptFamily: 'meet.phrases.practice.v1',
+    promptFamily: 'pf.production.speak.say_own_name.cued_recall.personal.casual.f2f.v1',
+    contextSignature: sig({
+      communicativeFunction: 'state_own_name',
+      cueTopology: 'cued_recall',
+      responseTopology: 'name_statement',
+      lexicalDomain: 'identity'
+    }),
     stimulus: { type: 'cued_prompt', languageComponents: ["I'm …"] },
     response: { type: 'spoken_turn', requiredFunctions: ['state_own_name'] },
     language: { requiredChunks: ["I'm …", 'My name is …'], requiredVocabulary: ['name'], requiredConstructions: [] }
@@ -245,10 +351,16 @@ export const TASKS_MEET_PERSON = [
   task({
     id: 'task.meet.retrieval.ask_name',
     missionId: 'mission.meet_new_person',
-    capabilityId: 'interact.ask_name',
+    capabilityId: 'interaction.ask_name',
     modality: 'spoken_interaction',
     purpose: 'retrieval',
-    promptFamily: 'meet.ask_name.practice.v1',
+    promptFamily: 'pf.interaction.ask_name.cued_recall.personal.casual.f2f.v1',
+    contextSignature: sig({
+      communicativeFunction: 'ask_name',
+      cueTopology: 'cued_recall',
+      responseTopology: 'wh_question',
+      lexicalDomain: 'identity'
+    }),
     stimulus: { type: 'cued_prompt', languageComponents: ["What's your name?"] },
     response: { type: 'spoken_turn', requiredFunctions: ['ask_name'] },
     language: { requiredChunks: ["What's your name?"], requiredVocabulary: ['name'], requiredConstructions: ['wh_question_name'] }
@@ -256,10 +368,16 @@ export const TASKS_MEET_PERSON = [
   task({
     id: 'task.meet.interaction.guided',
     missionId: 'mission.meet_new_person',
-    capabilityId: 'interact.ask_name',
+    capabilityId: 'interaction.ask_name',
     modality: 'spoken_interaction',
     purpose: 'interaction',
-    promptFamily: 'meet.ask_name.practice.v1',
+    promptFamily: 'pf.interaction.ask_name.partner_exchange.personal.casual.f2f.v1',
+    contextSignature: sig({
+      communicativeFunction: 'ask_name',
+      cueTopology: 'partner_exchange',
+      responseTopology: 'wh_question',
+      lexicalDomain: 'identity'
+    }),
     stimulus: { type: 'partner_turn', languageComponents: ["What's your name?"] },
     response: { type: 'spoken_turn', requiredFunctions: ['ask_name'] },
     supportPolicy: { allowed: [], revealModelAfterAttempt: true },
@@ -268,10 +386,16 @@ export const TASKS_MEET_PERSON = [
   task({
     id: 'task.meet.remediation.repair',
     missionId: 'mission.meet_new_person',
-    capabilityId: 'interact.ask_repeat',
+    capabilityId: 'interaction.ask_repeat',
     modality: 'spoken_interaction',
     purpose: 'remediation',
-    promptFamily: 'meet.repair.practice.v1',
+    promptFamily: 'pf.interaction.ask_repeat.missed_line.personal.casual.f2f.v1',
+    contextSignature: sig({
+      communicativeFunction: 'ask_repeat',
+      cueTopology: 'missed_line',
+      responseTopology: 'repair_request',
+      lexicalDomain: 'repair'
+    }),
     stimulus: { type: 'partner_turn', languageComponents: [] },
     response: { type: 'spoken_turn', requiredFunctions: ['ask_repeat'] },
     language: { requiredChunks: ['Sorry?', 'Can you repeat that?'], requiredVocabulary: ['sorry', 'repeat'], requiredConstructions: [] }
@@ -279,10 +403,16 @@ export const TASKS_MEET_PERSON = [
   task({
     id: 'task.meet.remediation.ask_name',
     missionId: 'mission.meet_new_person',
-    capabilityId: 'interact.ask_name',
+    capabilityId: 'interaction.ask_name',
     modality: 'spoken_interaction',
     purpose: 'remediation',
-    promptFamily: 'meet.ask_name.repair.v1',
+    promptFamily: 'pf.interaction.ask_name.partner_exchange.personal.casual.f2f.v1',
+    contextSignature: sig({
+      communicativeFunction: 'ask_name',
+      cueTopology: 'partner_exchange',
+      responseTopology: 'wh_question',
+      lexicalDomain: 'identity'
+    }),
     stimulus: { type: 'partner_turn', languageComponents: [] },
     response: { type: 'spoken_turn', requiredFunctions: ['ask_name'] },
     language: { requiredChunks: ["What's your name?"], requiredVocabulary: ['name'], requiredConstructions: ['wh_question_name'] }
@@ -290,10 +420,16 @@ export const TASKS_MEET_PERSON = [
   task({
     id: 'task.meet.interaction.unaided',
     missionId: 'mission.meet_new_person',
-    capabilityId: 'interact.ask_name',
+    capabilityId: 'interaction.ask_name',
     modality: 'spoken_interaction',
     purpose: 'interaction',
-    promptFamily: 'meet.ask_name.practice.v1',
+    promptFamily: 'pf.interaction.ask_name.partner_exchange.personal.casual.f2f.v1',
+    contextSignature: sig({
+      communicativeFunction: 'ask_name',
+      cueTopology: 'partner_exchange',
+      responseTopology: 'wh_question',
+      lexicalDomain: 'identity'
+    }),
     stimulus: { type: 'partner_turn', languageComponents: ['Nice to meet you'] },
     response: { type: 'spoken_turn', requiredFunctions: ['ask_name'] },
     language: { requiredChunks: ["What's your name?"], requiredVocabulary: ['name'], requiredConstructions: ['wh_question_name'] }
@@ -301,32 +437,79 @@ export const TASKS_MEET_PERSON = [
   task({
     id: 'task.meet.interaction.polite',
     missionId: 'mission.meet_new_person',
-    capabilityId: 'interact.respond_to_introduction',
+    capabilityId: 'interaction.respond_to_introduction',
     modality: 'spoken_interaction',
     purpose: 'interaction',
-    promptFamily: 'meet.polite.practice.v1',
+    promptFamily: 'pf.interaction.respond_to_introduction.nice_to_meet_you.personal.casual.f2f.v1',
+    contextSignature: sig({
+      communicativeFunction: 'respond_to_introduction',
+      cueTopology: 'nice_to_meet_you',
+      responseTopology: 'politeness_return',
+      lexicalDomain: 'greetings'
+    }),
     stimulus: { type: 'partner_turn', languageComponents: ['Nice to meet you'] },
     response: { type: 'spoken_turn', requiredFunctions: ['respond_to_introduction'] },
     language: { requiredChunks: ['Nice to meet you too'], requiredVocabulary: ['nice', 'meet'], requiredConstructions: [] }
   }),
+  /* Delayed re-checks re-probe the REHEARSED family after the retention
+   * lag — a delayed task on a novel family would measure transfer, not
+   * retention, so its family deliberately equals the last independent
+   * exchange's family. */
   task({
     id: 'task.meet.delayed.check',
     missionId: 'mission.meet_new_person',
-    capabilityId: 'interact.ask_name',
+    capabilityId: 'interaction.ask_name',
     modality: 'spoken_interaction',
     purpose: 'delayed_retrieval',
-    promptFamily: 'meet.ask_name.practice.v1',
+    promptFamily: 'pf.interaction.ask_name.partner_exchange.personal.casual.f2f.v1',
+    contextSignature: sig({
+      communicativeFunction: 'ask_name',
+      cueTopology: 'partner_exchange',
+      responseTopology: 'wh_question',
+      lexicalDomain: 'identity'
+    }),
     stimulus: { type: 'partner_turn', languageComponents: ["What's your name?"] },
     response: { type: 'spoken_turn', requiredFunctions: ['ask_name'] },
     language: { requiredChunks: ["What's your name?"], requiredVocabulary: ['name'], requiredConstructions: ['wh_question_name'] }
   }),
   task({
+    id: 'task.meet.delayed.name',
+    missionId: 'mission.meet_new_person',
+    capabilityId: 'production.speak.say_own_name',
+    modality: 'spoken_production',
+    purpose: 'delayed_retrieval',
+    promptFamily: 'pf.production.speak.say_own_name.asked_own_name.personal.casual.f2f.v1',
+    contextSignature: sig({
+      communicativeFunction: 'state_own_name',
+      cueTopology: 'asked_own_name',
+      responseTopology: 'name_statement',
+      lexicalDomain: 'identity'
+    }),
+    stimulus: { type: 'partner_turn', languageComponents: ["What's your name?"] },
+    response: { type: 'spoken_turn', requiredFunctions: ['state_own_name'] },
+    language: { requiredChunks: ["I'm …"], requiredVocabulary: ['name'], requiredConstructions: [] }
+  }),
+  /* Held-out transfer: the same communicative function in a context
+   * whose declared deltas (wording→cueTopology, partner→interlocutorRole,
+   * setting→setting) all differ from every rehearsed family. */
+  task({
     id: 'task.meet.transfer.street',
     missionId: 'mission.meet_new_person',
-    capabilityId: 'interact.ask_name',
+    capabilityId: 'interaction.ask_name',
     modality: 'spoken_interaction',
     purpose: 'transfer',
-    promptFamily: 'meet.ask_name.street.v1',
+    promptFamily: 'pf.interaction.ask_name.open_social.street.casual.f2f.v1',
+    contextSignature: {
+      communicativeFunction: 'ask_name',
+      cueTopology: 'open_social',
+      setting: 'street',
+      register: 'casual',
+      channel: 'f2f',
+      interlocutorRole: 'stranger',
+      relationship: 'stranger_contact',
+      responseTopology: 'wh_question',
+      lexicalDomain: 'identity'
+    },
     stimulus: { type: 'partner_turn', languageComponents: ["I'm Sam — and you are?"] },
     response: { type: 'spoken_turn', requiredFunctions: ['ask_name'] },
     freshness: { required: true, familyClass: 'fresh_transfer' },
@@ -334,22 +517,57 @@ export const TASKS_MEET_PERSON = [
     language: { requiredChunks: ["What's your name?"], requiredVocabulary: ['name'], requiredConstructions: ['wh_question_name'] }
   }),
   task({
+    id: 'task.meet.transfer.name',
+    missionId: 'mission.meet_new_person',
+    capabilityId: 'production.speak.say_own_name',
+    modality: 'spoken_production',
+    purpose: 'transfer',
+    promptFamily: 'pf.production.speak.say_own_name.name_check.educational.neutral.f2f.v1',
+    contextSignature: {
+      communicativeFunction: 'state_own_name',
+      cueTopology: 'name_check',
+      setting: 'educational',
+      register: 'neutral',
+      channel: 'f2f',
+      interlocutorRole: 'teacher',
+      relationship: 'authority',
+      responseTopology: 'name_statement',
+      lexicalDomain: 'identity'
+    },
+    stimulus: { type: 'partner_turn', languageComponents: ['Tell me your name.'] },
+    response: { type: 'spoken_turn', requiredFunctions: ['state_own_name'] },
+    freshness: { required: true, familyClass: 'fresh_transfer' },
+    transfer: { changedDimensions: ['wording', 'partner', 'setting'] },
+    language: { requiredChunks: ['My name is …', "I'm …"], requiredVocabulary: ['name'], requiredConstructions: [] }
+  }),
+  task({
     id: 'task.meet.assessment.checkpoint',
     missionId: 'mission.meet_new_person',
-    capabilityId: 'interact.ask_name',
+    capabilityId: 'interaction.ask_name',
     modality: 'spoken_interaction',
     purpose: 'assessment',
-    promptFamily: 'assess.meet.exchange.v1',
+    promptFamily: 'pf.interaction.ask_name.full_exchange.community.casual.f2f.v1',
+    contextSignature: {
+      communicativeFunction: 'full_name_exchange',
+      cueTopology: 'full_exchange',
+      setting: 'community',
+      register: 'casual',
+      channel: 'f2f',
+      interlocutorRole: 'acquaintance',
+      relationship: 'repeat_contact',
+      responseTopology: 'wh_question',
+      lexicalDomain: 'identity'
+    },
     stimulus: { type: 'partner_turn', languageComponents: ['Hi! Good to see you.'] },
-    response: { type: 'spoken_turn', requiredFunctions: ['greet', 'ask_name'] },
+    response: { type: 'spoken_turn', requiredFunctions: ['greet', 'state_own_name', 'ask_name'] },
     freshness: { required: true, familyClass: 'fresh_assessment' },
     supportPolicy: { allowed: [], revealModelAfterAttempt: false },
     assessment: {
-      capabilitySample: ['interact.ask_name', 'interact.respond_to_introduction'],
+      capabilitySample: ['interaction.ask_name', 'production.speak.say_own_name', 'interaction.respond_to_introduction'],
       allowedLanguageRange: 'declared_target_range',
       answerRevealDuringAttempt: false
     },
-    language: { requiredChunks: ["What's your name?"], requiredVocabulary: ['name'], requiredConstructions: ['wh_question_name'] }
+    language: { requiredChunks: ["What's your name?", "I'm …"], requiredVocabulary: ['name'], requiredConstructions: ['wh_question_name'] }
   })
 ];
 
@@ -357,10 +575,11 @@ export const TASKS_MEET_PERSON = [
 
 export const MISSION_ORDER_DRINK = makeMission({
   id: 'mission.order_drink',
-  revision: 1,
+  revision: 2,
   scenario: 'Order one drink politely in a cafe.',
   learnerGoal: 'Understand the offer question and order a drink.',
-  targetCapabilities: ['listen.drink_order_question_basic', 'interact.order_drink'],
+  targetCapabilities: ['interaction.order_drink'],
+  carrierCapabilities: ['reception.listen.drink_order_question_basic'],
   prerequisiteCapabilities: [],
   // No support capabilities declared — no task in this mission can
   // probe or teach them, and an unservable surface only produces
@@ -389,14 +608,30 @@ export const MISSION_ORDER_DRINK = makeMission({
   assessmentPlan: { required: true, freshnessRequired: true }
 });
 
+const CAFE = {
+  setting: 'cafe',
+  register: 'casual',
+  channel: 'f2f',
+  interlocutorRole: 'server',
+  relationship: 'service'
+};
+
+const cafeSig = (fields) => ({ ...CAFE, ...fields });
+
 export const TASKS_ORDER_DRINK = [
   task({
     id: 'task.drink.diagnostic.offer',
     missionId: 'mission.order_drink',
-    capabilityId: 'listen.drink_order_question_basic',
+    capabilityId: 'reception.listen.drink_order_question_basic',
     modality: 'listening',
     purpose: 'diagnostic',
-    promptFamily: 'drink.offer.baseline.v1',
+    promptFamily: 'pf.reception.listen.drink_order_question_basic.offer_audio.cafe.casual.f2f.v1',
+    contextSignature: cafeSig({
+      communicativeFunction: 'understand_offer_or_order_question',
+      cueTopology: 'offer_audio',
+      responseTopology: 'mc_meaning',
+      lexicalDomain: 'food_drink'
+    }),
     stimulus: { type: 'partner_turn', languageComponents: ['What would you like?'] },
     response: {
       type: 'choice',
@@ -412,10 +647,16 @@ export const TASKS_ORDER_DRINK = [
   task({
     id: 'task.drink.diagnostic.order',
     missionId: 'mission.order_drink',
-    capabilityId: 'interact.order_drink',
+    capabilityId: 'interaction.order_drink',
     modality: 'spoken_interaction',
     purpose: 'diagnostic',
-    promptFamily: 'drink.order.baseline.v1',
+    promptFamily: 'pf.interaction.order_drink.offer_question.cafe.casual.f2f.v1',
+    contextSignature: cafeSig({
+      communicativeFunction: 'order_item',
+      cueTopology: 'offer_question',
+      responseTopology: 'request',
+      lexicalDomain: 'food_drink'
+    }),
     stimulus: { type: 'partner_turn', languageComponents: ['What would you like?'] },
     response: { type: 'spoken_turn', requiredFunctions: ['order_item'] },
     language: { requiredChunks: ['Can I have …?', 'A coffee, please'], requiredVocabulary: ['coffee', 'tea', 'please'], requiredConstructions: [] }
@@ -423,10 +664,16 @@ export const TASKS_ORDER_DRINK = [
   task({
     id: 'task.drink.input.counter',
     missionId: 'mission.order_drink',
-    capabilityId: 'listen.drink_order_question_basic',
+    capabilityId: 'reception.listen.drink_order_question_basic',
     modality: 'listening',
     purpose: 'input',
-    promptFamily: 'drink.counter.v1',
+    promptFamily: 'pf.reception.listen.drink_order_question_basic.service_exchange.cafe.casual.f2f.v1',
+    contextSignature: cafeSig({
+      communicativeFunction: 'understand_offer_or_order_question',
+      cueTopology: 'service_exchange',
+      responseTopology: 'none',
+      lexicalDomain: 'food_drink'
+    }),
     stimulus: { type: 'dialogue', languageComponents: ['What would you like?', 'A coffee, please'] },
     response: { type: 'none', requiredFunctions: [] },
     language: { requiredChunks: ['What would you like?', 'A coffee, please'], requiredVocabulary: ['like', 'coffee', 'please'], requiredConstructions: [] }
@@ -434,10 +681,16 @@ export const TASKS_ORDER_DRINK = [
   task({
     id: 'task.drink.retrieval.order',
     missionId: 'mission.order_drink',
-    capabilityId: 'interact.order_drink',
+    capabilityId: 'interaction.order_drink',
     modality: 'spoken_interaction',
     purpose: 'retrieval',
-    promptFamily: 'drink.order.practice.v1',
+    promptFamily: 'pf.interaction.order_drink.cued_recall.cafe.casual.f2f.v1',
+    contextSignature: cafeSig({
+      communicativeFunction: 'order_item',
+      cueTopology: 'cued_recall',
+      responseTopology: 'request',
+      lexicalDomain: 'food_drink'
+    }),
     stimulus: { type: 'cued_prompt', languageComponents: ['Can I have …?'] },
     response: { type: 'spoken_turn', requiredFunctions: ['order_item'] },
     language: { requiredChunks: ['Can I have …?', 'A coffee, please'], requiredVocabulary: ['coffee', 'tea', 'please'], requiredConstructions: [] }
@@ -445,10 +698,16 @@ export const TASKS_ORDER_DRINK = [
   task({
     id: 'task.drink.interaction.guided',
     missionId: 'mission.order_drink',
-    capabilityId: 'interact.order_drink',
+    capabilityId: 'interaction.order_drink',
     modality: 'spoken_interaction',
     purpose: 'interaction',
-    promptFamily: 'drink.order.practice.v1',
+    promptFamily: 'pf.interaction.order_drink.offer_question.cafe.casual.f2f.v1',
+    contextSignature: cafeSig({
+      communicativeFunction: 'order_item',
+      cueTopology: 'offer_question',
+      responseTopology: 'request',
+      lexicalDomain: 'food_drink'
+    }),
     stimulus: { type: 'partner_turn', languageComponents: ['What would you like?'] },
     response: { type: 'spoken_turn', requiredFunctions: ['order_item'] },
     supportPolicy: { allowed: [], revealModelAfterAttempt: true },
@@ -457,10 +716,16 @@ export const TASKS_ORDER_DRINK = [
   task({
     id: 'task.drink.interaction.unaided',
     missionId: 'mission.order_drink',
-    capabilityId: 'interact.order_drink',
+    capabilityId: 'interaction.order_drink',
     modality: 'spoken_interaction',
     purpose: 'interaction',
-    promptFamily: 'drink.order.practice.v1',
+    promptFamily: 'pf.interaction.order_drink.offer_question.cafe.casual.f2f.v1',
+    contextSignature: cafeSig({
+      communicativeFunction: 'order_item',
+      cueTopology: 'offer_question',
+      responseTopology: 'request',
+      lexicalDomain: 'food_drink'
+    }),
     stimulus: { type: 'partner_turn', languageComponents: ['What would you like?'] },
     response: { type: 'spoken_turn', requiredFunctions: ['order_item'] },
     language: { requiredChunks: ['A coffee, please'], requiredVocabulary: ['coffee', 'please'], requiredConstructions: [] }
@@ -468,10 +733,16 @@ export const TASKS_ORDER_DRINK = [
   task({
     id: 'task.drink.delayed.check',
     missionId: 'mission.order_drink',
-    capabilityId: 'interact.order_drink',
+    capabilityId: 'interaction.order_drink',
     modality: 'spoken_interaction',
     purpose: 'delayed_retrieval',
-    promptFamily: 'drink.order.practice.v1',
+    promptFamily: 'pf.interaction.order_drink.offer_question.cafe.casual.f2f.v1',
+    contextSignature: cafeSig({
+      communicativeFunction: 'order_item',
+      cueTopology: 'offer_question',
+      responseTopology: 'request',
+      lexicalDomain: 'food_drink'
+    }),
     stimulus: { type: 'partner_turn', languageComponents: ['Anything else?'] },
     response: { type: 'spoken_turn', requiredFunctions: ['order_item'] },
     language: { requiredChunks: ['A coffee, please'], requiredVocabulary: ['coffee', 'please'], requiredConstructions: [] }
@@ -479,10 +750,21 @@ export const TASKS_ORDER_DRINK = [
   task({
     id: 'task.drink.transfer.stall',
     missionId: 'mission.order_drink',
-    capabilityId: 'interact.order_drink',
+    capabilityId: 'interaction.order_drink',
     modality: 'spoken_interaction',
     purpose: 'transfer',
-    promptFamily: 'drink.order.stall.v1',
+    promptFamily: 'pf.interaction.order_drink.open_counter.stall.casual.f2f.v1',
+    contextSignature: {
+      communicativeFunction: 'order_item',
+      cueTopology: 'open_counter',
+      setting: 'stall',
+      register: 'casual',
+      channel: 'f2f',
+      interlocutorRole: 'vendor',
+      relationship: 'service',
+      responseTopology: 'request',
+      lexicalDomain: 'food_drink'
+    },
     stimulus: { type: 'partner_turn', languageComponents: ['Yes? What can I get you?'] },
     response: { type: 'spoken_turn', requiredFunctions: ['order_item'] },
     freshness: { required: true, familyClass: 'fresh_transfer' },
@@ -492,16 +774,27 @@ export const TASKS_ORDER_DRINK = [
   task({
     id: 'task.drink.assessment.checkpoint',
     missionId: 'mission.order_drink',
-    capabilityId: 'interact.order_drink',
+    capabilityId: 'interaction.order_drink',
     modality: 'spoken_interaction',
     purpose: 'assessment',
-    promptFamily: 'assess.order_drink.v1',
+    promptFamily: 'pf.interaction.order_drink.counter_exchange.kiosk.casual.f2f.v1',
+    contextSignature: {
+      communicativeFunction: 'order_item',
+      cueTopology: 'counter_exchange',
+      setting: 'kiosk',
+      register: 'casual',
+      channel: 'f2f',
+      interlocutorRole: 'server',
+      relationship: 'service',
+      responseTopology: 'request',
+      lexicalDomain: 'food_drink'
+    },
     stimulus: { type: 'partner_turn', languageComponents: ['Hi! For you?'] },
     response: { type: 'spoken_turn', requiredFunctions: ['order_item'] },
     freshness: { required: true, familyClass: 'fresh_assessment' },
     supportPolicy: { allowed: [], revealModelAfterAttempt: false },
     assessment: {
-      capabilitySample: ['interact.order_drink'],
+      capabilitySample: ['interaction.order_drink'],
       allowedLanguageRange: 'declared_target_range',
       answerRevealDuringAttempt: false
     },

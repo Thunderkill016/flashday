@@ -27,7 +27,7 @@ import { runPilot, runPilotLearner, evaluateClaim } from '../src/vnext/pilot-har
 
 const T0 = Date.parse('2026-03-02T09:00:00Z');
 const HOUR = 3600_000;
-const ASK = 'interact.ask_name';
+const ASK = 'interaction.ask_name';
 const TASKS = TASKS_MEET_PERSON;
 
 const SESSIONS = [
@@ -265,7 +265,7 @@ const PILOT = { learners: COHORT, mission: MISSION_MEET_PERSON, tasks: TASKS, ca
     taskId: 'task.meet.transfer.street', taskRevision: 99,
     eventType: 'transfer_attempt', modality: 'spoken_interaction',
     occurredAt: T0 + 99 * HOUR,
-    context: { missionId: 'mission.meet_new_person', practicedOrTransfer: 'transfer', promptFamily: 'meet.ask_name.street.v1' },
+    context: { missionId: 'mission.meet_new_person', practicedOrTransfer: 'transfer', promptFamily: 'pf.interaction.ask_name.open_social.street.casual.f2f.v1' },
     attempt: { observed: true, outcome: 'success', latencyMs: 100, attemptId: 'f.1' },
     evaluation: { authority: 'deterministic', contractId: 'eval.required_functions.v1' },
     binding: { purpose: 'transfer', familyClass: 'fresh_transfer', freshnessRequired: true, effectiveSupportAllowed: [] }

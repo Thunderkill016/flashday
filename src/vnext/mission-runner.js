@@ -147,6 +147,7 @@ export function nextMissionTask({ learnerId, mission, tasks, capabilities, event
    * capability outside the mission never gets a task from inside it. */
   const surface = new Set([
     ...(mission.targetCapabilities ?? []),
+    ...(mission.carrierCapabilities ?? []),
     ...(mission.prerequisiteCapabilities ?? []),
     ...(mission.supportCapabilities ?? [])
   ]);
