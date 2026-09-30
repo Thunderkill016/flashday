@@ -222,12 +222,15 @@ export function createMissionSession({
 
   const progressLines = () => {
     const { byCapability } = projectLearnerState(learnerId, events, capabilities, tasks, { policy });
+    /* Progress lines list claim-bearing surfaces only — support caps
+     * are demand-routed remediation substrate, not learner goals, and
+     * their probes mint no milestones to describe honestly. */
+    const supportSet = new Set(mission.supportCapabilities ?? []);
     const ids = [
       ...(mission.targetCapabilities ?? []),
       ...(mission.carrierCapabilities ?? []),
-      ...(mission.prerequisiteCapabilities ?? []),
-      ...(mission.supportCapabilities ?? [])
-    ];
+      ...(mission.prerequisiteCapabilities ?? [])
+    ].filter((id) => !supportSet.has(id));
     return ids.map((capId) => {
       const cap = capById.get(capId);
       const entry = byCapability.get(capId);
@@ -462,7 +465,14 @@ export function createMissionSession({
         eventType: EVENT_TYPE_FOR(task.purpose, isChoice ? 'choice' : 'text'),
         attempt,
         support: { ...supportSnapshot },
-        evaluation: { evaluator: 'ui-session', version: EVALUATOR_VERSION }
+        evaluation: {
+          evaluator: 'ui-session',
+          version: EVALUATOR_VERSION,
+          /* Demand-routing signal (#61): only what the evaluator could
+           * attribute — empty for unattributable misses; the binder
+           * rejects anything outside the task's requiredFunctions. */
+          missingFunctions: evalResult.missingFunctions ?? []
+        }
       });
       const feedbackEvent = bindObservation(task, cap, {
         id: evtId(run?.id, attemptId, 'fb'),

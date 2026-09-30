@@ -30,6 +30,12 @@ export const TASK_PURPOSES = [
   'delayed_retrieval',
   'transfer',
   'assessment',
+  /* Demand-routed substrate repair (issue #61): a short probe on a
+   * support capability that exists ONLY because a target task's
+   * evaluation attributed the failure to a missing function. Support
+   * tasks emit 'support_attempt' — remediation context, never
+   * claim-bearing evidence. */
+  'support',
   'fluency' // reserved — rejected by validateTask until a calibrated contract exists
 ];
 
@@ -42,7 +48,8 @@ export const ELICITING_PURPOSES = new Set([
   'remediation',
   'delayed_retrieval',
   'transfer',
-  'assessment'
+  'assessment',
+  'support'
 ]);
 
 // Purposes that only expose — they may create exposure events, never
@@ -65,7 +72,12 @@ export const EVENT_TYPES_FOR_PURPOSE = {
   remediation: ['retry', 'recognition_attempt', 'recall_attempt', 'production_attempt', 'interaction_turn'],
   delayed_retrieval: ['delayed_retrieval'],
   transfer: ['transfer_attempt'],
-  assessment: ['checkpoint']
+  assessment: ['checkpoint'],
+  /* A support probe emits its own event type so no attempt semantics
+   * bleed across: recognition/recall/production/retry are all
+   * milestone-bearing types the projection promotes; support_attempt is
+   * deliberately not one of them. */
+  support: ['support_attempt']
 };
 
 /* The deterministic UI mapping from (purpose, response kind) to the
@@ -81,9 +93,10 @@ export function emittedEventType(purpose, responseKind) {
       : purpose === 'assessment' ? 'checkpoint'
         : purpose === 'remediation' ? 'retry'
           : purpose === 'interaction' ? 'interaction_turn'
-            : responseKind === 'choice' ? 'recognition_attempt'
-              : purpose === 'production' ? 'production_attempt'
-                : 'recall_attempt';
+            : purpose === 'support' ? 'support_attempt'
+              : responseKind === 'choice' ? 'recognition_attempt'
+                : purpose === 'production' ? 'production_attempt'
+                  : 'recall_attempt';
 }
 
 export const TRANSFER_DIMENSIONS = [
@@ -317,6 +330,19 @@ export function validateTask(task) {
 
   if (task?.purpose === 'fluency') {
     p.push('purpose fluency is reserved — no calibrated fluency contract exists in v0');
+  }
+
+  /* Support probes are remediation substrate, not held-out evidence:
+   * they must live in a practiced family (novelty is meaningless for
+   * them) and they must actually elicit a response — a non-eliciting
+   * support task can never carry a support_attempt. */
+  if (task?.purpose === 'support') {
+    if (task?.freshness?.required || (fc != null && fc !== 'practiced')) {
+      p.push('support tasks require freshness { required: false, familyClass: practiced } — a probe is never transfer or assessment evidence');
+    }
+    if (!task?.response?.type || task.response.type === 'none') {
+      p.push('support tasks must elicit a response — a probe with response.type none can never run');
+    }
   }
 
   if (task?.purpose === 'transfer') {

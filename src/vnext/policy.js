@@ -35,6 +35,13 @@ export const LEARNING_POLICY_V1 = deepFreeze({
     minSpacingGapMs: 30 * 60 * 1000
   },
   remediation: { minConsecutiveFailures: 1 },
+  /* Support demands (issue #61): how many times the SAME (target
+   * capability, missing function) pair may mint a support cycle before
+   * the planner stops re-offering substrate work and the target falls
+   * back to normal remediation. 1 = one probe cycle per gap — if the
+   * substrate probe did not fix the miss, repeating it identically is
+   * not remediation, it is a loop. */
+  supportDemand: { maxCyclesPerPair: 1 },
   claim: {
     requireDelayedSuccess: true,
     requireTransferSuccess: true,
@@ -60,6 +67,10 @@ export function validatePolicy(p) {
     problems.push('independent.minSpacingGapMs must be a number ≥ 0');
   }
   if (!isPosInt(p.remediation?.minConsecutiveFailures)) problems.push('remediation.minConsecutiveFailures must be an integer ≥ 1');
+  // Optional demand bound — absent means the v0 default (1 cycle/pair).
+  if (p.supportDemand != null && !isPosInt(p.supportDemand?.maxCyclesPerPair)) {
+    problems.push('supportDemand.maxCyclesPerPair must be an integer ≥ 1 when present');
+  }
   for (const k of ['requireDelayedSuccess', 'requireTransferSuccess', 'requireAssessmentSuccess', 'blockOnUnresolvedContradiction']) {
     if (!isBool(p.claim?.[k])) problems.push(`claim.${k} must be a boolean`);
   }
@@ -89,6 +100,7 @@ export function makePolicy(version, overrides = {}) {
     retention: { ...LEARNING_POLICY_V1.retention, ...overrides.retention },
     independent: { ...LEARNING_POLICY_V1.independent, ...overrides.independent },
     remediation: { ...LEARNING_POLICY_V1.remediation, ...overrides.remediation },
+    supportDemand: { ...LEARNING_POLICY_V1.supportDemand, ...overrides.supportDemand },
     claim: { ...LEARNING_POLICY_V1.claim, ...overrides.claim }
   };
   const problems = validatePolicy(p);

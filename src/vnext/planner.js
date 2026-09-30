@@ -19,6 +19,124 @@
 import { RETENTION_DELAY_MS, projectLearnerState } from './projection.js';
 import { priorById } from './risk-priors.js';
 import { resolvePolicy } from './policy.js';
+import { verifyEventTask } from './contracts.js';
+import { contractAttributesFunctions } from './evaluators.js';
+
+/* Derive outstanding support demands from the event log (issue #61).
+ *
+ * A demand exists only when a VERIFIED attempt on a claim-bearing
+ * capability failed under an evaluator contract that can attribute the
+ * miss, and the stamped missingFunctions ⊆ the task's declared
+ * requiredFunctions resolve to a declared support provider.
+ *
+ * Resolution state machine per (targetCapability, function) pair:
+ *   issued    — the failure attributed the function
+ *   consumed  — a later VERIFIED support_attempt on the provider cap
+ *               (success or fail — one probe cycle per demand)
+ *   cancelled — a later verified attempt success on the TARGET
+ *               capability (the miss resolved itself; rehearsing the
+ *               substrate would be stale demand)
+ *   re-issue  — bounded by policy supportDemand.maxCyclesPerPair
+ *
+ * Returns pending demands in canonical issue order. Everything is
+ * re-derived from events every call — replay is deterministic and a
+ * foreign learner's log cannot satisfy a demand (learnerId filter). */
+function deriveSupportDemands(learnerId, events, { capabilities, tasks, roles, policy }) {
+  if (!roles?.supports?.size) return [];
+  const pol = resolvePolicy(policy);
+  const maxCycles = pol.supportDemand?.maxCyclesPerPair ?? 1;
+  const capById = new Map(capabilities.map((c) => [c.id, c]));
+  const taskByRev = new Map(tasks.map((t) => [`${t.id}@${t.revision ?? 1}`, t]));
+
+  const scoped = new Set(capabilities.map((c) => c.id));
+  const isSupport = (id) => roles.supports.has(id);
+
+  /* Deterministic provider pick for one missing function: only declared
+   * support caps that actually provide `fn` qualify; among them prefer
+   * the cap covering the most of THIS failure's missing functions, ties
+   * break on capability id. Explainable: "the substrate that fixes the
+   * most of what the learner demonstrably missed". */
+  const pickProvider = (fn, allMissing) => {
+    let best = null;
+    let bestCover = 0;
+    for (const id of [...roles.supports].sort()) {
+      const c = capById.get(id);
+      if (!c || !scoped.has(c.id)) continue;
+      if (!(c.providesFunctions ?? []).includes(fn)) continue;
+      const cover = allMissing.filter((f) => c.providesFunctions.includes(f)).length;
+      if (!best || cover > bestCover) {
+        best = c;
+        bestCover = cover;
+      }
+    }
+    return best;
+  };
+
+  const mine = events
+    .filter((e) => e.learnerId === learnerId)
+    .sort((a, b) => a.occurredAt - b.occurredAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+
+  const pending = new Map(); // `${targetCap}|${fn}` → demand record
+  const cycles = new Map();  // pair key → consumed demand count
+  for (const e of mine) {
+    const t = taskByRev.get(`${e.taskId}@${e.taskRevision}`);
+    const cap = t ? capById.get(t.capabilityId) : null;
+    if (!t || !cap || !scoped.has(cap.id) || !verifyEventTask(e, t, cap)) continue;
+    /* Same evidence bar as the projection: an UNOBSERVED outcome
+     * (self-report) can neither issue, consume nor cancel a demand —
+     * routing substrate work on unobserved claims is how support
+     * laundering starts. */
+    if (e.attempt?.observed !== true) continue;
+
+    if (e.eventType === 'support_attempt') {
+      // A verified support probe consumed every pending demand routed
+      // to its capability — pass or fail, the cycle is spent.
+      for (const [key, d] of pending) {
+        if (d.supportCapabilityId === e.capabilityId) {
+          pending.delete(key);
+          cycles.set(key, (cycles.get(key) ?? 0) + 1);
+        }
+      }
+      continue;
+    }
+
+    if (e.attempt?.outcome == null) continue;
+
+    if (e.attempt.outcome === 'success') {
+      // The target recovered on its own — a stale demand must not fire.
+      for (const [key, d] of pending) {
+        if (d.targetCapabilityId === e.capabilityId) pending.delete(key);
+      }
+      continue;
+    }
+
+    if (e.attempt.outcome !== 'fail' && e.attempt.outcome !== 'partial') continue;
+    if (isSupport(e.capabilityId)) continue; // a failed probe demands nothing
+    if (!contractAttributesFunctions(t.evaluation?.contractId)) continue;
+
+    const declared = t.response?.requiredFunctions ?? [];
+    const missing = (e.evaluation?.missingFunctions ?? []).filter((f) => declared.includes(f));
+    if (!missing.length) continue;
+
+    for (const fn of missing) {
+      const key = `${e.capabilityId}|${fn}`;
+      if ((cycles.get(key) ?? 0) >= maxCycles) continue;
+      if (pending.has(key)) continue;
+      const provider = pickProvider(fn, missing);
+      if (!provider) continue;
+      pending.set(key, {
+        targetCapabilityId: e.capabilityId,
+        targetTaskId: e.taskId,
+        targetTaskRevision: e.taskRevision,
+        missingFunction: fn,
+        supportCapabilityId: provider.id,
+        sourceEventId: e.id,
+        issuedAt: e.occurredAt
+      });
+    }
+  }
+  return [...pending.values()];
+}
 
 export function planNext(learnerId, events, { capabilities, tasks = [], riskPriors = [], now, retentionDelayMs, policy, skipIntentFor, roles }) {
   const pol = resolvePolicy(policy);
@@ -29,13 +147,18 @@ export function planNext(learnerId, events, { capabilities, tasks = [], riskPrio
   /* Mission roles decide how a never-seen capability is introduced
    * (R6): targets owe a baseline probe; carriers — and declared
    * prerequisites — rehearse context opportunistically with no
-   * baseline at all; supports are demand-driven only, so the planner
-   * leaves them alone until evidence exists (rules 1–6a can still
-   * reach them once an attempt produced some). Callers without a
-   * mission (null) keep the original probe-or-expose behavior. */
+   * baseline at all; supports are demand-driven ONLY — every rule
+   * below skips them, so they surface exclusively through
+   * SUPPORT_DEMAND. Callers without a mission (null roles) keep the
+   * original probe-or-expose behavior. */
   const roleOf = roles
     ? (id) => (roles.targets?.has(id) ? 'target' : roles.supports?.has(id) ? 'support' : 'carrier')
     : () => null;
+  /* Support-role caps are demand-driven ONLY: none of the normal rules
+   * (resume/due/remediation/transfer/independent/expose/introduce) may
+   * reach them — a support cap free-running is exactly what the demand
+   * mechanism exists to prevent. */
+  const isSupportCap = (id) => roleOf(id) === 'support';
 
   /* `skipIntentFor` holds 'capabilityId|intentKind' keys: it silences
    * ONE kind of intent for a capability (the selector has no servable
@@ -48,7 +171,7 @@ export function planNext(learnerId, events, { capabilities, tasks = [], riskPrio
   /* 1. Resume in-flight work: the encounter started but no attempt
    *    outcome exists yet. */
   for (const c of capabilities) {
-    if (skipped(c.id, 'resume')) continue;
+    if (skipped(c.id, 'resume') || isSupportCap(c.id)) continue;
     const s = byCapability.get(c.id);
     if (s.state === 'EXPOSED' && s.lastAttemptOutcome == null) {
       return { kind: 'resume', capabilityId: c.id, reason: 'encounter started, no attempt recorded yet' };
@@ -62,7 +185,7 @@ export function planNext(learnerId, events, { capabilities, tasks = [], riskPrio
    *    delayed_retrieval forever after each failure. */
   let due = null;
   for (const c of capabilities) {
-    if (skipped(c.id, 'delayed_retrieval')) continue;
+    if (skipped(c.id, 'delayed_retrieval') || isSupportCap(c.id)) continue;
     const s = byCapability.get(c.id);
     if (!s.milestones.independent || s.lastIndependentSuccessAt == null) continue;
     if (s.lastAttemptOutcome === 'fail' || s.lastAttemptOutcome === 'partial') continue;
@@ -73,12 +196,28 @@ export function planNext(learnerId, events, { capabilities, tasks = [], riskPrio
   }
   if (due) return due;
 
-  /* 3. Remediation: enough consecutive failures on a capability that
+  /* 3. SUPPORT_DEMAND (issue #61): a verified, attributing failure on a
+   *    target/carrier whose missing functions resolve to a declared
+   *    support cap routes that cap's probe BEFORE the target's own
+   *    remediation/continuation. Demands are bounded (one cycle per
+   *    target×function pair), self-cancelling on target recovery, and
+   *    consumed by a verified support_attempt regardless of outcome. */
+  for (const d of deriveSupportDemands(learnerId, events, { capabilities, tasks, roles, policy })) {
+    if (skipped(d.supportCapabilityId, 'support_demand')) continue;
+    return {
+      kind: 'support_demand',
+      capabilityId: d.supportCapabilityId,
+      demand: d,
+      reason: `${d.targetCapabilityId} missed '${d.missingFunction}' on ${d.targetTaskId} — probing substrate ${d.supportCapabilityId}`
+    };
+  }
+
+  /* 4. Remediation: enough consecutive failures on a capability that
    *    was previously taught (supported or independent success exists).
    *    The threshold is policy — a baseline probe failure still does
    *    NOT land here; untaught work routes to introduction below. */
   for (const c of capabilities) {
-    if (skipped(c.id, 'retry')) continue;
+    if (skipped(c.id, 'retry') || isSupportCap(c.id)) continue;
     const s = byCapability.get(c.id);
     if ((s.milestones.supported || s.milestones.independent) &&
         s.consecutiveFailures >= pol.remediation.minConsecutiveFailures) {
@@ -86,30 +225,30 @@ export function planNext(learnerId, events, { capabilities, tasks = [], riskPrio
     }
   }
 
-  /* 4. Scheduled transfer: retained but never proven in a changed
+  /* 5. Scheduled transfer: retained but never proven in a changed
    *    context — send it somewhere new. */
   for (const c of capabilities) {
-    if (skipped(c.id, 'transfer')) continue;
+    if (skipped(c.id, 'transfer') || isSupportCap(c.id)) continue;
     const s = byCapability.get(c.id);
     if (s.milestones.retained && !s.milestones.transferred) {
       return { kind: 'transfer', capabilityId: c.id, reason: 'retained ability has not survived a changed context yet' };
     }
   }
 
-  /* 5. Continue current mission: supported work needs an unaided run. */
+  /* 6. Continue current mission: supported work needs an unaided run. */
   for (const c of capabilities) {
-    if (skipped(c.id, 'independent_attempt')) continue;
+    if (skipped(c.id, 'independent_attempt') || isSupportCap(c.id)) continue;
     const s = byCapability.get(c.id);
     if (s.milestones.supported && !s.milestones.independent) {
       return { kind: 'independent_attempt', capabilityId: c.id, reason: 'succeeded with support — now try without it' };
     }
   }
 
-  /* 6a. Continue the current mission: a started-but-never-taught
+  /* 7a. Continue the current mission: a started-but-never-taught
    *     capability whose prerequisites are NOW met gets its first real
    *     input — a mission in progress outranks opening a new one. */
   for (const c of capabilities) {
-    if (skipped(c.id, 'expose')) continue;
+    if (skipped(c.id, 'expose') || isSupportCap(c.id)) continue;
     const s = byCapability.get(c.id);
     if (s.state === 'NOT_SEEN') continue;
     if (s.milestones.supported || s.milestones.independent) continue;
@@ -119,18 +258,17 @@ export function planNext(learnerId, events, { capabilities, tasks = [], riskPrio
     }
   }
 
-  /* 6b. Introduce the first eligible never-seen capability, by role:
+  /* 7b. Introduce the first eligible never-seen capability, by role:
    *     a target always asks for a baseline probe first (falling back
    *     to input only if the mission declared none — an authoring gap
    *     the curriculum gate also flags); a carrier goes straight to
    *     input; a support is skipped — demand-driven intents only. */
   for (const c of capabilities) {
     const s = byCapability.get(c.id);
-    if (s.state !== 'NOT_SEEN') continue;
+    if (s.state !== 'NOT_SEEN' || isSupportCap(c.id)) continue;
     const ready = (c.prerequisites || []).every((p) => byCapability.get(p)?.milestones.independent);
     if (!ready) continue;
     const role = roleOf(c.id);
-    if (role === 'support') continue;
     const probes = (c.vietnameseRiskProbes || [])
       .map((id) => priorMap.get(id) || priorById(id))
       .filter((p) => p && p.mayTriggerProbe && p.appliesTo.includes(c.modality))

@@ -41,6 +41,13 @@ export const PURPOSE_FRAME = {
   assessment: {
     label: 'Kiểm tra cuối',
     hint: 'Làm hoàn toàn một mình — kết quả được giữ lại làm mốc đánh giá.'
+  },
+  /* Demand-routed substrate repair (#61): honest copy — this is a
+   * practice step for a narrower skill the target task depends on,
+   * never framed as progress or mastery of the mission goal. */
+  support: {
+    label: 'Luyện phần nền',
+    hint: 'Phần trước cần một kỹ năng nhỏ hơn — luyện nhanh phần này rồi quay lại bài chính.'
   }
 };
 

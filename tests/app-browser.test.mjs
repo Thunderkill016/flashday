@@ -1343,6 +1343,69 @@ try {
     check('vnext page renders intro + first diagnostic on mobile and desktop');
   }
 
+  // ── 23. /vnext/ demand-driven support routing (issue #61): a wrong
+  //        answer on an attributing comprehension diagnostic interposes
+  //        the substrate probe exactly once, then the mission resumes ──
+  {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 844 } });
+    const page = await context.newPage();
+    const errors = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    await page.goto(`${origin}vnext/?learner=browser.support&mission=mission.meet_at_a_time`);
+    /* This mission has no state_own_name task → needsName is false →
+     * the session starts straight on the first task (no intro card). */
+    await page.locator('.vnext-card[data-screen="task"]').waitFor();
+
+    const card = page.locator('.vnext-card');
+    assert.equal(await card.getAttribute('data-task'), 'task.time.diagnostic.hear@1',
+      'the attributing clock-time diagnostic is the declared baseline');
+    assert.equal(await card.getAttribute('data-purpose'), 'diagnostic');
+
+    // Fail it: the line says "three o'clock", pick the 'four' option —
+    // a miss the evaluator attributes to the declared functions.
+    await page.locator('[data-role="option"][data-option="four"]').click();
+    await page.locator('.vnext-card[data-phase="feedback"]').waitFor();
+    await page.locator('[data-role="next"]').click();
+
+    // The second declared diagnostic still owns the baseline block —
+    // answer it correctly so the mission proceeds.
+    await page.locator('.vnext-card[data-screen="task"]').waitFor();
+    assert.equal(await card.getAttribute('data-task'), 'task.time.diagnostic.say@1');
+    await page.locator('[data-role="answer"]').fill("it's three o'clock");
+    await page.locator('[data-role="commit"]').click();
+    await page.locator('.vnext-card[data-phase="feedback"]').waitFor();
+    await page.locator('[data-role="next"]').click();
+
+    // SUPPORT_DEMAND: the number-catch probe interposes — purpose
+    // 'support', never labeled as progress.
+    await page.locator('.vnext-card[data-purpose="support"]').waitFor();
+    assert.equal(await card.getAttribute('data-task'), 'task.time.support.number_probe@1',
+      `expected the number substrate probe, got ${await card.getAttribute('data-task')}`);
+    assert.equal(await page.locator('[data-role^="support-"]').count(), 0,
+      'a support probe offers no pre-commit support of its own');
+    await page.locator('[data-role="option"][data-option="ten"]').click();
+    await page.locator('.vnext-card[data-phase="feedback"]').waitFor();
+    await page.locator('[data-role="next"]').click();
+
+    // Demand consumed: the mission returns to the target capability and
+    // never re-serves the probe without a fresh attributing miss.
+    await page.locator('.vnext-card').waitFor();
+    const nextPurpose = await card.getAttribute('data-purpose');
+    const nextTask = await card.getAttribute('data-task');
+    assert.notEqual(nextPurpose, 'support', `probe repeated after its demand was spent (${nextTask})`);
+    const log = await page.evaluate(() => window.__FD_VNEXT__.session.log());
+    const probeEvents = log.filter((e) => e.taskId === 'task.time.support.number_probe' && e.attempt?.outcome != null);
+    assert.equal(probeEvents.length, 1, 'probe minted more than one attempt');
+    assert.equal(probeEvents[0].eventType, 'support_attempt',
+      'probe commit must be a support_attempt, not a claim-bearing type');
+    const missEvt = log.find((e) => e.taskId === 'task.time.diagnostic.hear' && e.attempt?.outcome === 'fail');
+    assert.deepEqual(missEvt?.evaluation?.missingFunctions, ['understand_clock_time', 'identify_spoken_number'],
+      'the committed miss did not carry evaluator attribution');
+    assert.deepEqual(errors, [], `pageerrors: ${errors.join(' | ')}`);
+    await context.close();
+    check('vnext: attributing miss → support probe once → mission resumes (issue #61)');
+  }
+
   console.log(`FlashDay app browser tests: ${passed} groups passed`);
 } finally {
   await browser?.close();

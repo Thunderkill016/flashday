@@ -792,7 +792,16 @@ const TF = {
     relationship: 'repeat_contact',
     responseTopology: 'time_statement',
     lexicalDomain: 'time'
-  }
+  },
+  /* #61 support-probe family: hearing a bare number inside a short
+   * utterance — the substrate the clock-time comprehension tasks
+   * depend on. Practiced class: probes are never held-out evidence. */
+  numberSpot: meetupSig({
+    communicativeFunction: 'identify_spoken_number',
+    cueTopology: 'number_in_utterance_audio',
+    responseTopology: 'mc_number',
+    lexicalDomain: 'time'
+  })
 };
 
 export const MISSION_MEET_AT_TIME = makeMission({
@@ -813,10 +822,12 @@ export const MISSION_MEET_AT_TIME = makeMission({
     'interaction.ask_name',
     'reception.listen.greeting_basic'
   ],
-  /* identify_spoken_number stays OFF the surface: demand-driven support
-   * needs a router, which does not exist yet — declaring it would be a
-   * dead surface (R7 blocker 2). */
-  supportCapabilities: [],
+  /* identify_spoken_number is demand-routed substrate (#61): it is NOT
+   * introduced, baselined or claimed here — a support_demand intent may
+   * serve its probe only when an attributing target failure names the
+   * function. Gate-verified live: the clock-time choice tasks genuinely
+   * require catching a number word. */
+  supportCapabilities: ['reception.listen.identify_spoken_number'],
   pedagogy: { recommendedAfterMissions: ['mission.order_drink'] },
   language: {
     assumedKnown: {
@@ -847,7 +858,8 @@ export const MISSION_MEET_AT_TIME = makeMission({
     'task.time.transfer.clinic',
     'task.time.transfer.event',
     'task.time.assessment.hear',
-    'task.time.assessment.checkpoint'
+    'task.time.assessment.checkpoint',
+    'task.time.support.number_probe'
   ],
   transferPlan: { required: true, dimensions: ['wording', 'partner', 'setting'] },
   assessmentPlan: { required: true, freshnessRequired: true }
@@ -865,7 +877,10 @@ export const TASKS_MEET_AT_TIME = [
     stimulus: { type: 'audio_line', languageComponents: ['The class is at three o\u2019clock.'] },
     response: {
       type: 'choice',
-      requiredFunctions: ['understand_clock_time'],
+      /* Missing the correct option means a required comprehension
+       * function did not happen — catching the number word is the
+       * substrate the support probe rehearses (#61). */
+      requiredFunctions: ['understand_clock_time', 'identify_spoken_number'],
       options: [
         { id: 'three', text: 'Lúc 3 giờ.', correct: true },
         { id: 'four', text: 'Lúc 4 giờ.' },
@@ -944,7 +959,7 @@ export const TASKS_MEET_AT_TIME = [
     stimulus: { type: 'audio_line', languageComponents: ['Meet me at half past four.'] },
     response: {
       type: 'choice',
-      requiredFunctions: ['understand_clock_time'],
+      requiredFunctions: ['understand_clock_time', 'identify_spoken_number'],
       options: [
         { id: 'half_four', text: 'Lúc 4 giờ rưỡi.', correct: true },
         { id: 'four', text: 'Lúc 4 giờ.' },
@@ -1132,6 +1147,30 @@ export const TASKS_MEET_AT_TIME = [
       answerRevealDuringAttempt: false
     },
     language: { requiredChunks: ["It's … o'clock", "What's your name?"], requiredVocabulary: ['time', 'name'], requiredConstructions: ['wh_question_name'] }
+  }),
+  /* #61 demand-routed support probe for identify_spoken_number: a
+   * bare number inside a short utterance → pick what you heard. It
+   * emits support_attempt events — remediation context that can never
+   * mint milestones on either the substrate or the target cap. */
+  task({
+    id: 'task.time.support.number_probe',
+    missionId: 'mission.meet_at_a_time',
+    capabilityId: 'reception.listen.identify_spoken_number',
+    modality: 'listening',
+    purpose: 'support',
+    promptFamily: pf('reception.listen.identify_spoken_number', TF.numberSpot),
+    contextSignature: TF.numberSpot,
+    stimulus: { type: 'audio_line', languageComponents: ['The lesson is at ten.'] },
+    response: {
+      type: 'choice',
+      requiredFunctions: ['identify_spoken_number'],
+      options: [
+        { id: 'ten', text: 'Lúc 10 giờ.', correct: true },
+        { id: 'two', text: 'Lúc 2 giờ.' },
+        { id: 'six', text: 'Lúc 6 giờ.' }
+      ]
+    },
+    language: { requiredChunks: [], requiredVocabulary: ['ten', 'two', 'six'], requiredConstructions: [] }
   })
 ];
 

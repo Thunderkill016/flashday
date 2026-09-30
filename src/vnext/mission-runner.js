@@ -55,7 +55,11 @@ const INTENT_PURPOSES = {
   independent_attempt: ELICITABLE,
   delayed_retrieval: ['delayed_retrieval'],
   transfer: ['transfer'],
-  checkpoint: ['assessment']
+  checkpoint: ['assessment'],
+  /* Demand-routed substrate repair (issue #61): a support_demand intent
+   * can only be served by a support-purpose task — never substituted by
+   * a semantically different task on the support cap. */
+  support_demand: ['support']
 };
 
 const keyOf = (t) => `${t.id}@${t.revision ?? 1}`;
@@ -178,7 +182,11 @@ export function nextMissionTask({ learnerId, mission, tasks, capabilities, event
    * transfer sample — and once it succeeds the intent never fires
    * again. Diagnostics stay single-sample: a consumed probe already
    * answered what it was meant to ask. */
-  const REPEATABLE = new Set(['retrieval', 'production', 'interaction', 'remediation', 'delayed_retrieval', 'transfer']);
+  /* 'support' is repeatable: a support probe may be re-served for a
+   * distinct later demand (a different target or function). Demand
+   * bounding lives in the planner's per-pair cycle cap — the selector
+   * just stays honest about consumption. */
+  const REPEATABLE = new Set(['retrieval', 'production', 'interaction', 'remediation', 'delayed_retrieval', 'transfer', 'support']);
   const pick = (capId, purposes, { unattemptedOnly = false } = {}) => {
     const candidates = missionTasks.filter((t) => t.capabilityId === capId && purposes.includes(t.purpose));
     const fresh = candidates.filter((t) => !verifiedAttempt.has(keyOf(t)) && !verifiedEvent.has(keyOf(t)));

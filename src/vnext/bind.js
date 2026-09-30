@@ -62,11 +62,26 @@ const bindEvaluation = (task, raw) => {
   if (raw?.evaluation?.contractId != null && contractId != null && raw.evaluation.contractId !== contractId) {
     throw new Error(`evaluation contract mismatch: task declares '${contractId}', caller reported '${raw.evaluation.contractId}'`);
   }
+  /* missingFunctions is evaluator output (issue #61): the caller may
+   * report it, but every entry must be a function the task itself
+   * declares — a function outside response.requiredFunctions is forged
+   * provenance, and a support demand must never route on it. Whether
+   * the task's contract may attribute a miss at all is the planner's
+   * separate check (contractAttributesFunctions). */
+  const required = task.response?.requiredFunctions ?? [];
+  const missing = raw?.evaluation?.missingFunctions ?? [];
+  if (!Array.isArray(missing) || missing.some((f) => typeof f !== 'string' || !f)) {
+    throw new Error('evaluation.missingFunctions must be a list of function names');
+  }
+  if (missing.some((f) => !required.includes(f))) {
+    throw new Error(`evaluation.missingFunctions must be a subset of the task's requiredFunctions — got '${missing.filter((f) => !required.includes(f)).join(', ')}'`);
+  }
   return {
     authority: declared,
     contractId,
     evaluator: raw?.evaluation?.evaluator ?? null,
-    version: raw?.evaluation?.version ?? null
+    version: raw?.evaluation?.version ?? null,
+    missingFunctions: missing
   };
 };
 
