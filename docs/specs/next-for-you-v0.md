@@ -366,14 +366,17 @@ also receives a conflicting `options.selection` fails closed
 (`selection_config_conflict`) rather than silently mixing two configs —
 the same guard applies when both sources agree (no violation).
 
-### 13.2 Policy A is a production-reference differential
-Policy A mirrors `nextMissionTask` (mission-runner.js) order exactly:
-phase-0 baseline diagnostics first, then resume → due delayed-retrieval
-→ support demand → retry/remediation → transfer → independent attempt →
-expose. The benchmark's Z3 harness asserts A's chosen taskId equals the
-production selector's on identical frozen states (phase-0, resume, due,
-demand-over-remediation, assessment close-out). Divergence is a defect,
-not a difference.
+### 13.2 Policy A follows production ORDER inside the safety envelope
+`policyRef` is the authoritative production reference (literal
+`nextMissionTask` wrapper — see §14.3). Policy A is the
+**safety-normalized cascade baseline**: production order — phase-0
+baseline diagnostics first, then resume → due delayed-retrieval →
+support demand → retry/remediation → transfer → independent attempt →
+expose — applied over the shared candidate surface and hard-filter
+envelope. Documented divergences (Z9): A filters a phase-0 probe when
+the episode diagnostic budget is exhausted (production has no budget),
+and A mints no baseline probe for a cap that is not NOT_SEEN
+(production re-probes declared diagnostics on pre-known capabilities).
 
 ### 13.3 Resume and introduction serve pending-phase only
 `resume_in_flight` and the introduction path both serve the next

@@ -1055,6 +1055,41 @@ function correctionSyntheticState({ remediationTasks = 1 } = {}) {
   }
 }
 
+/* --- Z10. Validator consumption is verification-gated (r5 HIGH) --- */
+{
+  const { validateDecision } = await import('../experiments/next-for-you/validator.js');
+  const base = tmt('assessment.checkpoint');
+  const mkEnv = (evts, st) => ({ events: evts, tasks: st.tasks, capabilities: st.capabilities, roles: st.roles, mission: st.mission, learnerId: 'SIM', now: T0, policy: LEARNING_POLICY_V1, selection: {}, decisionContext: st.decisionContext });
+  const transferredEv = [...transferredHistory(T0), attemptEvent(tmt('remediation.ask_name'), askCap(), { at: T0 - 30 * MIN, outcome: 'success' })];
+  const forgeAssess = (st) => {
+    const good = POLICIES.B(st, {});
+    return { ...good, chosen: { ...good.chosen, kind: KINDS.ASSESSMENT, capabilityId: base.capabilityId, taskId: base.id, taskRevision: base.revision } };
+  };
+
+  /* 1. malformed binding on the same task → does NOT consume → the
+   *    assessment choice is honestly fresh (no resold violation) */
+  {
+    const bad = attemptEvent(base, askCap(), { at: T0 - HOUR, outcome: 'fail' });
+    bad.binding = { ...bad.binding, purpose: 'input' }; /* malformed: purpose lies */
+    const st = scopedState([...transferredEv, bad], [askCap()]);
+    const vs = validateDecision(forgeAssess(st), mkEnv(st.events, st));
+    ok(!vs.some((vv) => vv.includes('assessment_resold')), `Z10.1: malformed same-task event counted as consumption (${vs.join(',')})`);
+  }
+  /* 2. a VALID verified checkpoint on the same task → consumes → resold flagged */
+  {
+    const st = scopedState([...transferredEv, attemptEvent(base, askCap(), { at: T0 - HOUR, outcome: 'fail' })], [askCap()]);
+    const vs = validateDecision(forgeAssess(st), mkEnv(st.events, st));
+    ok(vs.some((vv) => vv.includes('assessment_resold')), 'Z10.2: valid verified assessment event did not consume the task');
+  }
+  /* 3. stale revision on the same task id → does NOT consume */
+  {
+    const stale = { ...attemptEvent(base, askCap(), { at: T0 - HOUR, outcome: 'fail' }), taskRevision: 99 };
+    const st = scopedState([...transferredEv, stale], [askCap()]);
+    const vs = validateDecision(forgeAssess(st), mkEnv(st.events, st));
+    ok(!vs.some((vv) => vv.includes('assessment_resold')), `Z10.3: stale-revision event counted as consumption (${vs.join(',')})`);
+  }
+}
+
 /* --- Z8. Log append fails closed without canonical provenance --- */
 {
   const { createDecisionLog, stateDigest } = await import('../experiments/next-for-you/decision-log.js');

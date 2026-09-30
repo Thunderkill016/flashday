@@ -224,16 +224,19 @@ export function validateDecision(decision, { events, tasks, capabilities, roles,
         ? canonicalFamilyId(o.capabilityId, o.contextSignature)
         : (o?.promptFamily ?? o?.family ?? o?.id);
       const chosenFamily = task ? familyIdOf(task) : null;
+      /* Consumption is verification-gated for BOTH the same-task and
+       * the family paths (HIGH r5): resolve exact task@rev →
+       * verifyEventTask → only then may it consume. A malformed binding/
+       * evaluator/context event on the very task being chosen cannot
+       * fake consumption — the same bar the generator applies. */
       const consumed = events.some((e) => {
         if (e.learnerId !== learnerId) return false;
         if (!(e.attempt?.outcome != null || e.eventType === 'checkpoint')) return false;
-        if (e.taskId === ch.taskId && (e.taskRevision ?? 1) === (ch.taskRevision ?? 1)) return true;
-        /* family check: resolve the event's task and require it to
-         * verify — unverified/stale evidence cannot consume a family */
         const et = exactByKey.get(`${e.taskId}@${e.taskRevision ?? 1}`);
         if (!et || et.purpose !== 'assessment') return false;
         const cap2 = capById.get(et.capabilityId);
         if (!cap2 || !verifyEventTask(e, et, cap2)) return false;
+        if (et.id === ch.taskId && (et.revision ?? 1) === (ch.taskRevision ?? 1)) return true;
         return chosenFamily != null && familyIdOf(et) === chosenFamily;
       });
       if (consumed && !policyAllowsReprobe) v.push('assessment_resold_as_fresh');
