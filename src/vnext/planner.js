@@ -45,11 +45,14 @@ import { contractAttributesFunctions } from './evaluators.js';
  *               policy supportDemand.maxCyclesPerPair; the budget is
  *               lifetime-safe because demonstrated recovery resets it.
  *
- * Returns pending demands in canonical issue order. Everything is
- * re-derived from events every call — replay is deterministic and a
- * foreign learner's log cannot satisfy a demand (learnerId filter). */
-function deriveSupportDemands(learnerId, events, { capabilities, tasks, roles, policy }) {
-  if (!roles?.supports?.size) return [];
+ * Returns the full demand lifecycle — `pending` (still outstanding) and
+ * `resolved` (consumed or cancelled) — in canonical issue order.
+ * Everything is re-derived from events every call — replay is
+ * deterministic and a foreign learner's log cannot satisfy a demand
+ * (learnerId filter). The learner model reads the same derivation:
+ * it never invents a second demand history. */
+export function deriveSupportLifecycle(learnerId, events, { capabilities, tasks, roles, policy }) {
+  if (!roles?.supports?.size) return { pending: [], resolved: [] };
   const pol = resolvePolicy(policy);
   const maxCycles = pol.supportDemand?.maxCyclesPerPair ?? 1;
   const capById = new Map(capabilities.map((c) => [c.id, c]));
@@ -84,6 +87,8 @@ function deriveSupportDemands(learnerId, events, { capabilities, tasks, roles, p
     .sort((a, b) => a.occurredAt - b.occurredAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
   const pending = new Map(); // `${targetCap}|${fn}` → demand record
+  const resolved = [];       // issued demands retired by consume/cancel
+  const issued = new Map();  // pair key → the demand record (for lifecycle history)
   const cycles = new Map();  // pair key → consumed count in the OPEN episode
   const seenIds = new Set(); // resynced duplicates replay idempotently
   for (const e of mine) {
@@ -108,6 +113,7 @@ function deriveSupportDemands(learnerId, events, { capabilities, tasks, roles, p
         if (d.supportCapabilityId === e.capabilityId && covered.has(d.missingFunction)) {
           pending.delete(key);
           cycles.set(key, (cycles.get(key) ?? 0) + 1);
+          resolved.push({ ...d, status: 'consumed', resolvedByEventId: e.id, resolvedAt: e.occurredAt, probeTaskId: t.id });
         }
       }
       continue;
@@ -124,7 +130,9 @@ function deriveSupportDemands(learnerId, events, { capabilities, tasks, roles, p
        * episode, never a lifetime ban). */
       for (const fn of t.response?.requiredFunctions ?? []) {
         const key = `${e.capabilityId}|${fn}`;
-        pending.delete(key);
+        if (pending.delete(key)) {
+          resolved.push({ ...(issued.get(key) ?? { targetCapabilityId: e.capabilityId, missingFunction: fn }), status: 'cancelled', resolvedByEventId: e.id, resolvedAt: e.occurredAt });
+        }
         cycles.delete(key);
       }
       continue;
@@ -144,7 +152,7 @@ function deriveSupportDemands(learnerId, events, { capabilities, tasks, roles, p
       if (pending.has(key)) continue;
       const provider = pickProvider(fn, missing);
       if (!provider) continue;
-      pending.set(key, {
+      const demand = {
         targetCapabilityId: e.capabilityId,
         targetTaskId: e.taskId,
         targetTaskRevision: e.taskRevision,
@@ -152,10 +160,18 @@ function deriveSupportDemands(learnerId, events, { capabilities, tasks, roles, p
         supportCapabilityId: provider.id,
         sourceEventId: e.id,
         issuedAt: e.occurredAt
-      });
+      };
+      pending.set(key, demand);
+      issued.set(key, demand);
     }
   }
-  return [...pending.values()];
+  return { pending: [...pending.values()], resolved };
+}
+
+/* The planner's view of the lifecycle: only still-outstanding demands
+ * can route work. */
+function deriveSupportDemands(learnerId, events, opts) {
+  return deriveSupportLifecycle(learnerId, events, opts).pending;
 }
 
 export function planNext(learnerId, events, { capabilities, tasks = [], riskPriors = [], now, retentionDelayMs, policy, skipIntentFor, roles }) {
