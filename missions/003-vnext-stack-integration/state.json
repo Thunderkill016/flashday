@@ -1,0 +1,62 @@
+{
+  "id": "003-vnext-stack-integration",
+  "status": "DONE",
+  "startedAt": "2026-09-30T07:32:48.278Z",
+  "finishedAt": "2026-09-30T07:35:30.929Z",
+  "startSha": "93997265530634751c2be1dcc83630d1ba656ee8",
+  "startBranch": "integration/vnext-stack-20260930",
+  "missionSha256": "de2346127dde584fa552ce56544da9bcf09303db4aedd62551acc4300cd955dd",
+  "currentSha": "93997265530634751c2be1dcc83630d1ba656ee8",
+  "checkpoints": [
+    {
+      "n": 1,
+      "file": "checkpoints/001-checkpoint.md",
+      "at": "2026-09-30T07:33:22.082Z",
+      "sha": "93997265530634751c2be1dcc83630d1ba656ee8"
+    }
+  ],
+  "commands": [
+    {
+      "at": "2026-09-30T07:32:48.306Z",
+      "type": "start",
+      "detail": "integration/vnext-stack-20260930@939972655306"
+    },
+    {
+      "at": "2026-09-30T07:33:22.088Z",
+      "type": "checkpoint",
+      "detail": "cp 1"
+    },
+    {
+      "at": "2026-09-30T07:35:04.295Z",
+      "type": "verify",
+      "detail": "PASS"
+    },
+    {
+      "at": "2026-09-30T07:35:30.930Z",
+      "type": "finish",
+      "detail": "done"
+    }
+  ],
+  "verifications": [
+    {
+      "at": "2026-09-30T07:35:04.294Z",
+      "sha": "93997265530634751c2be1dcc83630d1ba656ee8",
+      "ok": true,
+      "results": [
+        {
+          "cmd": "npm run verify:full",
+          "exitCode": 0,
+          "ok": true,
+          "ms": 93047,
+          "log": "logs/verify-1790753704288-0.log"
+        }
+      ]
+    }
+  ],
+  "knownFailures": [],
+  "browserVerification": "tests/app-browser.test.mjs covers the vNext mission flow at 390px + 1280px inside verify:full",
+  "result": {
+    "status": "done",
+    "summary": null
+  }
+}

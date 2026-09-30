@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FlashDay — Nhiệm vụ</title>
+    <script src="/canonical.js"></script>
+    <link rel="stylesheet" href="./vnext.css" />
+  </head>
+  <body>
+    <main id="vnext-root" class="vnext-root">
+      <p class="vnext-loading">Đang tải nhiệm vụ…</p>
+    </main>
+    <script type="module">
+      import { bootMissionPage } from '../src/vnext/ui/mission-page.js';
+      bootMissionPage(document.getElementById('vnext-root'));
+    </script>
+  </body>
+</html>

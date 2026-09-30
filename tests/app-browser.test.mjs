@@ -1238,6 +1238,111 @@ try {
     check('old lessons 2–30 still load via the five-pane runner');
   }
 
+  // ── 22. /vnext/ mission page — the honest-UI contract on a real
+  //        browser: baseline first, pre-commit support is evidence,
+  //        reload resumes the same run ──
+  {
+    const VNEXT_TEXT = {
+      'task.meet.diagnostic.own_name': 'i am linh',
+      'task.meet.diagnostic.ask_name': 'uhhh',
+      'task.meet.retrieval.ask_name': "what's your name",
+    };
+    const VNEXT_CHOICE = {
+      'task.meet.retrieval.questions': 'ask_name',
+    };
+
+    for (const width of [1280, 390]) {
+      const context = await browser.newContext({
+        viewport: { width, height: 844 },
+      });
+      const page = await context.newPage();
+      const errors = [];
+      page.on('pageerror', (error) => errors.push(error.message));
+      await page.goto(`${origin}vnext/?learner=browser.${width}`);
+      await page.locator('.vnext-card[data-screen="intro"]').waitFor();
+      if (await page.locator('[data-role="name-input"]').count()) {
+        await page.locator('[data-role="name-input"]').fill('Linh');
+      }
+      await page.locator('[data-role="start"]').click();
+      await page.locator('.vnext-card[data-screen="task"]').waitFor();
+      const card = page.locator('.vnext-card');
+      assert.equal(await card.getAttribute('data-purpose'), 'diagnostic',
+        `baseline diagnostic first at ${width}px`);
+      assert.equal(await page.locator('[data-role^="support-"]').count(), 0,
+        'diagnostic offers no support controls');
+
+      if (width === 1280) {
+        // Drive the declared sequence until the retrieval prompt.
+        const vstep = async () => {
+          const c = page.locator('.vnext-card');
+          const scr = await c.getAttribute('data-screen');
+          if (scr === 'input') { await page.locator('[data-role="viewed"]').click(); return; }
+          if (scr !== 'task') return;
+          if ((await c.getAttribute('data-phase')) === 'feedback') {
+            await page.locator('[data-role="next"]').click();
+            return;
+          }
+          const taskId = (await c.getAttribute('data-task')).split('@')[0];
+          if (await page.locator('[data-role="option"]').count()) {
+            await page.locator(`[data-role="option"][data-option="${VNEXT_CHOICE[taskId]}"]`).click();
+            return;
+          }
+          await page.locator('[data-role="answer"]').fill(VNEXT_TEXT[taskId] ?? '');
+          await page.locator('[data-role="commit"]').click();
+        };
+        let at = null;
+        for (let i = 0; i < 40 && !at; i++) {
+          const c = page.locator('.vnext-card');
+          const task = await c.getAttribute('data-task');
+          const phase = await c.getAttribute('data-phase');
+          if (task === 'task.meet.retrieval.ask_name@1' && phase === 'prompt') at = 'prompt';
+          else { await vstep(); await page.waitForTimeout(40); }
+        }
+        assert.equal(at, 'prompt', 'never reached the retrieval prompt');
+
+        // Pre-commit support is persisted evidence BEFORE the attempt.
+        await page.locator('[data-role="support-hint"]').click();
+        await page.waitForTimeout(40);
+        const mid = await page.evaluate(() => window.__FD_VNEXT__.session.log());
+        assert.ok(mid.find((e) => e.eventType === 'support_use' && e.taskId === 'task.meet.retrieval.ask_name'),
+          'support_use event missing after hint');
+        assert.equal(mid.filter((e) => e.taskId === 'task.meet.retrieval.ask_name' && e.attempt?.outcome != null).length, 0,
+          'no attempt may exist before commit');
+        assert.equal(await page.locator('[data-support-kind="hint"]').count() > 0, true, 'hint content not shown');
+
+        // Commit → the attempt is stamped with the support actually used
+        // and the feedback screen says so — never "unaided".
+        const runId = await page.evaluate(() => window.__FD_VNEXT__.session.runInfo().id);
+        await page.locator('[data-role="answer"]').fill("what's your name");
+        await page.locator('[data-role="commit"]').click();
+        await page.locator('.vnext-card[data-phase="feedback"]').waitFor();
+        const after = await page.evaluate(() => window.__FD_VNEXT__.session.log());
+        const attempt = after.find((e) => e.taskId === 'task.meet.retrieval.ask_name' && e.attempt?.outcome != null);
+        assert.equal(attempt?.support?.hint, true, 'attempt did not stamp the hint snapshot');
+        assert.equal(attempt?.attempt?.outcome, 'success');
+        const fb = await page.locator('[data-role="outcome"]').textContent();
+        assert.ok(fb.length > 0, 'no outcome text in feedback');
+
+        // Reload → same missionRunId, evidence intact, never a new run.
+        // The run resumes straight into the next selector-chosen screen
+        // (learnerName is persisted — no second intro).
+        await page.reload();
+        await page.locator('.vnext-card').waitFor();
+        assert.equal(await page.evaluate(() => window.__FD_VNEXT__.session.runInfo().id), runId,
+          'reload minted a new missionRunId');
+        assert.equal((await page.evaluate(() => window.__FD_VNEXT__.session.log())).length, after.length,
+          'reload lost or duplicated evidence');
+        await context.close();
+        check('vnext: baseline first → support_use before commit → stamped attempt → reload resumes run');
+        continue;
+      }
+
+      assert.deepEqual(errors, [], `pageerrors at ${width}px: ${errors.join(' | ')}`);
+      await context.close();
+    }
+    check('vnext page renders intro + first diagnostic on mobile and desktop');
+  }
+
   console.log(`FlashDay app browser tests: ${passed} groups passed`);
 } finally {
   await browser?.close();

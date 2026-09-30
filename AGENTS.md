@@ -108,6 +108,33 @@ the deterministic next-action policy in `src/core/planner.js` — AI never
 chooses what the learner studies next. Full rationale:
 `docs/adr/learning-core-v3.md`.
 
+## Evidence engine vNext (`src/vnext/`)
+
+The greenfield learning loop — headless, append-only evidence,
+replay-derived capability states (`NOT_SEEN → EXPOSED → SUPPORTED →
+INDEPENDENT → RETAINED → TRANSFERRED`), versioned thresholds
+(`src/vnext/policy.js`), deterministic planner, contract-validated
+tasks (`contracts.js`), and a thin honest UI at `/vnext/`
+(`ui-session.js` + `ui/`).
+
+Curriculum authoring is gated by `src/vnext/curriculum-checks.js`
+(run in `tests/vnext-curriculum.test.mjs`): capability ids are
+namespaced `reception.*`/`production.*`/`interaction.*`; missions
+declare `targetCapabilities` (claim-bearing, ≤3 — each owes a baseline
+diagnostic plus practiced + delayed + fresh_transfer + assessment-
+sample coverage), `carrierCapabilities` (rehearsed opportunistically —
+no baseline probe, no fresh_transfer, no assessment of their own), and
+`supportCapabilities` (demand-driven only — declare one only when a
+mechanism can route learners to it). The active surface is capped at 6
+capabilities per mission; split beyond that. Every task carries a
+`contextSignature` and a canonical
+`pf.<cap>.<cueTopology>.<setting>.<register>.<channel>.<sigHash8>.vN`
+prompt family derived via `canonicalFamilyId` — the hash fingerprints
+the WHOLE signature so non-id fields still distinguish families;
+transfer `changedDimensions` must differ from every practiced family on
+real signature fields. Only verified events consume tasks; delayed
+re-checks reuse the rehearsed family.
+
 ## Pages and auth flow
 
 | Route        | File             | Role                                   |
@@ -183,3 +210,25 @@ Any host that isn't `flashday.web.app`, localhost, or a preview channel
 (`--` in hostname) is redirected to the canonical host before anything
 else runs — otherwise the auth helper iframe becomes cross-origin and
 lesson #1 happens again.
+
+## SWE work factory (missions/)
+
+Long autonomous missions run through the repo-local factory
+(`scripts/swe.mjs`, docs in `missions/README.md`, tests in
+`tests/swe-factory.test.mjs`). Lifecycle: QUEUED → RUNNING → VERIFYING →
+DONE / FAILED / BLOCKED — one non-terminal mission at a time.
+
+```bash
+npm run swe:start                  # refuses on dirty tree / active mission
+npm run swe:checkpoint -- <id> --file cp.md   # stamped, resumable state
+npm run swe:verify -- <id>         # runs the mission's allowlisted checks
+npm run swe:finish -- <id>         # DONE only with green verify on HEAD
+npm run swe:resume                 # context packet for a fresh session
+```
+
+Rules the factory enforces that must never be bypassed: verification
+commands are allowlisted shapes only (`npm run <script>`, `node tests/…`,
+`node scripts/…`); DONE requires the last `swe:verify` to be green on the
+current HEAD; a commit after verify forces re-verification. Mission files
+(`missions/<id>/mission.md`, see `missions/TEMPLATE.md`) are authored by
+agents/humans — V1 never generates new missions.
