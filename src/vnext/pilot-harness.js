@@ -34,17 +34,17 @@
  * are different sessions. Every timestamp is supplied; wall-clock
  * time is never read.
  */
-import { projectLearnerState, RETENTION_DELAY_MS } from './projection.js';
+import { projectLearnerState } from './projection.js';
 import { runMissionTrace } from './mission-runner.js';
 import { answerBearing } from './evidence.js';
 import { verifyEventTask } from './contracts.js';
+import { resolvePolicy } from './policy.js';
 
 const ATTEMPT_TYPES = new Set([
   'recognition_attempt', 'recall_attempt', 'production_attempt',
   'interaction_turn', 'retry', 'delayed_retrieval', 'transfer_attempt', 'checkpoint'
 ]);
 const INDEPENDENT_AUTHORITIES = new Set(['deterministic', 'human']);
-const SESSION_GAP_MS = 30 * 60 * 1000;
 
 const isUnaidedVerifiedSuccess = (e) =>
   ATTEMPT_TYPES.has(e.eventType) &&
@@ -53,14 +53,15 @@ const isUnaidedVerifiedSuccess = (e) =>
   !answerBearing(e.support) &&
   INDEPENDENT_AUTHORITIES.has(e.evaluation?.authority);
 
-/* Session buckets from the log itself: a >30min gap starts a new
- * session. Deterministic and content-free — no synthetic flags. */
-function sessionBuckets(events) {
+/* Session buckets from the log itself: a gap larger than the policy's
+ * spacing threshold starts a new session. Deterministic and
+ * content-free — no synthetic flags. */
+function sessionBuckets(events, minGapMs) {
   const times = [...new Set(events.map((e) => e.occurredAt))].sort((a, b) => a - b);
   const buckets = new Map();
   let bucket = 0;
   for (let i = 0; i < times.length; i++) {
-    if (i > 0 && times[i] - times[i - 1] > SESSION_GAP_MS) bucket++;
+    if (i > 0 && times[i] - times[i - 1] > minGapMs) bucket++;
     buckets.set(times[i], bucket);
   }
   return (t) => buckets.get(t) ?? 0;
@@ -68,7 +69,7 @@ function sessionBuckets(events) {
 
 /* One learner through an ordered list of sessions. Each session is a
  * bounded runMissionTrace call sharing the learner's append-only log. */
-export function runPilotLearner({ learner, mission, tasks, capabilities, riskPriors = [], sessions, stepsPerSession = 40 }) {
+export function runPilotLearner({ learner, mission, tasks, capabilities, riskPriors = [], sessions, stepsPerSession = 40, policy }) {
   const events = [];
   const trace = [];
   const sessionReports = [];
@@ -98,7 +99,8 @@ export function runPilotLearner({ learner, mission, tasks, capabilities, riskPri
             learnerId: learner.id // learner isolation is the harness's job, never the act's
           }));
       },
-      maxSteps: stepsPerSession
+      maxSteps: stepsPerSession,
+      policy
     });
     trace.push(...result.trace.map((t) => ({ ...t, session: session.name })));
     events.push(...result.events.slice(events.length));
@@ -132,8 +134,13 @@ export function runPilotLearner({ learner, mission, tasks, capabilities, riskPri
  * Baseline attribution: if the capability's first attempt is an
  * unaided diagnostic PASS, acquisitionSource = 'PREEXISTING' — the
  * learner arrived able; FlashDay may confirm but must never claim it. */
-export function evaluateClaim(learnerId, events, capabilities, tasks, capId, { retentionDelayMs = RETENTION_DELAY_MS } = {}) {
-  const { byCapability } = projectLearnerState(learnerId, events, capabilities, tasks);
+export function evaluateClaim(learnerId, events, capabilities, tasks, capId, { retentionDelayMs, policy } = {}) {
+  /* Thresholds are policy (issue #52): every claim is stamped with the
+   * policyVersion that produced it — a threshold change is a new
+   * policy, never a silent reinterpretation of an old claim. */
+  const pol = resolvePolicy(policy);
+  const lag = retentionDelayMs ?? pol.retention.minLagMs;
+  const { byCapability } = projectLearnerState(learnerId, events, capabilities, tasks, { policy: pol });
   const slot = byCapability.get(capId);
   /* Claims count only verified evidence — the same registry gate the
    * engine applies. An unverifiable event is neither proof nor
@@ -146,7 +153,7 @@ export function evaluateClaim(learnerId, events, capabilities, tasks, capId, { r
     const c = t ? capById.get(t.capabilityId) : null;
     return !!t && !!c && verifyEventTask(e, t, c);
   }).sort((a, b) => a.occurredAt - b.occurredAt || (a.id < b.id ? -1 : 1));
-  const bucketOf = sessionBuckets(mine);
+  const bucketOf = sessionBuckets(mine, pol.independent.minSpacingGapMs);
 
   const attempts = mine.filter((e) => ATTEMPT_TYPES.has(e.eventType) && e.attempt?.outcome != null);
   const unaided = mine.filter(isUnaidedVerifiedSuccess);
@@ -158,8 +165,8 @@ export function evaluateClaim(learnerId, events, capabilities, tasks, capId, { r
   const acquisitionSource = baselineMastered ? 'PREEXISTING' : 'FLASHDAY';
 
   const delayedPasses = mine.filter((e) => e.eventType === 'delayed_retrieval' && e.attempt?.outcome === 'success');
-  const retained24h = delayedPasses.some((e) => firstUnaidedAt != null && e.occurredAt >= firstUnaidedAt + retentionDelayMs);
-  const retained72h = delayedPasses.some((e) => firstUnaidedAt != null && e.occurredAt >= firstUnaidedAt + 3 * retentionDelayMs);
+  const retained24h = delayedPasses.some((e) => firstUnaidedAt != null && e.occurredAt >= firstUnaidedAt + lag);
+  const retained72h = delayedPasses.some((e) => firstUnaidedAt != null && e.occurredAt >= firstUnaidedAt + 3 * lag);
 
   /* Held-out transfer: the winning attempt's family must not have been
    * rehearsed in a practiced/assessment context before it. */
@@ -181,12 +188,18 @@ export function evaluateClaim(learnerId, events, capabilities, tasks, capId, { r
 
   const gaps = [];
   if (baselineMastered) gaps.push('acquisitionSource PREEXISTING — baseline already demonstrated the capability');
-  if (unaided.length < 2) gaps.push(`${unaided.length} unaided success(es), need ≥2`);
-  if (unaidedSessions.size < 2) gaps.push(`unaided successes span ${unaidedSessions.size} session(s), need ≥2`);
-  if (!retained24h) gaps.push('no delayed_retrieval success ≥24h after first unaided success');
-  if (!transferSuccess) gaps.push('no transfer_attempt success on held-out context');
-  if (!checkpointPass) gaps.push('no checkpoint success');
-  if (openProbes.length) gaps.push(`unresolved contradictory evidence: latest ${openProbes.join(', ')} outcome not success`);
+  if (unaided.length < pol.independent.successfulUnaidedRetrievals) {
+    gaps.push(`${unaided.length} unaided success(es), need ≥${pol.independent.successfulUnaidedRetrievals}`);
+  }
+  if (unaidedSessions.size < pol.independent.minDistinctSessions) {
+    gaps.push(`unaided successes span ${unaidedSessions.size} session(s), need ≥${pol.independent.minDistinctSessions}`);
+  }
+  if (pol.claim.requireDelayedSuccess && !retained24h) gaps.push('no delayed_retrieval success ≥ retention horizon after first unaided success');
+  if (pol.claim.requireTransferSuccess && !transferSuccess) gaps.push('no transfer_attempt success on held-out context');
+  if (pol.claim.requireAssessmentSuccess && !checkpointPass) gaps.push('no checkpoint success');
+  if (pol.claim.blockOnUnresolvedContradiction && openProbes.length) {
+    gaps.push(`unresolved contradictory evidence: latest ${openProbes.join(', ')} outcome not success`);
+  }
 
   /* Integrity cross-check — milestone vs the primitives it claims to
    * summarize. A mismatch is an engine promotion bug, not a gap. */
@@ -203,6 +216,7 @@ export function evaluateClaim(learnerId, events, capabilities, tasks, capId, { r
 
   return {
     capId,
+    policyVersion: pol.version,
     acquisitionSource,
     baselineMastered,
     learnedByFlashday: gaps.length === 0,
@@ -218,12 +232,12 @@ export function evaluateClaim(learnerId, events, capabilities, tasks, capId, { r
   };
 }
 
-export function runPilot({ learners, mission, tasks, capabilities, riskPriors = [], sessions, targetCapabilities, stepsPerSession = 40 }) {
+export function runPilot({ learners, mission, tasks, capabilities, riskPriors = [], sessions, targetCapabilities, stepsPerSession = 40, policy }) {
   const reports = learners.map((learner) => {
-    const run = runPilotLearner({ learner, mission, tasks, capabilities, riskPriors, sessions, stepsPerSession });
+    const run = runPilotLearner({ learner, mission, tasks, capabilities, riskPriors, sessions, stepsPerSession, policy });
     const caps = targetCapabilities ?? mission.targetCapabilities ?? [];
     const claims = {};
-    for (const capId of caps) claims[capId] = evaluateClaim(run.learnerId, run.events, capabilities, tasks, capId);
+    for (const capId of caps) claims[capId] = evaluateClaim(run.learnerId, run.events, capabilities, tasks, capId, { policy });
     return { ...run, claims };
   });
 

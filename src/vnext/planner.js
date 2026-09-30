@@ -18,9 +18,12 @@
  */
 import { RETENTION_DELAY_MS, projectLearnerState } from './projection.js';
 import { priorById } from './risk-priors.js';
+import { resolvePolicy } from './policy.js';
 
-export function planNext(learnerId, events, { capabilities, tasks = [], riskPriors = [], now, retentionDelayMs = RETENTION_DELAY_MS }) {
-  const { byCapability } = projectLearnerState(learnerId, events, capabilities, tasks, { retentionDelayMs });
+export function planNext(learnerId, events, { capabilities, tasks = [], riskPriors = [], now, retentionDelayMs, policy }) {
+  const pol = resolvePolicy(policy);
+  const lag = retentionDelayMs ?? pol.retention.minLagMs;
+  const { byCapability } = projectLearnerState(learnerId, events, capabilities, tasks, { retentionDelayMs: lag, policy: pol });
   const priorMap = new Map(riskPriors.map((p) => [p.id, p]));
 
   /* 1. Resume in-flight work: the encounter started but no attempt
@@ -42,22 +45,22 @@ export function planNext(learnerId, events, { capabilities, tasks = [], riskPrio
     const s = byCapability.get(c.id);
     if (!s.milestones.independent || s.lastIndependentSuccessAt == null) continue;
     if (s.lastAttemptOutcome === 'fail' || s.lastAttemptOutcome === 'partial') continue;
-    const dueAt = s.lastIndependentSuccessAt + retentionDelayMs;
+    const dueAt = s.lastIndependentSuccessAt + lag;
     if (now >= dueAt && (!due || dueAt < due.dueAt)) {
       due = { kind: 'delayed_retrieval', capabilityId: c.id, dueAt, reason: 'independent success is due for a delayed check' };
     }
   }
   if (due) return due;
 
-  /* 3. Remediation: the latest attempt failed on a capability that was
-   *    previously taught (supported or independent success exists). A
-   *    baseline probe failure does NOT land here — untaught work routes
-   *    to introduction below. */
+  /* 3. Remediation: enough consecutive failures on a capability that
+   *    was previously taught (supported or independent success exists).
+   *    The threshold is policy — a baseline probe failure still does
+   *    NOT land here; untaught work routes to introduction below. */
   for (const c of capabilities) {
     const s = byCapability.get(c.id);
     if ((s.milestones.supported || s.milestones.independent) &&
-        (s.lastAttemptOutcome === 'fail' || s.lastAttemptOutcome === 'partial')) {
-      return { kind: 'retry', capabilityId: c.id, reason: `latest attempt was ${s.lastAttemptOutcome} — feedback and self-repair first` };
+        s.consecutiveFailures >= pol.remediation.minConsecutiveFailures) {
+      return { kind: 'retry', capabilityId: c.id, reason: `${s.consecutiveFailures} consecutive ${s.lastAttemptOutcome} outcome(s) — feedback and self-repair first` };
     }
   }
 

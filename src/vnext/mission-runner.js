@@ -72,7 +72,7 @@ const ready = (task, reason) => ({
 
 const blocked = (reason) => ({ status: 'blocked', taskId: null, taskRevision: null, capabilityId: null, purpose: null, reason });
 
-export function nextMissionTask({ learnerId, mission, tasks, capabilities, events, riskPriors = [], now }) {
+export function nextMissionTask({ learnerId, mission, tasks, capabilities, events, riskPriors = [], now, policy }) {
   /* Registry: keyed by id@revision like projectLearnerState — duplicate
    * registrations are an integrity violation, not last-write-wins. */
   const capById = new Map(capabilities.map((c) => [c.id, c]));
@@ -174,7 +174,8 @@ export function nextMissionTask({ learnerId, mission, tasks, capabilities, event
       capabilities: scopedCaps.filter((c) => !excluded.has(c.id)),
       tasks,
       riskPriors,
-      now
+      now,
+      policy
     });
     if (plan.kind === 'idle') break;
     const task = (plan.kind === 'expose' || plan.kind === 'resume')
@@ -191,7 +192,7 @@ export function nextMissionTask({ learnerId, mission, tasks, capabilities, event
   /* Assessment is the mission's closing step — it runs once, after the
    * capability it samples has actually proven transfer. It is never a
    * substitute for transfer work. */
-  const { byCapability } = projectLearnerState(learnerId, events, capabilities, tasks);
+  const { byCapability } = projectLearnerState(learnerId, events, capabilities, tasks, { policy });
   for (const t of missionTasks) {
     if (t.purpose === 'assessment' && mission.assessmentPlan?.required) {
       const attempts = attemptOutcomes.get(keyOf(t)) ?? [];
@@ -223,18 +224,18 @@ export function nextMissionTask({ learnerId, mission, tasks, capabilities, event
  *     { attempt fields..., support, evaluation }  → bindAttempt
  *   nowAt(step) → deterministic timestamp for the selection call.
  */
-export function runMissionTrace({ learnerId, mission, tasks, capabilities, events = [], riskPriors = [], nowAt, act, maxSteps = 60 }) {
+export function runMissionTrace({ learnerId, mission, tasks, capabilities, events = [], riskPriors = [], nowAt, act, maxSteps = 60, policy }) {
   const log = [...events];
   const trace = [];
   for (let step = 1; step <= maxSteps; step++) {
     const now = nowAt ? nowAt(step) : undefined;
-    const sel = nextMissionTask({ learnerId, mission, tasks, capabilities, events: log, riskPriors, now });
+    const sel = nextMissionTask({ learnerId, mission, tasks, capabilities, events: log, riskPriors, now, policy });
     const task = sel.taskId
       ? tasks.find((t) => t.id === sel.taskId && revOf(t) === sel.taskRevision)
       : null;
     const cap = task ? capByIdFrom(capabilities, task.capabilityId) : null;
     const beforeState = cap
-      ? projectLearnerState(learnerId, log, capabilities, tasks).byCapability.get(cap.id).state
+      ? projectLearnerState(learnerId, log, capabilities, tasks, { policy }).byCapability.get(cap.id).state
       : null;
     if (sel.status !== 'ready' || !task || !cap) {
       trace.push({ step, taskId: sel.taskId, taskRevision: sel.taskRevision, purpose: sel.purpose, reason: sel.reason, status: sel.status, beforeState, afterState: beforeState, eventCount: log.length });
@@ -247,7 +248,7 @@ export function runMissionTrace({ learnerId, mission, tasks, capabilities, event
         ? bindObservation(task, cap, { eventType: observe, ...rest })
         : bindAttempt(task, cap, rest));
     }
-    const afterState = projectLearnerState(learnerId, log, capabilities, tasks).byCapability.get(cap.id).state;
+    const afterState = projectLearnerState(learnerId, log, capabilities, tasks, { policy }).byCapability.get(cap.id).state;
     trace.push({ step, taskId: task.id, taskRevision: revOf(task), purpose: task.purpose, reason: sel.reason, status: 'ready', beforeState, afterState, eventCount: log.length });
   }
   return { trace, events: log };
