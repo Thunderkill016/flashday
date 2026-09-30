@@ -163,22 +163,29 @@ try {
     /* B0-native reachability note: correction mints only on a POST-taught
      * attributed miss. The clock cap's tasks allow no support, so a first
      * success goes straight to INDEPENDENT and the only later serve is
-     * the lagged due_retrieval — the ?clockOffset seam compresses the
-     * 24h retention lag. Phase A teaches the cap; phase B reloads the
-     * same persisted run with the clock shifted, fails the delayed
-     * retest, and expects the authored remediation task to be served. */
+     * the lagged due_retrieval — the +25h retention lag is compressed by
+     * a TEST-HARNESS clock patch (addInitScript runs before page scripts
+     * on later navigations; no product URL can alter evidence time).
+     * Phase A teaches the cap on the real clock; phase B reloads the
+     * same persisted learner under the shifted harness clock, fails the
+     * delayed retest, and expects the authored remediation task. */
     const { context, page, errors } = await mk('sim-slice');
-    const url = (extra = '') => `${origin}vnext/?mission=mission.meet_at_a_time&learner=sim-slice&mode=b0${extra}`;
+    const url = `${origin}vnext/?mission=mission.meet_at_a_time&learner=sim-slice&mode=b0`;
     const is = (prefix) => (id) => typeof id === 'string' && id.startsWith(prefix);
-    await page.goto(url());
+    await page.goto(url);
     const a = await drive(page, 30);
     /* The run may legitimately reach summary — lagged intents (due,
      * transfer, assessment) need real elapsed time. What matters here:
      * the clock baseline was served and succeeded → INDEPENDENT. */
     assert.ok(a.served.some(is('task.time.diagnostic.hear')), `clock-time baseline never served: ${a.served}`);
-    /* Reload the same persisted learner with the clock shifted +25h —
-     * a new run resumes and the lagged delayed retest is servable. */
-    await page.goto(url('&clockOffset=90000000'));
+    /* Harness clock shift for subsequent navigations only: every
+     * Date.now() inside this context returns real time +25h. */
+    await page.addInitScript(() => {
+      const real = Date.now.bind(Date);
+      const SHIFT_MS = 90_000_000; // +25h — past the 24h retention lag
+      Date.now = () => real() + SHIFT_MS;
+    });
+    await page.goto(url);
     const b = await drive(page, 40, {
       wrong: is('task.time.delayed.hear'),
       until: is('task.time.remediation.hear')
@@ -208,6 +215,42 @@ try {
     const repair = corrAudit.find((r) => (r.chosenKind === 'correction' || r.chosenKind === 'refresh') && r.taskId === 'task.time.remediation.hear');
     assert.ok(repair != null, `no repair-kind audit record for the authored remediation task (kinds seen: ${corrAudit.map((r) => r.chosenKind)})`);
     check(`008D slice: attributing miss → authored remediation served as ${repair.chosenKind} (task.time.remediation.hear)`);
+    /* Persisted evidence follows the TEST clock — phase-B events land
+     * ≈25h after phase-A evidence inside the persisted log itself. */
+    const stamps = await page.evaluate(() => {
+      const raw = localStorage.getItem('fd.vnext.sim-slice.events') ?? '[]';
+      return JSON.parse(raw).map((e) => e.occurredAt).filter((t) => Number.isFinite(t));
+    });
+    const span = Math.max(...stamps) - Math.min(...stamps);
+    assert.ok(stamps.length > 2 && span > 20 * 3600 * 1000,
+      `persisted evidence does not straddle the harness clock shift: ${stamps.length} events, span ${span}ms`);
+    check(`008D slice: persisted evidence timestamps follow the harness clock (span ${(span / 3600e3).toFixed(1)}h)`);
+    await context.close();
+  }
+
+  // ── Removed seam: ?clockOffset= is inert on the product route ──
+  {
+    /* Regression for the 008D clock-seam blocker: no product code may
+     * read a clock URL param into evidence time. Serve real evidence
+     * with a hostile param present, then prove persisted timestamps sit
+     * on the real clock. */
+    const { context, page, errors } = await mk('sim-clockparam');
+    await page.goto(`${origin}vnext/?mission=mission.meet_new_person&learner=sim-clockparam&mode=b0&clockOffset=90000000`);
+    const { served } = await drive(page, 4);
+    assert.equal(errors.length, 0, `pageerrors: ${errors.join(' | ')}`);
+    assert.ok(served.length > 1, 'no evidence served for clock-param regression');
+    const probe = await page.evaluate(() => {
+      const raw = localStorage.getItem('fd.vnext.sim-clockparam.events') ?? '[]';
+      const events = JSON.parse(raw);
+      return { wallNow: Date.now(), stamps: events.map((e) => e.occurredAt) };
+    });
+    const MAX_SKEW_MS = 60_000;
+    assert.ok(probe.stamps.length > 0, 'no persisted evidence to check');
+    for (const t of probe.stamps) {
+      assert.ok(Math.abs(t - probe.wallNow) < MAX_SKEW_MS,
+        `evidence timestamp ${t} diverges from wall clock ${probe.wallNow} — ?clockOffset is not inert`);
+    }
+    check('?clockOffset= has no effect on persisted evidence time (param ignored)');
     await context.close();
   }
 } finally {

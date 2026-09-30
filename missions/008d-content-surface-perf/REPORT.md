@@ -64,7 +64,7 @@ Mission 008D (ChatGPT control room): close the B0 content surface honestly — c
 - (none recorded)
 
 ## Browser verification
-Playwright /vnext surface: a driven attributing miss now routes to a real authored remediation + correction pair (not blocked); the complete slice traverses input → failure → remediation → correction → retest → transfer → assessment without synthetic fixtures.
+Playwright /vnext surface: after teaching the clock cap, a TEST-HARNESS clock shift (Playwright `addInitScript` patching `Date.now`, added between navigations — no product URL can alter evidence time) resumes the persisted learner +25h later; the lagged delayed retest is served and deliberately missed, and `task.time.remediation.hear` is served under a repair kind with a decision-audit record. The `?clockOffset` URL seam was removed in review round 1 — a regression test now asserts the param is inert (persisted evidence timestamps stay on the wall clock). 8 browser checks PASS.
 
 ## Final result
 # Mission 008D — content-surface closure + runtime scalability
@@ -81,10 +81,18 @@ factored to one computation. Zero Policy-B semantic change.
 checkpoint commit `5c4c23d`; this report lands on top)
 
 ### GAP CLASSIFICATION
-The rewritten audit (experiments/next-for-you/differential.js) derives a
-per-capability reachability envelope — attemptable / attributable /
-exposure / eliciting / freshTransfer / freshAssessment — and mirrors
-candidate-generator.js mint conditions exactly. 91 findings:
+The rewritten audit (experiments/next-for-you/differential.js) is a
+**conservative semantic reachability audit** — a static surface model,
+not a state-space proof: `attemptable`/`attributable`/freshness are
+existential surface properties while real minting also depends on
+temporal learner state. It derives a per-capability reachability
+envelope and mirrors candidate-generator.js mint conditions for triage;
+**every `required` row carries an executable witness** — a built engine
+state (independent→retained→transferred, or taught+attributed miss)
+replayed through the real `generateCandidates`, confirming the intent
+mints and nothing is servable. Every `not_mintable` row carries a
+concrete structural `reason` code (e.g. `no_attributing_evaluator`,
+`target_intro_mints_baseline_probe`, `non_target_role`). 91 findings:
 - **required (5)** — mintable intent, nothing servable, claim- or
   repair-bearing role:
   - `correction` — reception.listen.understand_spoken_price @
@@ -101,11 +109,11 @@ candidate-generator.js mint conditions exactly. 91 findings:
   servable (refresh / due_retrieval / correction on carriers): degraded
   recovery surface; carriers own no claim.
 - **not_mintable (65)** — structurally unreachable under the authored
-  surface: carrier diagnostic_probe (self-suppressing paths), target
-  new_input (targets baseline-probe instead), correction on caps whose
-  only attempt tasks use eval.required_functions.v1 (cannot attribute),
-  transfer/due_retrieval on non-attemptable carriers. Audit-visible, no
-  authoring action.
+  surface, each row stamped with a concrete `reason` code:
+  `carrier_intro_mints_new_input_and_no_diagnostic_task`,
+  `target_intro_mints_baseline_probe`, `no_attributing_evaluator`
+  (eval.required_functions.v1 cannot attribute), `no_attempt_binding_task`,
+  `non_target_role`. Audit-visible, no authoring action.
 - covered rows report `derivation` (e.g. new_input → eliciting_intro)
   when served through a fallback path.
 
@@ -124,14 +132,26 @@ Complete chain on `reception.listen.understand_clock_time` @
    kind=correction AND servableTask=task.time.remediation.hear.
 5. `task.time.delayed.hear` — due_retrieval after the 24h retention lag.
 6. `task.time.transfer.clinic` — fresh transfer family (clinic context).
-7. `task.time.assessment.hear` — fresh assessment family (shop
-   announcement), consumed once, never re-offered.
-Browser verification: Playwright drives the real /vnext surface — the
-run ends at summary after in-flight work drains (lagged intents need
-real elapsed time); reloading with the ?clockOffset=+25h test seam
-resumes the persisted run, the delayed retest is served and
-deliberately missed, and `task.time.remediation.hear` is served under a
-repair kind with a decision-audit record. 6 browser checks PASS.
+7. `task.time.assessment.hear` — fresh assessment family (announcement
+   context), consumed once, never re-offered.
+
+Proof levels (honest, post-review):
+- **Engine contract chain** — Z12 asserts each link mints AND is
+  servable on authored tasks under B0 candidate semantics.
+- **Session-level trajectory** — runtime SLICE section drives
+  `createMissionSession` with an injected test clock and consumes real
+  B0 selections end-to-end: baseline taught → +25h → lagged delayed
+  retest served and MISSED → authored remediation served under a repair
+  kind (B0 picked refresh; support_demand minted alongside) → fresh
+  transfer family → fresh assessment family → mission closes. Note the
+  honest ordering: the lagged retest IS the attributed failure, and B0
+  ranks fresh claim-bearing work above a post-repair re-drill — the
+  chain is miss→repair→transfer→assessment, which is the reachable
+  chain under the frozen policy.
+- **Browser runtime** — Playwright proves the repair segment on the
+  shipped surface (miss → authored remediation + audit record); the
+  +25h lag is compressed by a harness `addInitScript` Date.now patch,
+  not by any product URL parameter.
 
 ### PERFORMANCE PROFILE
 Stage-level breakdown added to experiments/next-for-you/perf.js.
@@ -164,19 +184,25 @@ PASS twice at 5c4c23d (logs/verify-1790791956818-0.log,
 logs/verify-1790792152521-0.log): typecheck 137 files, all unit suites,
 vite build, 26+6 browser checks, Firestore emulator (incl. decision-audit
 rules). Differential corpus clean. Curriculum gate green.
+Post-review round 1 (clock-seam removal + witnesses + session
+trajectory): re-verified at the review head — see below.
 
 ### EXACT-HEAD CI
-Pending at report-commit time — CI runs on the pushed head and is
-reported to the control room before merge.
+PR #71 head `f5cdf15e8047f6b35314d191eebbe2fa7c194200`: both verify
+runs GREEN (push + pull_request triggers). Post-review head will be
+re-verified and reported.
 
 ### KNOWN LIMITATIONS
 - Five required findings remain as named authoring debt (2 correction
-  remediation tasks, 3 assessment tasks) — enumerated for the next
-  content mission; no slice was stretched beyond the honest boundary.
+  remediation tasks, 3 assessment tasks) — each backed by a confirmed
+  executable witness; they are authoring debt, not unproven suspicion.
+- The coverage audit is a conservative static reachability model — it
+  under-approximates (a mintable+servable row can still be unreachable
+  from a given temporal state), which is why required rows carry
+  executable witnesses and the SLICE trajectory exists.
 - B0 select is synchronous O(event-log) — ~125ms at 2k events, paid once
-  per decision (never per render). No SLA was invented.
-- The ?clockOffset seam exists only on the /vnext test surface; it is
-  never used by the product flow itself.
+  per decision (never per render). Incremental derived state / worker
+  evaluation remain follow-up; validation was not weakened.
 - A refresh-kind serve and a correction-kind serve can land on the same
   remediation task; B0's frozen ranking chooses which intent records —
   the authored task is the served surface either way.

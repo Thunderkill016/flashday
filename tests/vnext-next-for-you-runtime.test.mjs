@@ -919,7 +919,20 @@ const consumedKinds = (session) => (session.selectionContext()?.actionsChosen ??
    * from whichever trajectory happened to reach it. */
   const backlog = cov.gaps.filter((g) => g.kind === 'assessment');
   ok(backlog.some((g) => g.backlog === 'no_assessment_task'), 'assessment-family backlog not enumerated');
-  say('COVERAGE: semantic intent×capability gap audit runs (HIGH-7/008D)');
+  /* Review 008D-R1: every required finding carries an executable
+   * witness — a built engine state where mint preconditions hold and
+   * the REAL generator confirms nothing servable. A witness that
+   * cannot build the precondition state, or builds it but the
+   * generator serves content, fails the row. */
+  ok(cov.gaps.every((g) => g.witness?.built === true),
+    `required row without a built witness: ${JSON.stringify(cov.gaps.find((g) => g.witness?.built !== true) ?? null)}`);
+  ok(cov.gaps.every((g) => g.witness?.confirmed === true),
+    `required row whose witness FAILED — the gap is not proven: ${JSON.stringify(cov.gaps.find((g) => g.witness?.confirmed !== true)?.witness ?? null)}`);
+  /* Every not_mintable row names its structural reason — the class is
+   * a concrete derivation, never an inference from aggregate counts. */
+  ok(cov.findings.every((f) => f.class !== 'not_mintable' || typeof f.reason === 'string' && f.reason.length > 0),
+    'not_mintable row missing its structural reason code');
+  say('COVERAGE: conservative reachability audit — required findings carry confirmed executable witnesses');
 }
 
 /* LEGACY-PIN (BLOCKER-1 re-review): an open run predating selection
@@ -1117,6 +1130,130 @@ const consumedKinds = (session) => (session.selectionContext()?.actionsChosen ??
   assert.equal((await ref.auditTrail()).length, 0, 'reference unexpectedly carries an audit store');
   ok(true, 'AUDIT-REQUIRED: B0 never consumes audit-free; reference stays free of it');
   say('AUDIT-REQUIRED: B0/SHADOW default to a memory audit store (final invariant)');
+}
+
+/* ═══ SLICE — 008D vertical slice as a real session trajectory ════
+ * Review requirement (PR #71 R1/HIGH): prove the full reachable chain
+ * through createMissionSession with an injected test clock — real
+ * selections consumed in B0 order, not appended events. Baseline →
+ * +25h → lagged delayed retest MISSED (the retest is the attributed
+ * failure) → repair surface served (support probe and/or authored
+ * remediation, whichever B0 ranks first) → fresh transfer → fresh
+ * assessment. Session restarts on the same stores mirror the
+ * reload/episode-roll path. */
+{
+  const learner = 'RT.slice';
+  const eventStore = createMemoryEventStore();
+  const runStore = createMemoryRunStore();
+  const decisionStore = createMemoryDecisionStore();
+
+  /* Every task in the mission needs a scripted CORRECT response — the
+   * driver consumes whatever B0 actually serves. */
+  const TIME_ANSWERS = {
+    'task.time.diagnostic.hear': 'three',
+    'task.time.diagnostic.say': "it's three o'clock",
+    'task.time.retrieval.greeting': 'greeting',
+    'task.time.remediation.hear': 'eight',
+    'task.time.retrieval.hear': 'half_four',
+    'task.time.retrieval.say': "it's two o'clock",
+    'task.time.retrieval.greet': 'hi',
+    'task.time.interaction.ask_name': 'what is your name',
+    'task.time.interaction.guided': "it's four o'clock",
+    'task.time.interaction.unaided': "it's four o'clock",
+    'task.time.delayed.hear': 'six',
+    'task.time.delayed.say': "it's six o'clock",
+    'task.time.transfer.clinic': 'half_ten',
+    'task.time.transfer.event': "it's six o'clock",
+    'task.time.assessment.hear': 'nine',
+    'task.time.assessment.checkpoint': 'hi! it is three o clock. what is your name?',
+    'task.time.support.number_probe': 'ten'
+  };
+
+  const open = async () => {
+    const s = makeSession({ fixture: TIME, learner, eventStore, runStore, decisionStore });
+    await s.init();
+    return s;
+  };
+
+  const served = [];
+  const missed = new Set();
+  const driveSlice = async (session, { missOnce = null, steps = 120 } = {}) => {
+    for (let i = 0; i < steps; i += 1) {
+      const s = session.screen();
+      if (s.type === 'summary') return true;
+      if (s.type === 'error') throw new Error(`error screen: ${s.message ?? JSON.stringify(s)}`);
+      if (s.type === 'intro') { await session.start({ learnerName: 'linh' }); continue; }
+      if (s.type === 'input') { await session.view(); continue; }
+      if (s.type !== 'task') throw new Error(`unknown screen ${s.type}`);
+      if (s.phase === 'feedback') { await session.next(); continue; }
+      served.push(s.taskId);
+      let a = TIME_ANSWERS[s.taskId];
+      assert.ok(a != null, `no scripted answer for served task ${s.taskId}`);
+      if (missOnce === s.taskId && !missed.has(s.taskId)) {
+        missed.add(s.taskId);
+        a = 'seven'; /* deliberate wrong option → observed attributing miss */
+      }
+      if (s.responseType === 'choice') await session.commit({ optionId: a });
+      else await session.commit({ text: a });
+    }
+    return false;
+  };
+
+  /* Phase A (test clock T0): teach — the run may hit summary before the
+   * baseline lands, so reopen sessions until the clock-time diagnostic
+   * is served and passed. */
+  for (let round = 0; round < 4 && !served.includes('task.time.diagnostic.hear'); round += 1) {
+    if (await driveSlice(await open())) break;
+  }
+  ok(served.includes('task.time.diagnostic.hear'), 'SLICE: baseline diagnostic never served');
+  say('SLICE-A: baseline taught through real selections');
+
+  /* Phase B (test clock +25h): the delayed retest is due — that serve
+   * IS the retention check; the learner misses it. B0's real ordering
+   * then ranks the authored repair surface first (remediation under a
+   * repair kind), then fresh transfer, then fresh assessment — the
+   * mission closes once targets are assessed, so re-drilling the
+   * delayed task after repair is correctly never picked over the
+   * claim-bearing work. */
+  tick += DAY + HOUR;
+  const idx = (id, from = 0) => served.findIndex((t, i) => i >= from && t === id);
+  const chainHit = () => {
+    const miss = idx('task.time.delayed.hear');
+    if (miss < 0 || !missed.has('task.time.delayed.hear')) return false;
+    const repair = idx('task.time.remediation.hear', miss);
+    if (repair < 0) return false;
+    const tr = idx('task.time.transfer.clinic', repair);
+    if (tr < 0) return false;
+    return idx('task.time.assessment.hear', tr) >= 0;
+  };
+  for (let round = 0; round < 8 && !chainHit(); round += 1) {
+    await driveSlice(await open(), { missOnce: 'task.time.delayed.hear' });
+    tick += 2 * HOUR; /* each "visit" later in time — episodes roll honestly */
+  }
+  const miss = idx('task.time.delayed.hear');
+  ok(miss >= 0 && missed.has('task.time.delayed.hear'), `SLICE: post-lag delayed retest never served/missed — ${served.join(' → ')}`);
+  const repair = idx('task.time.remediation.hear', miss);
+  ok(repair >= 0, `SLICE: authored remediation never served after the miss — ${served.slice(miss).join(' → ')}`);
+  const tr = idx('task.time.transfer.clinic', repair);
+  ok(tr >= 0, 'SLICE: fresh transfer family never served after repair');
+  const as = idx('task.time.assessment.hear', tr);
+  ok(as >= 0, 'SLICE: fresh assessment family never served after transfer');
+  say('SLICE-B: lagged retest miss → authored remediation → fresh transfer → fresh assessment (real session)');
+
+  /* The repair segment must be reflected in the consumed-decision
+   * audit: some repair-intent decision (correction/refresh/support
+   * demand) precedes the remediation serve, and an assessment decision
+   * was consumed for the clock cap. */
+  const audits = await decisionStore.list();
+  const repairDecision = audits.find((r) =>
+    ['correction', 'refresh', 'support_demand'].includes(r.chosenKind) &&
+    (r.taskId === 'task.time.remediation.hear' || r.taskId === 'task.time.support.number_probe'));
+  ok(repairDecision != null, `SLICE: no repair-kind decision in audit — ${audits.map((r) => `${r.chosenKind}@${r.taskId}`).join(', ')}`);
+  ok(audits.some((r) => r.chosenKind === 'assessment' && r.taskId === 'task.time.assessment.hear'),
+    'SLICE: assessment decision missing from audit');
+  ok(audits.every((r) => typeof r.decisionInputDigest === 'string' && r.decisionInputDigest.startsWith('sha256:')),
+    'SLICE: audit record without decide-time sha256 digest');
+  say('SLICE-C: repair + assessment decisions audited with sha256 digests');
 }
 
 console.log(`vnext-next-for-you-runtime: ${check} checks — PASS`);
