@@ -4,7 +4,7 @@
 - mission: `missions/008e-required-surface-closure/mission.md`
 - branch: devin/m008e-required-surface-closure
 - starting sha: `765a5d86e2500ed16010315f0164ef9aee05715d`
-- ending sha: `37d50a4` (R1 content patch; verify:full PASS) + report commits
+- ending sha: `d4def77` (R2 freshness patch; verify:full PASS) + report commits
 
 ## Objective
 
@@ -22,8 +22,8 @@ trajectories — with zero Policy-B semantic change.
 - `37d50a4 008E R1: construct-valid assessment cues + cue-alignment
   regressions` (PR comment 5919831496)
 - `510f340 008E: R1 checkpoint + report truth corrections + CI record`
-- R2 head pending — learner-visible fresh context + practiced-only cue
-  cover + metadata alignment (PR comment 5920114888)
+- `d4def77 008E R2: learner-visible fresh context + practiced-only cue
+  cover` (PR comment 5920114888)
 
 ## Files changed vs start (7)
 
@@ -232,15 +232,16 @@ change; digest remains the single dominant stage (112ms), unchanged.
 
 ## VERIFY:FULL
 
-- `npm run verify:full` at `37d50a4`: PASS — verify (typecheck 137
-  files + all node suites + build), browser 26+8, Firestore emulator
+- `npm run verify:full` at `d4def77`: PASS — verify (typecheck 137
+  files + all node suites + build), browser 26+9 (includes the
+  fresh-assessment situation render-order leg), Firestore emulator
   (evidence immutability, owner/learner pinning, idempotent append,
   replay parity, decision-audit rules).
 
 ## CI
 
-Exact-head green on `804d925` (push `36777075743`, pull_request
-`36777114226`). R1 patch head pending — updated after push.
+Exact-head green on `510f340` (push `36779272463`, pull_request
+`36779277695`). R2 head `d4def77` CI pending — updated after push.
 
 ## OPEN OPTIONAL GAPS
 
