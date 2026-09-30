@@ -30,37 +30,58 @@ produces honest `blocked` — correct, but useless for the learner. And a
 scheduler that blocks the main thread for ~285ms on large logs cannot
 ship. Both must be fixed before vNext can leave the bench.
 
-## SCOPE
+## INVARIANTS
 
-1. Gap classification (semantic, not a task-count):
-   - REAL REQUIRED GAP (author);
-   - INTENT NOT MINTABLE FOR THAT ROLE (fix the audit's enumeration —
-     e.g. a carrier role where the intent is never generated);
-   - OPTIONAL PEDAGOGIC COVERAGE (documented, not authored now);
-   - DUPLICATE/DERIVABLE GAP (servable through an existing task).
-2. One complete A1 vertical slice with real contracts:
-   attributing failure → real remediation → correction → delayed retest
-   → fresh transfer → fresh assessment family. No synthetic correction
-   fixture may be required for the liveness test afterward.
-3. Performance: stage-level profiling (projection, learner model,
-   support lifecycle, candidate generation, policy, validator,
-   canonical digest) at 100/500/2000 events; remove obviously
-   duplicated work; compare replay vs memoized/incremental vs snapshot
-   cache vs worker — measured, no invented SLA, zero B0 semantic change.
-4. Journal data minimization: `pendingConsumption.expectedEvents`
-   fingerprints become `sha256:` digests; reconcile semantics
-   unchanged (same id+same digest → valid, same id+different digest →
-   conflict, partial → fail closed). Learner response text must never
-   persist in `run.selection`.
+- Policy-B pedagogical semantics unchanged: tiers, freshness, support
+  precedence, repair bounds, and the differential corpus invariants
+  (718 MATCH / 759 EXPECTED / 6 SAFETY-PRIOR / 0 BUG / 0 validator
+  violations on the 1483-row corpus) still hold exactly.
+- Evidence honesty: support, self-report, and unobserved success never
+  mint stronger states; transfer requires changed context + novel
+  family; assessments bind fresh families + zero support.
+- Consumption stays crash-consistent: same id + same digest → valid;
+  same id + different digest → conflict; partial landing → fail
+  closed; nothing fabricates learner evidence.
+- Learner response text lives only in the append-only evidence log —
+  never in run.selection, the journal, or decision audits.
+- Validation is never weakened to buy speed: the validator, contract
+  gate, family integrity, and freshness checks run exactly as before.
+- Append-only stores; same-id different-content conflicts throw; retry
+  dedupe ignores server arrival timestamps.
 
-## NON-GOALS
+## IN SCOPE
 
-- No gamification or UI redesign; no audit-summary UI.
-- No RL/bandit; no FSRS/memory-model work.
-- No public deploy; no Firestore Rules deploy.
-- No mass content generation without contract review.
-- No Policy-B pedagogical semantic change (tiers, freshness, support
-  precedence, repair bounds).
+1. Semantic gap classification of the 60-row coverage audit:
+   REAL REQUIRED GAP / INTENT NOT MINTABLE FOR THAT ROLE / OPTIONAL
+   PEDAGOGIC COVERAGE / DUPLICATE/DERIVABLE — the audit itself must
+   become capability/intent-semantic, not a missing-task count.
+2. One complete A1 vertical slice on real contracts: attributing
+   failure → real remediation → correction → delayed retest → fresh
+   transfer → fresh assessment family. No synthetic correction fixture
+   required for the liveness test afterward. Priority targets:
+   correction/remediation authoring gap; target capabilities missing
+   assessment; fresh semantic assessment families; carrier coverage
+   only where actual candidate semantics require it.
+3. Stage-level performance profile at 100/500/2000 events: projection,
+   learner model, support lifecycle, candidate generation, policy,
+   validator, canonical digest — each measured separately; remove
+   obviously duplicated work; compare repeated full replay vs
+   memoized/incremental derived state vs immutable snapshot cache vs
+   Web Worker feasibility; produce a measured architecture for larger
+   histories. No invented SLA.
+4. Journal data minimization: `pendingConsumption.expectedEvents[].`
+   `fingerprint` becomes a `sha256:` content digest computed by the
+   browser-safe canonical hasher.
+
+## OUT OF SCOPE
+
+- Gamification, UI redesign, audit-summary UI.
+- RL/bandit selection, FSRS/memory-model changes.
+- Public deploy; Firestore Rules deploy.
+- Mass content generation without contract review.
+- Changes to Policy-B pedagogical semantics.
+- Remote decision-store sync policy (deferred — follows content
+  completeness).
 
 ## ACCEPTANCE CRITERIA
 
@@ -78,6 +99,42 @@ ship. Both must be fixed before vNext can leave the bench.
 - [ ] Journal fingerprints are crypto digests; no raw learner response
       in `run.selection`; crash-injection suite still green.
 - [ ] `npm run verify:full` green; exact-head CI green.
+
+## VERIFICATION
+
+- `npm run verify:full` at the final head.
+- Focused runtime suite must cover: journal digest reconcile (same/
+  different digest, partial, empty), perf regression shape (no
+  per-render re-selection), slice liveness on real content.
+- Differential corpus invariants unchanged after any perf work.
+
+## BROWSER VERIFICATION
+
+Playwright against the real /vnext surface: a driven attributing miss
+routes to a real authored remediation + correction pair (no longer
+blocked); the complete slice traverses input → failure → remediation →
+correction → retest → transfer → assessment without synthetic fixtures.
+
+## SAFETY CONSTRAINTS
+
+- Never weaken validation, contracts, or evidence honesty for speed.
+- Never persist learner response text outside the append-only evidence
+  log.
+- Unknown selection modes still fail closed; open-run policy pinning
+  (mode + version + legacy runs) is untouched.
+- No semantic change to B0 — the 907-check benchmark and differential
+  corpus must pass unmodified.
+- No deploys of any kind.
+
+## STOP CONDITIONS
+
+- Any required fix that would change Policy-B decision semantics —
+  surface it, don't ship it.
+- Content authoring that requires inventing evaluation contracts the
+  registry cannot validate.
+- Perf work that would need a worker migration to stay correct — do
+  the measured comparison first, document feasibility, do not force it.
+- Any conflict with the learner-safety invariants above.
 
 ## REPORT FORMAT
 
