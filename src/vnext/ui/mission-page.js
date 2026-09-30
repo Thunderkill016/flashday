@@ -15,15 +15,20 @@ import {
   FEEDBACK_COPY, SUPPORT_LABEL
 } from './copy.js';
 import { speakEnglish } from '../../ui/speech.js';
-import { MISSION_MEET_PERSON, TASKS_MEET_PERSON, MISSION_ORDER_DRINK, TASKS_ORDER_DRINK, capabilityById } from '../fixtures.js';
+import { FIXTURES } from '../fixtures.js';
 import { CAPABILITIES } from '../capabilities.js';
 import { RISK_PRIORS } from '../risk-priors.js';
 import { LEARNING_POLICY_V1 } from '../policy.js';
 
-const MISSIONS = {
-  'mission.meet_new_person': { mission: MISSION_MEET_PERSON, tasks: TASKS_MEET_PERSON },
-  'mission.order_drink': { mission: MISSION_ORDER_DRINK, tasks: TASKS_ORDER_DRINK }
-};
+const MISSIONS = Object.fromEntries(
+  FIXTURES.map((f) => [f.mission.id, f])
+);
+/* The task registry is the WHOLE curriculum, not just this mission's
+ * taskIds — evidence bound under earlier missions' tasks must still
+ * verify here or prerequisite gates appear unmet (carried prereqs
+ * would look NOT_SEEN and the mission would deadlock). Routing stays
+ * scoped: the selector only serves ids declared in mission.taskIds. */
+const TASK_REGISTRY = FIXTURES.flatMap((f) => f.tasks);
 
 const el = (tag, attrs = {}, children = []) => {
   const node = document.createElement(tag);
@@ -55,7 +60,7 @@ export async function bootMissionPage(root) {
   const session = createMissionSession({
     learnerId,
     mission: spec.mission,
-    tasks: spec.tasks,
+    tasks: TASK_REGISTRY,
     capabilities: CAPABILITIES,
     riskPriors: RISK_PRIORS,
     policy: LEARNING_POLICY_V1,

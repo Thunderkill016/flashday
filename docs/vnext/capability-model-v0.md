@@ -142,6 +142,12 @@ Append-only. Learner state is a projection.
 reception.listen.greeting_basic
 reception.listen.identity_question_basic
 reception.listen.drink_order_question_basic
+reception.listen.identify_spoken_number
+reception.listen.understand_clock_time
+reception.listen.understand_simple_choice
+reception.listen.understand_spoken_price
+reception.listen.identify_basic_direction_term
+reception.listen.follow_short_direction
 ```
 
 ### Spoken interaction
@@ -150,15 +156,22 @@ reception.listen.drink_order_question_basic
 interaction.greet
 interaction.ask_name
 interaction.respond_to_introduction
+interaction.thank
 interaction.ask_repeat
 interaction.signal_nonunderstanding
 interaction.request_item
+interaction.answer_simple_choice
+interaction.ask_price
+interaction.ask_location
 ```
 
 ### Spoken production
 
 ```
 production.speak.say_own_name
+production.speak.state_clock_time
+production.speak.state_basic_self_detail
+production.speak.describe_family_member_basic
 ```
 
 ### Reading
@@ -196,7 +209,36 @@ interaction.ask_repeat
 interaction.signal_nonunderstanding
     ↘
       supports many later missions
+
+reception.listen.understand_clock_time
+    ↓
+production.speak.state_clock_time          (comprehension before production)
+
+reception.listen.drink_order_question_basic
+    ↓
+interaction.request_item                   (complete_small_order)
+
+production.speak.say_own_name
+    ↓
+production.speak.state_basic_self_detail
+    ↓
+production.speak.describe_family_member_basic
 ```
+
+Split capabilities with no hard edge — the reception half is support
+substrate, not a gate:
+
+```
+reception.listen.understand_simple_choice  ⇢  interaction.answer_simple_choice
+reception.listen.identify_spoken_number    ⇢  understand_spoken_price work
+reception.listen.identify_basic_direction_term  ⇢  follow_short_direction work
+```
+
+These are **demand-driven support**, never DAG edges: a learner may
+already parse "small or large", numerals, or left/right without explicit
+teaching, and the interaction must not be blocked on a recognition probe
+it cannot schedule. Choice comprehension and choice *response* stay
+separate capabilities — hearing the option is not choosing it.
 
 ## 6. Vietnamese learner risk priors
 

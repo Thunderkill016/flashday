@@ -54,7 +54,14 @@ export const FUNCTION_MODEL = {
   ask_repeat: 'Sorry?',
   respond_to_introduction: 'Nice to meet you too.',
   signal_nonunderstanding: "I don't understand.",
-  request_item: 'A coffee, please.'
+  request_item: 'A coffee, please.',
+  state_clock_time: "It's three o'clock.",
+  answer_simple_choice: 'The large one, please.',
+  thank: 'Thank you.',
+  ask_price: 'How much is this?',
+  ask_location: 'Where is the station?',
+  state_basic_self_detail: "I'm from Vietnam.",
+  describe_family_member_basic: 'This is my mother.'
 };
 
 export const FUNCTION_HINT = {
@@ -64,20 +71,40 @@ export const FUNCTION_HINT = {
   ask_repeat: 'Chỉ cần “S…?” hoặc “Can you repeat …”',
   respond_to_introduction: '“Nice to meet you …”',
   signal_nonunderstanding: '“I don’t …”',
-  request_item: '“A coffee, please” hoặc “Can I have …?”'
+  request_item: '“A coffee, please” hoặc “Can I have …?”',
+  state_clock_time: '“It’s …” + giờ',
+  answer_simple_choice: '“The … one, please” hoặc “A …, please”',
+  thank: '“Thank …” hoặc “Thanks”',
+  ask_price: '“How much …?”',
+  ask_location: '“Where is the …?”',
+  state_basic_self_detail: '“I’m from …” hoặc “I live in …”',
+  describe_family_member_basic: '“This is my …” hoặc “My … is …”'
 };
 
 export const CAP_LABEL = {
   'reception.listen.greeting_basic': 'Nghe lời chào',
   'reception.listen.identity_question_basic': 'Nghe câu hỏi tên',
   'reception.listen.drink_order_question_basic': 'Nghe câu hỏi gọi đồ uống',
+  'reception.listen.identify_spoken_number': 'Bắt số đọc',
+  'reception.listen.understand_clock_time': 'Nghe giờ',
+  'reception.listen.understand_simple_choice': 'Nghe câu hỏi lựa chọn',
+  'reception.listen.understand_spoken_price': 'Nghe giá',
+  'reception.listen.follow_short_direction': 'Nghe chỉ đường ngắn',
+  'reception.listen.identify_basic_direction_term': 'Bắt từ chỉ hướng',
   'production.speak.say_own_name': 'Nói tên của mình',
+  'production.speak.state_clock_time': 'Nói giờ',
+  'production.speak.state_basic_self_detail': 'Nói thông tin cá nhân',
+  'production.speak.describe_family_member_basic': 'Tả một người nhà',
   'interaction.greet': 'Chào lại',
   'interaction.ask_name': 'Hỏi tên người khác',
   'interaction.respond_to_introduction': 'Đáp lại lời giới thiệu',
   'interaction.ask_repeat': 'Xin người khác nhắc lại',
   'interaction.signal_nonunderstanding': 'Báo là chưa hiểu',
   'interaction.request_item': 'Yêu cầu một món',
+  'interaction.answer_simple_choice': 'Chọn một phương án',
+  'interaction.thank': 'Cảm ơn',
+  'interaction.ask_price': 'Hỏi giá',
+  'interaction.ask_location': 'Hỏi đường',
   'reception.read.simple_sign_or_menu_item': 'Đọc biển/menu đơn giản',
   'production.write.personal_info_short': 'Viết thông tin cá nhân ngắn'
 };
@@ -100,6 +127,31 @@ export const MISSION_INTRO = {
   'mission.order_drink': {
     title: 'Gọi một thức uống',
     blurb: 'Bạn đứng trước quầy cà phê. Mục tiêu: hiểu câu hỏi của người bán và gọi được một thức uống.',
+    startLabel: 'Bắt đầu'
+  },
+  'mission.meet_at_a_time': {
+    title: 'Hẹn giờ gặp',
+    blurb: 'Bạn hẹn giờ với một bạn cùng lớp. Mục tiêu: nghe được giờ và nói được giờ hẹn.',
+    startLabel: 'Bắt đầu'
+  },
+  'mission.complete_small_order': {
+    title: 'Gọi món có lựa chọn',
+    blurb: 'Người bán hỏi bạn chọn món. Mục tiêu: gọi được món và chọn được một phương án.',
+    startLabel: 'Bắt đầu'
+  },
+  'mission.buy_small_item': {
+    title: 'Hỏi giá mua đồ',
+    blurb: 'Bạn muốn mua một món nhỏ. Mục tiêu: hỏi được giá và nghe hiểu số tiền.',
+    startLabel: 'Bắt đầu'
+  },
+  'mission.find_a_place': {
+    title: 'Hỏi đường',
+    blurb: 'Bạn đang tìm một địa điểm. Mục tiêu: hỏi được đường và đi theo chỉ dẫn ngắn.',
+    startLabel: 'Bắt đầu'
+  },
+  'mission.talk_about_self_family': {
+    title: 'Nói về bản thân và gia đình',
+    blurb: 'Một người mới hỏi về bạn. Mục tiêu: nói được quê quán và tả một người nhà.',
     startLabel: 'Bắt đầu'
   }
 };
