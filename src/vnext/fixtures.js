@@ -157,7 +157,23 @@ const F = {
     cueTopology: 'nice_to_meet_you',
     responseTopology: 'politeness_return',
     lexicalDomain: 'greetings'
-  })
+  }),
+  /* 008E: genuinely fresh assessment context for say_own_name — an
+   * organizer requesting the learner's name for a sign-up sheet. Not the
+   * rehearsed peer cue ("What's your name?"): different cue topology,
+   * setting, register and partner, so the sample cannot lean on the
+   * practiced exchange. */
+  ownNameSignup: {
+    communicativeFunction: 'state_own_name',
+    cueTopology: 'signup_name_request',
+    setting: 'community',
+    register: 'neutral',
+    channel: 'f2f',
+    interlocutorRole: 'organizer',
+    relationship: 'first_meeting',
+    responseTopology: 'name_statement',
+    lexicalDomain: 'identity'
+  }
 };
 
 const pf = canonicalFamilyId;
@@ -166,7 +182,7 @@ const pf = canonicalFamilyId;
 
 export const MISSION_MEET_PERSON = makeMission({
   id: 'mission.meet_new_person',
-  revision: 3,
+  revision: 4,
   scenario: 'Meet another learner for the first time.',
   learnerGoal: 'Exchange a greeting and names politely.',
   /* Claim-bearing targets: the mission owes each of them a baseline
@@ -217,6 +233,7 @@ export const MISSION_MEET_PERSON = makeMission({
     'task.meet.delayed.name',
     'task.meet.transfer.street',
     'task.meet.transfer.name',
+    'task.meet.assessment.name_signup',
     'task.meet.assessment.checkpoint'
   ],
   transferPlan: { required: true, dimensions: ['wording', 'partner', 'setting'] },
@@ -435,6 +452,29 @@ export const TASKS_MEET_PERSON = [
     freshness: { required: true, familyClass: 'fresh_transfer' },
     transfer: { changedDimensions: ['wording', 'partner', 'setting'] },
     language: { requiredChunks: ['My name is …', "I'm …"], requiredVocabulary: ['name'], requiredConstructions: [] }
+  }),
+  /* 008E: direct fresh-assessment sample for say_own_name — the
+   * capability was covered only transitively inside the multi-cap
+   * checkpoint; this single-capability probe measures it post-transfer
+   * in a context no teaching task rehearses. */
+  task({
+    id: 'task.meet.assessment.name_signup',
+    missionId: 'mission.meet_new_person',
+    capabilityId: 'production.speak.say_own_name',
+    modality: 'spoken_production',
+    purpose: 'assessment',
+    promptFamily: pf('production.speak.say_own_name', F.ownNameSignup),
+    contextSignature: F.ownNameSignup,
+    stimulus: { type: 'partner_turn', languageComponents: ['For the sign-up sheet — your name, please?'] },
+    response: { type: 'spoken_turn', requiredFunctions: ['state_own_name'] },
+    freshness: { required: true, familyClass: 'fresh_assessment' },
+    supportPolicy: { allowed: [], revealModelAfterAttempt: false },
+    assessment: {
+      capabilitySample: ['production.speak.say_own_name'],
+      allowedLanguageRange: 'declared_target_range',
+      answerRevealDuringAttempt: false
+    },
+    language: { requiredChunks: ["I'm …", 'My name is …'], requiredVocabulary: ['name'], requiredConstructions: [] }
   }),
   task({
     id: 'task.meet.assessment.checkpoint',
@@ -1312,12 +1352,27 @@ const OF = {
     relationship: 'service',
     responseTopology: 'choice_answer',
     lexicalDomain: 'food_drink'
+  },
+  /* 008E: fresh assessment context for request_item — a drink-cart
+   * vendor calling the queue forward. No direct "what can I get you"
+   * cue to echo: the learner must produce the request from the
+   * communicative situation, not a rehearsed prompt string. */
+  requestCart: {
+    communicativeFunction: 'request_item',
+    cueTopology: 'cart_order_call',
+    setting: 'drink_cart',
+    register: 'casual',
+    channel: 'f2f',
+    interlocutorRole: 'vendor',
+    relationship: 'service',
+    responseTopology: 'request',
+    lexicalDomain: 'food_drink'
   }
 };
 
 export const MISSION_COMPLETE_ORDER = makeMission({
   id: 'mission.complete_small_order',
-  revision: 1,
+  revision: 2,
   scenario: 'Order at a food stall and answer a choice question.',
   learnerGoal: 'Request an item and pick one option when the server offers a choice.',
   targetCapabilities: [
@@ -1359,6 +1414,7 @@ export const MISSION_COMPLETE_ORDER = makeMission({
     'task.order.delayed.choice',
     'task.order.transfer.stall',
     'task.order.transfer.takeaway',
+    'task.order.assessment.request',
     'task.order.assessment.checkpoint'
   ],
   transferPlan: { required: true, dimensions: ['wording', 'partner', 'setting'] },
@@ -1564,6 +1620,29 @@ export const TASKS_COMPLETE_ORDER = [
     transfer: { changedDimensions: ['wording', 'partner', 'setting'] },
     language: { requiredChunks: ['…, please'], requiredVocabulary: ['take', 'here'], requiredConstructions: [] }
   }),
+  /* 008E: direct fresh-assessment sample for request_item — the
+   * capability was covered only transitively inside the choice-bound
+   * checkpoint; this single-capability probe measures it post-transfer
+   * in a context no teaching task rehearses. */
+  task({
+    id: 'task.order.assessment.request',
+    missionId: 'mission.complete_small_order',
+    capabilityId: 'interaction.request_item',
+    modality: 'spoken_interaction',
+    purpose: 'assessment',
+    promptFamily: pf('interaction.request_item', OF.requestCart),
+    contextSignature: OF.requestCart,
+    stimulus: { type: 'partner_turn', languageComponents: ['Cold drinks! Who is next?'] },
+    response: { type: 'spoken_turn', requiredFunctions: ['request_item'] },
+    freshness: { required: true, familyClass: 'fresh_assessment' },
+    supportPolicy: { allowed: [], revealModelAfterAttempt: false },
+    assessment: {
+      capabilitySample: ['interaction.request_item'],
+      allowedLanguageRange: 'declared_target_range',
+      answerRevealDuringAttempt: false
+    },
+    language: { requiredChunks: ['A …, please', 'Can I have …?'], requiredVocabulary: ['water', 'tea', 'please'], requiredConstructions: [] }
+  }),
   task({
     id: 'task.order.assessment.checkpoint',
     missionId: 'mission.complete_small_order',
@@ -1697,7 +1776,7 @@ const SF = {
 
 export const MISSION_BUY_ITEM = makeMission({
   id: 'mission.buy_small_item',
-  revision: 1,
+  revision: 2,
   scenario: 'Ask the price of a small item in a shop.',
   learnerGoal: 'Ask "How much is this?" and understand the answer.',
   targetCapabilities: [
@@ -1725,6 +1804,10 @@ export const MISSION_BUY_ITEM = makeMission({
     'task.price.input.scene',
     'task.price.input.amount',
     'task.price.retrieval.ask',
+    /* Remediation precedes the re-drill it repairs: when refresh or
+     * correction mints after an attributed miss, the first unconsumed
+     * repair surface must be the remediation task, not the drill. */
+    'task.price.remediation.hear',
     'task.price.retrieval.hear',
     'task.price.retrieval.request',
     'task.price.interaction.ask_guided',
@@ -1809,6 +1892,32 @@ export const TASKS_BUY_ITEM = [
     stimulus: { type: 'cued_prompt', languageComponents: ['How much …?'] },
     response: { type: 'spoken_turn', requiredFunctions: ['ask_price'] },
     language: { requiredChunks: ['How much is this?', 'How much is it?'], requiredVocabulary: ['much', 'this'], requiredConstructions: [] }
+  }),
+  /* 008E: the repair surface for spoken-price misses. The price frame is
+   * stripped to a bare amount so the choice operationalizes exactly the
+   * substrate a price comprehension needs — catching the number word —
+   * while the response still names the attributed pair
+   * (understand_spoken_price + identify_spoken_number). Deliberately
+   * shares the practiced family: repair is not freshness evidence. */
+  task({
+    id: 'task.price.remediation.hear',
+    missionId: 'mission.buy_small_item',
+    capabilityId: 'reception.listen.understand_spoken_price',
+    modality: 'listening',
+    purpose: 'remediation',
+    promptFamily: pf('reception.listen.understand_spoken_price', SF.priceQAudio),
+    contextSignature: SF.priceQAudio,
+    stimulus: { type: 'audio_line', languageComponents: ['Three dollars.'] },
+    response: {
+      type: 'choice',
+      requiredFunctions: ['understand_spoken_price', 'identify_spoken_number'],
+      options: [
+        { id: 'three', text: '3 đô-la.', correct: true },
+        { id: 'thirteen', text: '13 đô-la.' },
+        { id: 'eight', text: '8 đô-la.' }
+      ]
+    },
+    language: { requiredChunks: ['… dollars'], requiredVocabulary: ['three'], requiredConstructions: [] }
   }),
   task({
     id: 'task.price.retrieval.hear',
@@ -2110,7 +2219,7 @@ const LF = {
 
 export const MISSION_FIND_PLACE = makeMission({
   id: 'mission.find_a_place',
-  revision: 1,
+  revision: 2,
   scenario: 'Ask a passer-by where a place is and follow the answer.',
   learnerGoal: 'Ask "Where is the …?" and follow a short direction.',
   targetCapabilities: [
@@ -2140,6 +2249,8 @@ export const MISSION_FIND_PLACE = makeMission({
     'task.place.input.scene',
     'task.place.input.route',
     'task.place.retrieval.ask',
+    /* Remediation precedes the re-drill it repairs (008E). */
+    'task.place.remediation.follow',
     'task.place.retrieval.follow',
     'task.place.retrieval.follow_landmark',
     'task.place.retrieval.greet',
@@ -2225,6 +2336,31 @@ export const TASKS_FIND_PLACE = [
     stimulus: { type: 'cued_prompt', languageComponents: ['Where is the …?'] },
     response: { type: 'spoken_turn', requiredFunctions: ['ask_location'] },
     language: { requiredChunks: ['Where is the …?'], requiredVocabulary: ['where', 'station', 'toilet'], requiredConstructions: [] }
+  }),
+  /* 008E: the repair surface for direction misses. A single isolated
+   * imperative makes the choice operationalize the substrate a direction
+   * needs — catching the direction term (identify_basic_direction_term) —
+   * a different substrate from price comprehension's number-catch. Shares
+   * the practiced family deliberately: repair is not freshness evidence. */
+  task({
+    id: 'task.place.remediation.follow',
+    missionId: 'mission.find_a_place',
+    capabilityId: 'reception.listen.follow_short_direction',
+    modality: 'listening',
+    purpose: 'remediation',
+    promptFamily: pf('reception.listen.follow_short_direction', LF.directionAudio),
+    contextSignature: LF.directionAudio,
+    stimulus: { type: 'audio_line', languageComponents: ['Turn right.'] },
+    response: {
+      type: 'choice',
+      requiredFunctions: ['follow_short_direction', 'identify_basic_direction_term'],
+      options: [
+        { id: 'right', text: 'Rẽ phải.', correct: true },
+        { id: 'left', text: 'Rẽ trái.' },
+        { id: 'straight', text: 'Đi thẳng.' }
+      ]
+    },
+    language: { requiredChunks: ['Turn right'], requiredVocabulary: ['right'], requiredConstructions: [] }
   }),
   task({
     id: 'task.place.retrieval.follow',
@@ -2533,12 +2669,27 @@ const MF = {
     relationship: 'repeat_contact',
     responseTopology: 'description_statement',
     lexicalDomain: 'family'
+  },
+  /* 008E: fresh assessment context for state_basic_self_detail — a
+   * homestay host's arrival question. Not the rehearsed peer small-talk
+   * exchange and not the office registration form: different cue
+   * topology, setting and partner. */
+  selfHost: {
+    communicativeFunction: 'state_basic_self_detail',
+    cueTopology: 'host_arrival_detail',
+    setting: 'homestay',
+    register: 'casual',
+    channel: 'f2f',
+    interlocutorRole: 'host',
+    relationship: 'first_meeting',
+    responseTopology: 'self_detail_statement',
+    lexicalDomain: 'identity'
   }
 };
 
 export const MISSION_SELF_FAMILY = makeMission({
   id: 'mission.talk_about_self_family',
-  revision: 1,
+  revision: 2,
   scenario: 'Tell a new acquaintance where you are from and describe a family member.',
   learnerGoal: 'State one personal detail and describe one family member in simple phrases.',
   targetCapabilities: [
@@ -2577,6 +2728,7 @@ export const MISSION_SELF_FAMILY = makeMission({
     'task.self.delayed.family',
     'task.self.transfer.office',
     'task.self.transfer.introduce',
+    'task.self.assessment.detail',
     'task.self.assessment.checkpoint'
   ],
   transferPlan: { required: true, dimensions: ['wording', 'partner', 'setting'] },
@@ -2769,6 +2921,29 @@ export const TASKS_SELF_FAMILY = [
     freshness: { required: true, familyClass: 'fresh_transfer' },
     transfer: { changedDimensions: ['wording', 'partner', 'setting'] },
     language: { requiredChunks: ['This is my …', "She's …"], requiredVocabulary: ['sister', 'family'], requiredConstructions: [] }
+  }),
+  /* 008E: direct fresh-assessment sample for state_basic_self_detail —
+   * the capability was covered only transitively inside the
+   * family-bound checkpoint; this single-capability probe measures it
+   * post-transfer in a context no teaching task rehearses. */
+  task({
+    id: 'task.self.assessment.detail',
+    missionId: 'mission.talk_about_self_family',
+    capabilityId: 'production.speak.state_basic_self_detail',
+    modality: 'spoken_production',
+    purpose: 'assessment',
+    promptFamily: pf('production.speak.state_basic_self_detail', MF.selfHost),
+    contextSignature: MF.selfHost,
+    stimulus: { type: 'partner_turn', languageComponents: ['Welcome! Do you work, or are you a student?'] },
+    response: { type: 'spoken_turn', requiredFunctions: ['state_basic_self_detail'] },
+    freshness: { required: true, familyClass: 'fresh_assessment' },
+    supportPolicy: { allowed: [], revealModelAfterAttempt: false },
+    assessment: {
+      capabilitySample: ['production.speak.state_basic_self_detail'],
+      allowedLanguageRange: 'declared_target_range',
+      answerRevealDuringAttempt: false
+    },
+    language: { requiredChunks: ['I work in …', 'I study at …'], requiredVocabulary: ['work', 'study'], requiredConstructions: [] }
   }),
   task({
     id: 'task.self.assessment.checkpoint',

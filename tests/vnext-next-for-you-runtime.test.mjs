@@ -33,10 +33,12 @@ import { LEARNING_POLICY_V1 } from '../src/vnext/policy.js';
 import { nextMissionTask } from '../src/vnext/mission-runner.js';
 import { sha256, canon, sha256HexOfString } from '../src/vnext/next-for-you/canonical.js';
 import { emptyContext, consumeDecision, recordChoice, normalizeContext } from '../src/vnext/next-for-you/decision-context.js';
-import { selectNextTask, engineState, SELECTION_MODES, POLICY_VERSIONS } from '../src/vnext/next-for-you/selector.js';
+import { selectNextTask, engineState, SELECTION_MODES, POLICY_VERSIONS, validateB0 } from '../src/vnext/next-for-you/selector.js';
 import { policyB } from '../src/vnext/next-for-you/policies.js';
 import { KINDS } from '../src/vnext/next-for-you/constants.js';
 import { stateDigest } from '../src/vnext/next-for-you/decision-log.js';
+import { canonicalFamilyId } from '../src/vnext/contracts.js';
+import { contractAttributesFunctions } from '../src/vnext/evaluators.js';
 import { attemptEvent, observeEvent } from '../experiments/next-for-you/scenarios.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -48,6 +50,10 @@ const DAY = 24 * HOUR;
 const MEET = FIXTURES.find((f) => f.mission.id === 'mission.meet_new_person');
 const DRINK = FIXTURES.find((f) => f.mission.id === 'mission.order_drink');
 const TIME = FIXTURES.find((f) => f.mission.id === 'mission.meet_at_a_time');
+const ORDER = FIXTURES.find((f) => f.mission.id === 'mission.complete_small_order');
+const BUY = FIXTURES.find((f) => f.mission.id === 'mission.buy_small_item');
+const PLACE = FIXTURES.find((f) => f.mission.id === 'mission.find_a_place');
+const SELF = FIXTURES.find((f) => f.mission.id === 'mission.talk_about_self_family');
 const TASK_REGISTRY = FIXTURES.flatMap((f) => f.tasks);
 
 let tick = T0;
@@ -88,6 +94,7 @@ const SCRIPT = {
   'task.meet.delayed.name': 'i am linh',
   'task.meet.transfer.name': 'my name is linh',
   'task.meet.transfer.street': "what's your name",
+  'task.meet.assessment.name_signup': 'my name is linh',
   'task.meet.assessment.checkpoint': "hi, i'm linh — what's your name?",
   'task.drink.diagnostic.order': 'a coffee please',
   'task.drink.retrieval.offer': 'coffee',
@@ -96,7 +103,14 @@ const SCRIPT = {
   'task.drink.interaction.unaided': 'a coffee please',
   'task.drink.delayed.check': 'a coffee please',
   'task.drink.transfer.stall': 'a coffee please',
-  'task.drink.assessment.checkpoint': 'a coffee please'
+  'task.drink.assessment.checkpoint': 'a coffee please',
+  /* 008E-authored surfaces on the other missions — the ANSWERS_008E map
+   * carries their full per-task scripts; these four keep generic drives
+   * (PURPOSE/probe sections) from committing 'x' to a fresh surface. */
+  'task.order.assessment.request': 'a tea please',
+  'task.price.remediation.hear': 'three',
+  'task.place.remediation.follow': 'right',
+  'task.self.assessment.detail': 'i study at hanoi'
 };
 
 async function drive(session, pred, { steps = 120, answer = (s) => SCRIPT[s.taskId], onScreen } = {}) {
@@ -900,8 +914,14 @@ const consumedKinds = (session) => (session.selectionContext()?.actionsChosen ??
   const { runCoverageAudit } = await import('../experiments/next-for-you/differential.js');
   const cov = runCoverageAudit(FIXTURES);
   ok(cov.missions.length === FIXTURES.length, 'coverage audit skipped missions');
-  ok(cov.gaps.length > 0, 'coverage audit reported zero required gaps — suspicious for the authored surface');
-  ok(cov.gaps.every((g) => g.class === 'required' && g.mintable && !g.servable), 'required rows must be mintable-but-unservable');
+  /* 008E closed the last required findings. The audit must report
+   * ZERO required rows — and the report is only honest if findings are
+   * still being derived, so the classification machinery itself is
+   * asserted below (a degenerate all-covered report would be a weaker
+   * claim than what this audit actually does). */
+  ok(cov.findings.length > 0, 'coverage audit returned no findings at all — classification machinery dead');
+  ok(cov.gaps.length === 0,
+    `coverage audit still reports required findings: ${JSON.stringify(cov.gaps.map((g) => `${g.mission}|${g.capabilityId}|${g.kind}`))}`);
   /* Carrier rows can never be 'required' — carriers own no claim. */
   ok(!cov.findings.some((f) => f.role === 'carrier' && f.class === 'required'), 'carrier row classified required');
   /* The known semantic results: carrier diagnostic_probe is never
@@ -909,31 +929,24 @@ const consumedKinds = (session) => (session.selectionContext()?.actionsChosen ??
    * where a choice contract can attribute the miss. */
   ok(cov.findings.some((f) => f.kind === 'diagnostic_probe' && f.role === 'carrier' && f.class === 'not_mintable'),
     'carrier diagnostic_probe should be classified not_mintable');
-  const correctionGaps = cov.gaps.filter((g) => g.kind === 'correction');
-  ok(correctionGaps.length > 0, 'correction remediation gaps vanished — audit not seeing the known gap');
-  /* The 008D vertical slice closed clock-time's correction gap — the
-   * remaining required correction rows are named findings on the other
-   * attributing listening targets. */
-  ok(!correctionGaps.some((g) => g.capabilityId === 'reception.listen.understand_clock_time' && g.mission === 'mission.meet_at_a_time'),
-    'authored remediation task did not close the clock-time correction gap');
-  /* Assessment backlog is enumerated per-claim-target, not inferred
-   * from whichever trajectory happened to reach it. */
-  const backlog = cov.gaps.filter((g) => g.kind === 'assessment');
-  ok(backlog.some((g) => g.backlog === 'no_assessment_task'), 'assessment-family backlog not enumerated');
-  /* Review 008D-R1: every required finding carries an executable
-   * witness — a built engine state where mint preconditions hold and
-   * the REAL generator confirms nothing servable. A witness that
-   * cannot build the precondition state, or builds it but the
-   * generator serves content, fails the row. */
-  ok(cov.gaps.every((g) => g.witness?.built === true),
-    `required row without a built witness: ${JSON.stringify(cov.gaps.find((g) => g.witness?.built !== true) ?? null)}`);
-  ok(cov.gaps.every((g) => g.witness?.confirmed === true),
-    `required row whose witness FAILED — the gap is not proven: ${JSON.stringify(cov.gaps.find((g) => g.witness?.confirmed !== true)?.witness ?? null)}`);
+  /* The authored surfaces stay closed: the 008D clock-time slice plus
+   * the five 008E targets must not regress back into the findings. */
+  for (const [mission, capabilityId, kind] of [
+    ['mission.meet_at_a_time', 'reception.listen.understand_clock_time', 'correction'],
+    ['mission.buy_small_item', 'reception.listen.understand_spoken_price', 'correction'],
+    ['mission.find_a_place', 'reception.listen.follow_short_direction', 'correction'],
+    ['mission.meet_new_person', 'production.speak.say_own_name', 'assessment'],
+    ['mission.complete_small_order', 'interaction.request_item', 'assessment'],
+    ['mission.talk_about_self_family', 'production.speak.state_basic_self_detail', 'assessment']
+  ]) {
+    ok(!cov.gaps.some((g) => g.mission === mission && g.capabilityId === capabilityId && g.kind === kind),
+      `008E closed finding regressed: ${mission}|${capabilityId}|${kind} is required again`);
+  }
   /* Every not_mintable row names its structural reason — the class is
    * a concrete derivation, never an inference from aggregate counts. */
   ok(cov.findings.every((f) => f.class !== 'not_mintable' || typeof f.reason === 'string' && f.reason.length > 0),
     'not_mintable row missing its structural reason code');
-  say('COVERAGE: conservative reachability audit — required findings carry confirmed executable witnesses');
+  say('COVERAGE: required=0 — all authored surfaces closed; classifier machinery still deriving real findings');
 }
 
 /* LEGACY-PIN (BLOCKER-1 re-review): an open run predating selection
@@ -1407,6 +1420,400 @@ const consumedKinds = (session) => (session.selectionContext()?.actionsChosen ??
   ok(audits.every((r) => typeof r.decisionInputDigest === 'string' && r.decisionInputDigest.startsWith('sha256:')),
     'SLICE: audit record without decide-time sha256 digest');
   say('SLICE-C: repair + assessment decisions audited with sha256 digests');
+}
+
+/* ═══ 008E — REQUIRED-SURFACE CLOSURE regressions ═══════════════════
+ * The five former REQUIRED coverage findings (witnesses CONFIRMED on
+ * main@765a5d8) become executable after-regressions: identical
+ * preconditions to the audit's witness states, but the minted
+ * candidate now resolves to the exact authored task@revision, is
+ * eligible, is what B0 actually selects, and the decision validates
+ * clean. §6 of the mission spec. */
+{
+  const ATTEMPT = (t) => t.response?.type != null && t.response.type !== 'none';
+  const WT0 = Date.parse('2026-02-01T09:00:00Z');
+  const W_LAG = 25 * HOUR;
+  /* attemptEvent stamps learnerId 'SIM' — the input must match or the
+   * learner model sees zero events (generator filters by learnerId). */
+  const selOf = (fixture, events, at) => selectNextTask({
+    mode: 'b0', learnerId: 'SIM', mission: fixture.mission, tasks: TASK_REGISTRY,
+    capabilities: CAPABILITIES, events, riskPriors: RISK_PRIORS,
+    policy: LEARNING_POLICY_V1, selection: {},
+    decisionContext: emptyContext('ep.008e', 'ses.008e'), now: at
+  });
+
+  /* Correction witnesses — taught + attributed observed miss. The
+   * candidate must mint with servableTask = the authored remediation. */
+  for (const [fx, capId, want] of [
+    [BUY, 'reception.listen.understand_spoken_price', 'task.price.remediation.hear'],
+    [PLACE, 'reception.listen.follow_short_direction', 'task.place.remediation.follow']
+  ]) {
+    const cap = capabilityById(capId);
+    const capTasks = fx.tasks.filter((t) => t.capabilityId === capId);
+    const taught = capTasks.find((t) => ATTEMPT(t) && t.purpose !== 'remediation');
+    const attr = capTasks.find((t) => ATTEMPT(t) && contractAttributesFunctions(t.evaluation?.contractId));
+    const events = [
+      attemptEvent(taught, cap, { at: WT0, outcome: 'success' }),
+      attemptEvent(attr, cap, { at: WT0 + HOUR, outcome: 'fail', missing: attr.response.requiredFunctions })
+    ];
+    const sel = selOf(fx, events, WT0 + 2 * HOUR);
+    const cand = sel.decision?.candidates?.find((c) => c.kind === KINDS.CORRECTION && c.capabilityId === capId);
+    ok(cand != null, `008E-WITNESS: correction never minted for ${capId}`);
+    ok(cand.taskId === want, `008E-WITNESS: ${capId} correction served ${cand?.taskId} — expected ${want}`);
+    ok((cand.taskRevision ?? 1) === (TASK_REGISTRY.find((t) => t.id === want)?.revision ?? 1),
+      `008E-WITNESS: ${want} served at wrong revision`);
+    ok(cand.eligible === true, `008E-WITNESS: ${capId} correction filtered: ${cand?.filterReason}`);
+    assert.deepEqual(validateB0(sel.decision, sel.engineInput), [], `008E-WITNESS: validator violation on ${capId} correction`);
+    ok(sel.status === 'ready' && sel.taskId === want, `008E-WITNESS: B0 did not select ${want} — got ${sel.status}:${sel.taskId}`);
+  }
+  say('008E-WITNESS: price + direction corrections mint the authored remediation, serve it, validate clean');
+
+  /* Assessment witnesses — independent → retained → transferred.
+   * The minted assessment candidate must be the authored fresh task. */
+  for (const [fx, capId, want] of [
+    [MEET, 'production.speak.say_own_name', 'task.meet.assessment.name_signup'],
+    [ORDER, 'interaction.request_item', 'task.order.assessment.request'],
+    [SELF, 'production.speak.state_basic_self_detail', 'task.self.assessment.detail']
+  ]) {
+    const cap = capabilityById(capId);
+    const capTasks = fx.tasks.filter((t) => t.capabilityId === capId);
+    const nonTransfer = capTasks.filter((t) => ATTEMPT(t) && !['transfer', 'assessment'].includes(t.purpose));
+    const indep = nonTransfer[0];
+    const delayed = capTasks.find((t) => t.purpose === 'delayed_retrieval') ?? nonTransfer.find((t) => t !== indep);
+    const practicedFams = new Set(capTasks.filter((t) => t.purpose !== 'transfer').map((t) => t.promptFamily));
+    const transfer = capTasks.find((t) => t.purpose === 'transfer' && !practicedFams.has(t.promptFamily));
+    const events = [
+      attemptEvent(indep, cap, { at: WT0, outcome: 'success' }),
+      attemptEvent(delayed, cap, { at: WT0 + W_LAG, outcome: 'success' }),
+      attemptEvent(transfer, cap, { at: WT0 + W_LAG + MIN, outcome: 'success' })
+    ];
+    const sel = selOf(fx, events, WT0 + W_LAG + 2 * MIN);
+    const cand = sel.decision?.candidates?.find((c) => c.kind === KINDS.ASSESSMENT && c.capabilityId === capId);
+    ok(cand != null, `008E-WITNESS: assessment never minted for ${capId}`);
+    ok(cand.taskId === want, `008E-WITNESS: ${capId} assessment served ${cand?.taskId} — expected ${want}`);
+    ok((cand.taskRevision ?? 1) === (TASK_REGISTRY.find((t) => t.id === want)?.revision ?? 1),
+      `008E-WITNESS: ${want} served at wrong revision`);
+    ok(cand.eligible === true, `008E-WITNESS: ${capId} assessment filtered: ${cand?.filterReason}`);
+    assert.deepEqual(validateB0(sel.decision, sel.engineInput), [], `008E-WITNESS: validator violation on ${capId} assessment`);
+    ok(sel.status === 'ready' && sel.taskId === want, `008E-WITNESS: B0 did not select ${want} — got ${sel.status}:${sel.taskId}`);
+  }
+  say('008E-WITNESS: three fresh assessments mint the authored task, serve it, validate clean');
+}
+
+/* ═══ 008E FAM-COLLISION (§8): every new task's canonical family is
+ * checked against every task for that capability. Remediation MAY
+ * share the practiced family deliberately (repair is not freshness
+ * evidence); assessment must collide with nothing — diagnostic,
+ * retrieval, remediation, delayed, transfer, or a consumed assessment
+ * family. */
+{
+  const famOf = (t) => canonicalFamilyId(t.capabilityId, t.contextSignature);
+  for (const [id, sharedPracticed] of [
+    ['task.price.remediation.hear', true],
+    ['task.place.remediation.follow', true],
+    ['task.meet.assessment.name_signup', false],
+    ['task.order.assessment.request', false],
+    ['task.self.assessment.detail', false]
+  ]) {
+    const t = TASK_REGISTRY.find((x) => x.id === id);
+    assert.ok(t, `008E-FAM: authored task ${id} missing from the registry`);
+    ok(t.promptFamily === famOf(t), `008E-FAM: ${id} promptFamily is not the canonical id of its signature`);
+    const colliding = TASK_REGISTRY.filter((x) => x.id !== id && famOf(x) === famOf(t));
+    if (sharedPracticed) {
+      ok(colliding.length > 0, `008E-FAM: ${id} remediation should share the practiced family — it shares nothing`);
+      ok(colliding.every((x) => (x.freshness?.familyClass ?? 'practiced') === 'practiced'),
+        `008E-FAM: ${id} remediation collides with a held-out family — freshness contamination`);
+      ok(colliding.every((x) => x.capabilityId === t.capabilityId),
+        `008E-FAM: ${id} shares a family across capabilities — family id corrupted`);
+    } else {
+      ok(colliding.length === 0,
+        `008E-FAM: ${id} fresh assessment collides with ${colliding.map((x) => x.id).join(', ') || 'none'}`);
+      ok(t.freshness?.required === true && t.freshness?.familyClass === 'fresh_assessment',
+        `008E-FAM: ${id} is not a fresh_assessment`);
+      ok((t.supportPolicy?.allowed ?? []).length === 0,
+        `008E-FAM: ${id} allows pre-attempt answer-bearing support`);
+      ok((t.assessment?.capabilitySample ?? []).includes(t.capabilityId),
+        `008E-FAM: ${id} capabilitySample does not include its own capability`);
+    }
+  }
+  say('008E-FAM: remediation deliberately practiced; all three fresh families collide with nothing');
+}
+
+/* Answers shared by the 008E trajectory and REVPIN audit legs. */
+const ANSWERS_008E = {
+    /* meet_new_person — name_signup assessment */
+    'task.meet.assessment.name_signup': 'my name is linh',
+    /* complete_small_order */
+    'task.order.diagnostic.request': 'a coffee please',
+    'task.order.diagnostic.choice': 'the small one please',
+    'task.order.retrieval.request': 'can i have a coffee',
+    'task.order.retrieval.choice': 'the large one',
+    'task.order.retrieval.greet': 'hello',
+    'task.order.interaction.request_guided': 'a tea please',
+    'task.order.interaction.request_unaided': 'can i have a tea',
+    'task.order.interaction.choice_guided': 'a large one',
+    'task.order.interaction.choice_unaided': 'small please',
+    'task.order.interaction.thanks': 'thank you',
+    'task.order.delayed.request': 'a coffee please',
+    'task.order.delayed.choice': 'the first one',
+    'task.order.transfer.stall': 'some water please',
+    'task.order.transfer.takeaway': 'the second one',
+    'task.order.assessment.request': 'a tea please',
+    'task.order.assessment.checkpoint': 'the small one please, a coffee please, thank you',
+    /* buy_small_item */
+    'task.price.diagnostic.ask': 'how much is this',
+    'task.price.diagnostic.hear': 'two',
+    'task.price.retrieval.ask': 'how much is this',
+    'task.price.remediation.hear': 'three',
+    'task.price.retrieval.hear': 'five',
+    'task.price.retrieval.request': 'this one please',
+    'task.price.interaction.ask_guided': 'how much is this',
+    'task.price.interaction.ask_unaided': 'how much is it',
+    'task.price.interaction.thanks': 'thank you',
+    'task.price.delayed.ask': 'how much is this',
+    'task.price.delayed.hear': 'ten',
+    'task.price.transfer.market': 'how much is this',
+    'task.price.transfer.checkout': 'eight',
+    'task.price.assessment.hear': 'six',
+    'task.price.assessment.checkpoint': 'this one please, how much is this, thank you',
+    /* find_a_place */
+    'task.place.diagnostic.ask': 'where is the station',
+    'task.place.diagnostic.follow': 'left_straight',
+    'task.place.retrieval.ask': 'where is the bank',
+    'task.place.remediation.follow': 'right',
+    'task.place.retrieval.follow': 'right_bank',
+    'task.place.retrieval.follow_landmark': 'bank_after_cafe',
+    'task.place.retrieval.greet': 'hi',
+    'task.place.interaction.ask_guided': 'where is the station',
+    'task.place.interaction.ask_unaided': 'where is the toilet',
+    'task.place.interaction.thanks': 'thank you',
+    'task.place.delayed.ask': 'where is the bank',
+    'task.place.delayed.follow': 'straight_left',
+    'task.place.transfer.mall_ask': 'where is the toilet',
+    'task.place.transfer.mall_follow': 'lift_right',
+    'task.place.assessment.follow': 'ahead_left',
+    'task.place.assessment.checkpoint': 'hi, where is the toilet? thank you',
+    /* talk_about_self_family */
+    'task.self.diagnostic.detail': "i'm from vietnam",
+    'task.self.diagnostic.family': 'this is my mother',
+    'task.self.retrieval.detail': 'i live in hanoi',
+    'task.self.retrieval.family': 'this is my sister',
+    'task.self.retrieval.name': 'my name is linh',
+    'task.self.interaction.detail_guided': 'i live in hanoi',
+    'task.self.interaction.detail_unaided': 'i study at hanoi',
+    'task.self.interaction.family_guided': 'this is my father',
+    'task.self.interaction.family_unaided': 'i have a brother',
+    'task.self.delayed.detail': "i'm from vietnam",
+    'task.self.delayed.family': 'my mother is a teacher',
+    'task.self.transfer.office': 'i live in hanoi',
+    'task.self.transfer.introduce': 'this is my sister',
+    'task.self.assessment.detail': 'i study at hanoi',
+    'task.self.assessment.checkpoint': 'my name is linh, i am from vietnam, this is my mother'
+};
+
+/* ═══ 008E REV-PIN (§5): every mission whose task surface changed
+ * bumped its revision. A stale-revision open run supersedes; a
+ * matching-revision run resumes pinned; the persisted audit stamps the
+ * run's pinned revision — historical provenance is never reinterpreted
+ * under the new surface. */
+{
+  const CHANGED_008E = [MEET, ORDER, BUY, PLACE, SELF];
+  const seededOpenRun = (fixture, rev) => createMemoryRunStore([{
+    id: `run.008e.${fixture.mission.id}`,
+    learnerId: 'RT.learner', missionId: fixture.mission.id, missionRevision: rev,
+    status: 'open', learnerName: 'A', startedAt: 1, endedAt: null,
+    selection: {
+      version: 'vnext.run-selection.v1', mode: 'b0',
+      selectionPolicyVersion: POLICY_VERSIONS.B,
+      decisionEpisodeId: `ep:run.008e.${fixture.mission.id}`,
+      config: {}, decisionContext: null, pendingConsumption: null
+    }
+  }]);
+  for (const fx of CHANGED_008E) {
+    const tag = fx.mission.id;
+    const curRev = fx.mission.revision ?? null;
+    /* old-revision open run → superseded + fresh pinned run */
+    {
+      const rs = seededOpenRun(fx, curRev - 1);
+      const s = makeSession({ fixture: fx, runStore: rs, mode: 'b0' });
+      await s.init();
+      const runs = await rs.list();
+      const old = runs.find((r) => r.id === `run.008e.${tag}`);
+      ok(old?.status === 'superseded' && old.supersedeReason === `mission_revision_changed:${curRev - 1}->${curRev}` && old.endedAt != null,
+        `008E-REVPIN ${tag}: stale-revision open run not superseded`);
+      const open = runs.filter((r) => r.status === 'open');
+      ok(open.length === 1 && open[0].missionRevision === curRev && s.runInfo().id === open[0].id,
+        `008E-REVPIN ${tag}: fresh run not pinned at rev ${curRev}`);
+    }
+    /* matching-revision run → resumed pinned, reload-safe */
+    {
+      const rs = seededOpenRun(fx, curRev);
+      const s = makeSession({ fixture: fx, runStore: rs, mode: 'b0' });
+      await s.init();
+      ok(s.runInfo().id === `run.008e.${tag}` && s.runInfo().status === 'open' && s.runInfo().missionRevision === curRev,
+        `008E-REVPIN ${tag}: same-revision run not resumed pinned`);
+    }
+    /* a consumed decision under the new surface stamps the run's
+     * pinned revision — provenance stays tied to the surface that
+     * produced it. */
+    {
+      const es = createMemoryEventStore();
+      const rs = createMemoryRunStore();
+      const ds = createMemoryDecisionStore();
+      const s = makeSession({ fixture: fx, eventStore: es, runStore: rs, decisionStore: ds, mode: 'b0' });
+      await s.init();
+      await drive(s, (x) => x.type === 'task' && x.phase === 'feedback', {
+        answer: (x) => ANSWERS_008E[x.taskId] ?? SCRIPT[x.taskId] ?? 'hi'
+      });
+      const audits = await ds.list();
+      const rec = audits.at(-1);
+      assert.ok(rec, `008E-REVPIN ${tag}: consumed decision minted no audit`);
+      ok(rec.missionRevision === curRev && rec.missionRunId === s.runInfo().id,
+        `008E-REVPIN ${tag}: audit not stamped with pinned revision ${curRev} (got ${rec.missionRevision})`);
+    }
+  }
+  say('008E-REVPIN: five bumped missions supersede stale runs, pin the new revision, stamp audits with it');
+}
+
+/* ═══ 008E TRAJECTORIES (§7) — real createMissionSession drives ═════
+ * Shared driver: consumes whatever B0 serves, scripted correct answers,
+ * optional one-shot miss for the remediation trajectories. Sessions
+ * reopen on shared stores — reload/episode-roll exercised honestly. */
+{
+  const drive008e = async (session, answers, { missOnce = null, missed = null, served, steps = 200 } = {}) => {
+    for (let i = 0; i < steps; i += 1) {
+      const s = session.screen();
+      if (s.type === 'summary') return true;
+      if (s.type === 'error') throw new Error(`008E trajectory error screen: ${s.message ?? JSON.stringify(s)}`);
+      if (s.type === 'intro') { await session.start({ learnerName: 'linh' }); continue; }
+      if (s.type === 'input') { await session.view(); continue; }
+      if (s.type !== 'task') throw new Error(`008E unknown screen ${s.type}`);
+      if (s.phase === 'feedback') { await session.next(); continue; }
+      served.push(s.taskId);
+      let a = answers(s);
+      assert.ok(a != null, `008E no scripted answer for served task ${s.taskId}`);
+      if (missOnce === s.taskId && !missed.has(s.taskId)) {
+        missed.add(s.taskId);
+        a = s.responseType === 'choice' ? '__wrong_option__' : 'zz nonsense';
+      }
+      if (s.responseType === 'choice') await session.commit({ optionId: a });
+      else await session.commit({ text: a });
+    }
+    return false;
+  };
+  const idx = (served, id, from = 0) => served.findIndex((t, i) => i >= from && t === id);
+  const count = (served, id) => served.filter((t) => t === id).length;
+
+  /* ── Remediation trajectories: taught target → observed attributing
+   * miss → authored remediation → successful recovery. Neither mission
+   * declares a support capability, so no support-demand step is
+   * legitimately mintable — the repair kinds are correction/refresh.
+   * The attributing miss happens on the LAGGED delayed retest: under
+   * B0 ordering the listening cap goes independent off its diagnostic
+   * and the plain retrieval drill is never routed pre-lag (the SLICE-B
+   * trajectory proved the same dynamic on clock-time). ── */
+  for (const [fx, capId, missTask, remTask] of [
+    [BUY, 'reception.listen.understand_spoken_price', 'task.price.delayed.hear', 'task.price.remediation.hear'],
+    [PLACE, 'reception.listen.follow_short_direction', 'task.place.delayed.follow', 'task.place.remediation.follow']
+  ]) {
+    const learner = `RT.008e.rem.${fx.mission.id}`;
+    const eventStore = createMemoryEventStore();
+    const runStore = createMemoryRunStore();
+    const decisionStore = createMemoryDecisionStore();
+    const served = [];
+    const missed = new Set();
+    const answers = (s) => ANSWERS_008E[s.taskId] ?? SCRIPT[s.taskId];
+    const open = async () => {
+      const s = makeSession({ fixture: fx, learner, eventStore, runStore, decisionStore });
+      await s.init();
+      return s;
+    };
+    /* Phase A: teach — drain everything immediately routable. */
+    for (let round = 0; round < 4; round += 1) {
+      await drive008e(await open(), answers, { served });
+    }
+    /* Phase B: past the retention lag the delayed retest is due — the
+     * observed attributing miss lands there; the authored remediation
+     * must be served after it. */
+    tick += DAY + HOUR;
+    for (let round = 0; round < 12 && !(missed.has(missTask) && idx(served, remTask, idx(served, missTask)) >= 0); round += 1) {
+      await drive008e(await open(), answers, { missOnce: missTask, missed, served });
+      tick += 2 * HOUR;
+    }
+    const miss = idx(served, missTask);
+    ok(miss >= 0 && missed.has(missTask), `008E-TRAJ ${capId}: attributing miss never produced — ${served.join(' → ')}`);
+    const rep = idx(served, remTask, miss);
+    ok(rep >= 0, `008E-TRAJ ${capId}: authored remediation never served after the miss — ${served.slice(miss).join(' → ')}`);
+    /* Recovery: the remediation serve was committed with the correct
+     * answer — a success event exists for it in the event log. */
+    const evs = await eventStore.list();
+    const remSuccess = evs.some((e) => e.taskId === remTask && e.attempt?.outcome === 'success');
+    ok(remSuccess, `008E-TRAJ ${capId}: remediation serve did not produce a success — recovery unproven`);
+    /* The repair decision must be in the consumed-decision audit. */
+    const audits = await decisionStore.list();
+    const repairDecision = audits.find((r) =>
+      ['correction', 'refresh', 'support_demand'].includes(r.chosenKind) && r.taskId === remTask);
+    ok(repairDecision != null,
+      `008E-TRAJ ${capId}: no repair-kind decision chose ${remTask} — ${audits.map((r) => `${r.chosenKind}@${r.taskId}`).join(', ')}`);
+    say(`008E-TRAJ: ${capId} miss → ${remTask} → recovery (real session, audit-backed)`);
+  }
+
+  /* ── Assessment trajectories: independent → retained → transferred →
+   * fresh assessment → consumed exactly once. Injected test clock only
+   * (the session's `now` option — no production time seam). ── */
+  for (const [fx, capId, delayedId, transferId, assessId] of [
+    [MEET, 'production.speak.say_own_name', 'task.meet.delayed.name', 'task.meet.transfer.name', 'task.meet.assessment.name_signup'],
+    [ORDER, 'interaction.request_item', 'task.order.delayed.request', 'task.order.transfer.stall', 'task.order.assessment.request'],
+    [SELF, 'production.speak.state_basic_self_detail', 'task.self.delayed.detail', 'task.self.transfer.office', 'task.self.assessment.detail']
+  ]) {
+    const learner = `RT.008e.ass.${fx.mission.id}`;
+    const eventStore = createMemoryEventStore();
+    const runStore = createMemoryRunStore();
+    const decisionStore = createMemoryDecisionStore();
+    const served = [];
+    const answers = (s) => ANSWERS_008E[s.taskId] ?? SCRIPT[s.taskId];
+    const open = async () => {
+      const s = makeSession({ fixture: fx, learner, eventStore, runStore, decisionStore });
+      await s.init();
+      return s;
+    };
+    /* Phase A: teach — all caps reach first independent successes at
+     * test-clock T0+. Then the clock jumps past the retention lag so
+     * due_retrieval and the transfer/assessment chain unlock. */
+    for (let round = 0; round < 4 && idx(served, delayedId) < 0; round += 1) {
+      await drive008e(await open(), answers, { served });
+    }
+    tick += DAY + HOUR;
+    const chain = () => {
+      const d = idx(served, delayedId);
+      if (d < 0) return false;
+      const tr = idx(served, transferId, d);
+      if (tr < 0) return false;
+      return idx(served, assessId, tr) >= 0;
+    };
+    for (let round = 0; round < 12 && !chain(); round += 1) {
+      await drive008e(await open(), answers, { served });
+      tick += 2 * HOUR;
+    }
+    const d = idx(served, delayedId);
+    ok(d >= 0, `008E-TRAJ ${capId}: delayed retest never served — retention phase unreachable — ${served.join(' → ')}`);
+    const tr = idx(served, transferId, d);
+    ok(tr >= 0, `008E-TRAJ ${capId}: fresh transfer never served after delayed retest`);
+    const a = idx(served, assessId, tr);
+    ok(a >= 0, `008E-TRAJ ${capId}: fresh assessment ${assessId} never served after transfer — ${served.slice(tr).join(' → ')}`);
+    /* Consumed exactly once: keep driving past the success; the task
+     * must never re-serve (assessmentStatus success blocks re-mint). */
+    for (let round = 0; round < 4; round += 1) {
+      if (await drive008e(await open(), answers, { served })) break;
+      tick += 2 * HOUR;
+    }
+    ok(count(served, assessId) === 1, `008E-TRAJ ${capId}: assessment re-served — consumed ${count(served, assessId)}×, expected once`);
+    const audits = await decisionStore.list();
+    const assessDecisions = audits.filter((r) => r.chosenKind === 'assessment' && r.taskId === assessId);
+    ok(assessDecisions.length === 1,
+      `008E-TRAJ ${capId}: expected exactly one assessment decision for ${assessId}, got ${assessDecisions.length}`);
+    say(`008E-TRAJ: ${capId} independent → retained → transferred → ${assessId} (once)`);
+  }
 }
 
 console.log(`vnext-next-for-you-runtime: ${check} checks — PASS`);
