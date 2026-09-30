@@ -1,0 +1,26 @@
+$ node tests/swe-factory.test.mjs
+
+
+swe-factory: 21 checks — PASS
+  ✓ queued mission listed as QUEUED
+  ✓ start transitions to RUNNING with start sha
+  ✓ start refuses unsafe dirty tree
+  ✓ second mission start refused while first active
+  ✓ checkpoint missing sections refused
+  ✓ full checkpoint recorded + stamped with real sha
+  ✓ verify PASS recorded with sha
+  ✓ finish refused without any verification
+  ✓ finish refused when HEAD moved after verify
+  ✓ finish DONE after green verify on HEAD + REPORT.md written
+  ✓ verify FAIL exits nonzero and is recorded
+  ✓ finish refused after red verify
+  ✓ finish --result failed still allowed + report
+  ✓ blocked checkpoint sets BLOCKED
+  ✓ resume prints packet + unblocks
+  ✓ non-allowlisted verification command rejected
+  ✓ verification on missing file rejected
+  ✓ verification on unknown npm script rejected
+  ✓ resume warns on uncommitted tracked changes
+  ✓ checkpoint on DONE mission refused
+  ✓ second finish refused
+

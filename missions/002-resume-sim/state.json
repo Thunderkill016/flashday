@@ -1,0 +1,66 @@
+{
+  "id": "002-resume-sim",
+  "status": "DONE",
+  "startedAt": "2026-09-30T06:55:40.674Z",
+  "finishedAt": "2026-09-30T06:56:09.180Z",
+  "startSha": "4d0df45c4478429571981670020ff6db5ff207a8",
+  "startBranch": "devin/swe-factory-001",
+  "currentSha": "4d0df45c4478429571981670020ff6db5ff207a8",
+  "checkpoints": [
+    {
+      "n": 1,
+      "file": "checkpoints/001-checkpoint.md",
+      "at": "2026-09-30T06:55:48.925Z",
+      "sha": "4d0df45c4478429571981670020ff6db5ff207a8"
+    }
+  ],
+  "commands": [
+    {
+      "at": "2026-09-30T06:55:40.696Z",
+      "type": "start",
+      "detail": "devin/swe-factory-001@4d0df45c4478"
+    },
+    {
+      "at": "2026-09-30T06:55:48.934Z",
+      "type": "checkpoint",
+      "detail": "cp 1 (blocked)"
+    },
+    {
+      "at": "2026-09-30T06:55:55.224Z",
+      "type": "resume",
+      "detail": "unblocked"
+    },
+    {
+      "at": "2026-09-30T06:56:08.915Z",
+      "type": "verify",
+      "detail": "PASS"
+    },
+    {
+      "at": "2026-09-30T06:56:09.181Z",
+      "type": "finish",
+      "detail": "done"
+    }
+  ],
+  "verifications": [
+    {
+      "at": "2026-09-30T06:56:08.915Z",
+      "sha": "4d0df45c4478429571981670020ff6db5ff207a8",
+      "ok": true,
+      "results": [
+        {
+          "cmd": "node tests/swe-factory.test.mjs",
+          "exitCode": 0,
+          "ok": true,
+          "ms": 4573,
+          "log": "logs/verify-1790751368911-0.log"
+        }
+      ]
+    }
+  ],
+  "knownFailures": [],
+  "browserVerification": null,
+  "result": {
+    "status": "done",
+    "summary": null
+  }
+}

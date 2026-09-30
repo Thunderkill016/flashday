@@ -1,0 +1,61 @@
+{
+  "id": "001-factory-smoke",
+  "status": "DONE",
+  "startedAt": "2026-09-30T06:55:15.751Z",
+  "finishedAt": "2026-09-30T06:55:20.941Z",
+  "startSha": "7b7bf698b6f0d5e4cb40972e2b424f88318ee275",
+  "startBranch": "devin/swe-factory-001",
+  "currentSha": "7b7bf698b6f0d5e4cb40972e2b424f88318ee275",
+  "checkpoints": [
+    {
+      "n": 1,
+      "file": "checkpoints/001-checkpoint.md",
+      "at": "2026-09-30T06:55:16.054Z",
+      "sha": "7b7bf698b6f0d5e4cb40972e2b424f88318ee275"
+    }
+  ],
+  "commands": [
+    {
+      "at": "2026-09-30T06:55:15.773Z",
+      "type": "start",
+      "detail": "devin/swe-factory-001@7b7bf698b6f0"
+    },
+    {
+      "at": "2026-09-30T06:55:16.060Z",
+      "type": "checkpoint",
+      "detail": "cp 1"
+    },
+    {
+      "at": "2026-09-30T06:55:20.671Z",
+      "type": "verify",
+      "detail": "PASS"
+    },
+    {
+      "at": "2026-09-30T06:55:20.941Z",
+      "type": "finish",
+      "detail": "done"
+    }
+  ],
+  "verifications": [
+    {
+      "at": "2026-09-30T06:55:20.671Z",
+      "sha": "7b7bf698b6f0d5e4cb40972e2b424f88318ee275",
+      "ok": true,
+      "results": [
+        {
+          "cmd": "node tests/swe-factory.test.mjs",
+          "exitCode": 0,
+          "ok": true,
+          "ms": 4356,
+          "log": "logs/verify-1790751320664-0.log"
+        }
+      ]
+    }
+  ],
+  "knownFailures": [],
+  "browserVerification": null,
+  "result": {
+    "status": "done",
+    "summary": null
+  }
+}
