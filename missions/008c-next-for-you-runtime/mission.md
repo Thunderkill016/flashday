@@ -168,9 +168,9 @@ browser back/refresh if relevant. No brittle sleeps/selectors.
 - Mission file contradicts observed repo reality.
 - Scope keeps expanding beyond the declared contract.
 
-## REPORT FORMAT (§34)
+## REPORT FORMAT
 
-MISSION 008C — PRODUCTION RUNTIME INTEGRATION report answering:
+MISSION 008C — PRODUCTION RUNTIME INTEGRATION report (spec §34) answering:
 BASE SHA · ENDING SHA · PR · PRODUCTION MODULES · BROWSER-SAFE HASH
 RESULT · REFERENCE SELECTOR STATUS · B0 SELECTOR STATUS · SHADOW MODE ·
 DECISION CONTEXT LIFECYCLE · RELOAD RESULT · LIVE DECISION LOCK ·
