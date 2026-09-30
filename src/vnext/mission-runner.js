@@ -112,6 +112,7 @@ export function nextMissionTask({ learnerId, mission, tasks, capabilities, event
    * an unrun task. */
   const verifiedEvent = new Set();
   const verifiedAttempt = new Set();
+  const attemptOutcomes = new Map(); // key → [{outcome, occurredAt, id}] verified only
   for (const e of events) {
     if (e.learnerId !== learnerId) continue;
     const t = byKey.get(`${e.taskId}@${e.taskRevision}`);
@@ -119,7 +120,15 @@ export function nextMissionTask({ learnerId, mission, tasks, capabilities, event
     if (!t || !cap || !verifyEventTask(e, t, cap)) continue;
     const key = keyOf(t);
     verifiedEvent.add(key);
-    if (e.attempt?.outcome != null) verifiedAttempt.add(key);
+    if (e.attempt?.outcome != null) {
+      verifiedAttempt.add(key);
+      const list = attemptOutcomes.get(key) ?? [];
+      list.push({ outcome: e.attempt.outcome, occurredAt: e.occurredAt, id: e.id });
+      attemptOutcomes.set(key, list);
+    }
+  }
+  for (const list of attemptOutcomes.values()) {
+    list.sort((a, b) => a.occurredAt - b.occurredAt || (a.id < b.id ? -1 : 1));
   }
 
   /* Phase 0 — declared baseline diagnostics run once, in mission order.
@@ -184,9 +193,17 @@ export function nextMissionTask({ learnerId, mission, tasks, capabilities, event
    * substitute for transfer work. */
   const { byCapability } = projectLearnerState(learnerId, events, capabilities, tasks);
   for (const t of missionTasks) {
-    if (t.purpose === 'assessment' && mission.assessmentPlan?.required && !verifiedAttempt.has(keyOf(t))) {
+    if (t.purpose === 'assessment' && mission.assessmentPlan?.required) {
+      const attempts = attemptOutcomes.get(keyOf(t)) ?? [];
+      const latest = attempts[attempts.length - 1];
+      /* A non-success assessment is probed again after remediation —
+       * the capability must still hold TRANSFERRED, and the retry is
+       * just as fresh as the first sample. */
+      if (attempts.length && latest.outcome === 'success') continue;
       if (byCapability.get(t.capabilityId)?.milestones.transferred) {
-        return ready(t, 'assessment plan requires a fresh sample after transfer');
+        return ready(t, latest
+          ? `assessment re-probe after ${latest.outcome} outcome — TRANSFERRED still requires a fresh pass`
+          : 'assessment plan requires a fresh sample after transfer');
       }
       skipped.push(`${t.capabilityId}: assessment '${keyOf(t)}' waits for TRANSFERRED`);
     }
