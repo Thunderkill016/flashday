@@ -99,10 +99,10 @@ const F = {
     communicativeFunction: 'state_own_name',
     cueTopology: 'name_check',
     setting: 'educational',
-    register: 'neutral',
+    register: 'casual',
     channel: 'f2f',
     interlocutorRole: 'teacher',
-    relationship: 'authority',
+    relationship: 'first_meeting',
     responseTopology: 'name_statement',
     lexicalDomain: 'identity'
   },
@@ -137,7 +137,7 @@ const F = {
     register: 'casual',
     channel: 'f2f',
     interlocutorRole: 'stranger',
-    relationship: 'stranger_contact',
+    relationship: 'first_meeting',
     responseTopology: 'wh_question',
     lexicalDomain: 'identity'
   },
@@ -466,7 +466,7 @@ export const MISSION_ORDER_DRINK = makeMission({
   learnerGoal: 'Understand the offer question and order a drink.',
   targetCapabilities: ['interaction.request_item'],
   carrierCapabilities: ['reception.listen.drink_order_question_basic'],
-  prerequisiteCapabilities: [],
+  pedagogy: { recommendedAfterMissions: ['mission.meet_new_person'] },
   // No support capabilities declared — supports are demand-driven and
   // no mechanism yet routes to them; a dead surface only produces
   // planner intents the mission must block on.
@@ -753,10 +753,10 @@ const TF = {
     communicativeFunction: 'understand_clock_time',
     cueTopology: 'appointment_confirmation',
     setting: 'clinic',
-    register: 'neutral',
+    register: 'casual',
     channel: 'f2f',
     interlocutorRole: 'receptionist',
-    relationship: 'service',
+    relationship: 'repeat_contact',
     responseTopology: 'mc_meaning',
     lexicalDomain: 'time'
   },
@@ -764,10 +764,10 @@ const TF = {
     communicativeFunction: 'state_clock_time',
     cueTopology: 'schedule_info_request',
     setting: 'community_event',
-    register: 'neutral',
+    register: 'casual',
     channel: 'f2f',
     interlocutorRole: 'attendee',
-    relationship: 'stranger_contact',
+    relationship: 'repeat_contact',
     responseTopology: 'time_statement',
     lexicalDomain: 'time'
   },
@@ -804,19 +804,20 @@ export const MISSION_MEET_AT_TIME = makeMission({
     'reception.listen.understand_clock_time',
     'production.speak.state_clock_time'
   ],
-  carrierCapabilities: ['interaction.greet', 'interaction.ask_name'],
-  /* identify_spoken_number is support substrate, not a DAG edge (R6):
-   * declared so a demand-driven probe can route to it later, but no
-   * task binds it yet. */
-  supportCapabilities: ['reception.listen.identify_spoken_number'],
-  /* Read-only DAG gates — evidence carried over from earlier missions:
-   * greet needs greeting_basic, ask_name needs identity_question_basic
-   * and say_own_name, say_own_name needs identity_question_basic. */
-  prerequisiteCapabilities: [
-    'reception.listen.greeting_basic',
-    'reception.listen.identity_question_basic',
-    'production.speak.say_own_name'
+  /* greeting_basic is a carrier like the spoken caps — rehearsed via
+   * one comprehension check, never claim-bearing here. No capability
+   * gates on evidence from earlier missions: the only edges are
+   * curriculum order (pedagogy), not capability dependencies (R7). */
+  carrierCapabilities: [
+    'interaction.greet',
+    'interaction.ask_name',
+    'reception.listen.greeting_basic'
   ],
+  /* identify_spoken_number stays OFF the surface: demand-driven support
+   * needs a router, which does not exist yet — declaring it would be a
+   * dead surface (R7 blocker 2). */
+  supportCapabilities: [],
+  pedagogy: { recommendedAfterMissions: ['mission.order_drink'] },
   language: {
     assumedKnown: {
       chunks: ['Hi', 'Hello', "What's your name?"],
@@ -909,11 +910,9 @@ export const TASKS_MEET_AT_TIME = [
     response: { type: 'none', requiredFunctions: [] },
     language: { requiredChunks: ["It's … o'clock", 'See you at …'], requiredVocabulary: ['time', 'two', 'three'], requiredConstructions: [] }
   }),
-  /* greeting_basic is a read-only prerequisite here, but the whole
-   * curriculum gives it no other eliciting task — without an attempt it
-   * can never reach INDEPENDENT and every capability gated on it
-   * (interaction.greet, in missions 3–6) would deadlock. One cheap
-   * comprehension check is enough rehearsal to evidence it. */
+  /* greeting_basic is a carrier here — the only eliciting task for it
+   * in the whole curriculum is this cheap comprehension check, enough
+   * rehearsal to evidence it without claiming it. */
   task({
     id: 'task.time.retrieval.greeting',
     missionId: 'mission.meet_at_a_time',
@@ -1257,14 +1256,11 @@ export const MISSION_COMPLETE_ORDER = makeMission({
     'interaction.answer_simple_choice'
   ],
   carrierCapabilities: ['interaction.greet', 'interaction.thank'],
-  /* understand_simple_choice is the support substrate for the choice
-   * answer target (R6 split): comprehension may be probed on demand
-   * but carries no baseline of its own. */
-  supportCapabilities: ['reception.listen.understand_simple_choice'],
-  prerequisiteCapabilities: [
-    'reception.listen.drink_order_question_basic',
-    'reception.listen.greeting_basic'
-  ],
+  /* understand_simple_choice stays OFF the surface until the
+   * support-demand router exists (R7) — choice comprehension is
+   * embedded in the choice-answer interaction itself. */
+  supportCapabilities: [],
+  pedagogy: { recommendedAfterMissions: ['mission.meet_at_a_time'] },
   language: {
     assumedKnown: {
       chunks: ['What would you like?', 'Can I have …?', 'A coffee, please', 'A …, please', 'Hi', 'Hello'],
@@ -1599,7 +1595,7 @@ const SF = {
     communicativeFunction: 'understand_spoken_price',
     cueTopology: 'total_due_statement',
     setting: 'checkout',
-    register: 'neutral',
+    register: 'casual',
     channel: 'f2f',
     interlocutorRole: 'cashier',
     relationship: 'service',
@@ -1640,8 +1636,8 @@ export const MISSION_BUY_ITEM = makeMission({
     'reception.listen.understand_spoken_price'
   ],
   carrierCapabilities: ['interaction.request_item', 'interaction.thank'],
-  supportCapabilities: ['reception.listen.identify_spoken_number'],
-  prerequisiteCapabilities: ['reception.listen.drink_order_question_basic'],
+  supportCapabilities: [],
+  pedagogy: { recommendedAfterMissions: ['mission.complete_small_order'] },
   language: {
     assumedKnown: {
       chunks: ['Can I have …?', 'A …, please', 'Thank you', 'Thanks'],
@@ -1961,6 +1957,15 @@ const LF = {
     responseTopology: 'mc_meaning',
     lexicalDomain: 'directions'
   }),
+  /* R7: a second practiced route topology — the generic capability
+   * needs more than one-turn instructions in its practiced pool or the
+   * held-out landmark transfer measures an un-practiced construct. */
+  directionLandmark: streetSig({
+    communicativeFunction: 'follow_short_direction',
+    cueTopology: 'landmark_sequence',
+    responseTopology: 'mc_meaning',
+    lexicalDomain: 'directions'
+  }),
   placeAsked: streetSig({
     communicativeFunction: 'ask_location',
     cueTopology: 'place_query',
@@ -1995,7 +2000,7 @@ const LF = {
     register: 'neutral',
     channel: 'f2f',
     interlocutorRole: 'staff',
-    relationship: 'service',
+    relationship: 'stranger_contact',
     responseTopology: 'location_question',
     lexicalDomain: 'places'
   },
@@ -2006,7 +2011,7 @@ const LF = {
     register: 'neutral',
     channel: 'f2f',
     interlocutorRole: 'staff',
-    relationship: 'service',
+    relationship: 'stranger_contact',
     responseTopology: 'mc_meaning',
     lexicalDomain: 'directions'
   },
@@ -2044,8 +2049,10 @@ export const MISSION_FIND_PLACE = makeMission({
     'reception.listen.follow_short_direction'
   ],
   carrierCapabilities: ['interaction.greet', 'interaction.thank'],
-  supportCapabilities: ['reception.listen.identify_basic_direction_term'],
-  prerequisiteCapabilities: ['reception.listen.greeting_basic'],
+  /* identify_basic_direction_term stays OFF the surface until the
+   * support-demand router exists (R7). */
+  supportCapabilities: [],
+  pedagogy: { recommendedAfterMissions: ['mission.buy_small_item'] },
   language: {
     assumedKnown: {
       chunks: ['Hi', 'Hello', 'Thank you', 'Thanks'],
@@ -2054,7 +2061,7 @@ export const MISSION_FIND_PLACE = makeMission({
     },
     introduced: {
       chunks: ['Where is the …?', 'Turn left', 'Turn right', 'Go straight', 'On the left', 'On the right', 'Next to …', 'Straight ahead', 'Then …', 'Excuse me', 'Can I help you?'],
-      vocabulary: ['where', 'left', 'right', 'straight', 'station', 'toilet', 'bank', 'lift', 'platform', 'excuse', 'help'],
+      vocabulary: ['where', 'left', 'right', 'straight', 'station', 'toilet', 'bank', 'lift', 'platform', 'excuse', 'help', 'café'],
       constructions: []
     }
   },
@@ -2065,6 +2072,7 @@ export const MISSION_FIND_PLACE = makeMission({
     'task.place.input.route',
     'task.place.retrieval.ask',
     'task.place.retrieval.follow',
+    'task.place.retrieval.follow_landmark',
     'task.place.retrieval.greet',
     'task.place.interaction.ask_guided',
     'task.place.interaction.ask_unaided',
@@ -2168,6 +2176,26 @@ export const TASKS_FIND_PLACE = [
       ]
     },
     language: { requiredChunks: ['Turn right'], requiredVocabulary: ['right', 'bank'], requiredConstructions: [] }
+  }),
+  task({
+    id: 'task.place.retrieval.follow_landmark',
+    missionId: 'mission.find_a_place',
+    capabilityId: 'reception.listen.follow_short_direction',
+    modality: 'listening',
+    purpose: 'retrieval',
+    promptFamily: pf('reception.listen.follow_short_direction', LF.directionLandmark),
+    contextSignature: LF.directionLandmark,
+    stimulus: { type: 'audio_line', languageComponents: ['Go past the café — the bank is next to it.'] },
+    response: {
+      type: 'choice',
+      requiredFunctions: ['follow_short_direction'],
+      options: [
+        { id: 'bank_after_cafe', text: 'Đi qua quán cà phê — ngân hàng ở cạnh đó.', correct: true },
+        { id: 'cafe_after_bank', text: 'Đi qua ngân hàng — quán cà phê ở cạnh đó.' },
+        { id: 'turn_cafe', text: 'Rẽ ở quán cà phê.' }
+      ]
+    },
+    language: { requiredChunks: ['Next to …'], requiredVocabulary: ['bank', 'café'], requiredConstructions: [] }
   }),
   task({
     id: 'task.place.retrieval.greet',
@@ -2408,10 +2436,10 @@ const MF = {
     communicativeFunction: 'state_basic_self_detail',
     cueTopology: 'registration_detail',
     setting: 'office',
-    register: 'neutral',
+    register: 'casual',
     channel: 'f2f',
     interlocutorRole: 'admin_staff',
-    relationship: 'service',
+    relationship: 'repeat_contact',
     responseTopology: 'self_detail_statement',
     lexicalDomain: 'identity'
   },
@@ -2451,9 +2479,7 @@ export const MISSION_SELF_FAMILY = makeMission({
   carrierCapabilities: ['production.speak.say_own_name'],
   /* R6: lexical support only — no spoken support capability declared. */
   supportCapabilities: [],
-  /* say_own_name (carrier + prereq of both targets) itself needs
-   * identity_question_basic — declared so the closure stays honest. */
-  prerequisiteCapabilities: ['reception.listen.identity_question_basic'],
+  pedagogy: { recommendedAfterMissions: ['mission.find_a_place'] },
   language: {
     assumedKnown: {
       chunks: ["I'm …", 'My name is …'],

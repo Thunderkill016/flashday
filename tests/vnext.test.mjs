@@ -275,6 +275,10 @@ const planFor = (log, opts) => planNext(LEARNER, log, { tasks: allTasks(), ...op
 // ── 7. Vertical slice: baseline fail → input → retrieval → supported
 //        interaction → feedback → retry → independent → delayed →
 //        changed-context transfer — planner routes every step ──
+// R7: capabilities have no DAG prerequisites — a baseline fail routes
+// to teaching THE CAPABILITY ITSELF (expose), never to a "prerequisite
+// walk". The second capability here only demonstrates earliest-due
+// ordering between two independent evidence timelines.
 {
   const cap = 'interaction.greet';
   const pre = 'reception.listen.greeting_basic';
@@ -283,8 +287,8 @@ const planFor = (log, opts) => planNext(LEARNER, log, { tasks: allTasks(), ...op
   const at = (offsetMs) => T0 + offsetMs;
 
   // Baseline probe: cold attempt fails. A failed baseline is diagnostic —
-  // the planner must route to TEACHING (the unmet prerequisite), not to
-  // retrying something that was never taught.
+  // the planner must route to TEACHING the failed capability itself,
+  // not to retrying something that was never taught.
   log.push(ev(cap, {
     eventType: 'interaction_turn',
     occurredAt: at(0),
@@ -292,36 +296,33 @@ const planFor = (log, opts) => planNext(LEARNER, log, { tasks: allTasks(), ...op
   }));
   assert.equal(stateOf(log, cap).state, 'EXPOSED', 'a baseline fail still means the capability was encountered');
   let plan = planFor(log, opts);
-  assert.equal(plan.capabilityId, pre, 'planner walks to the unmet prerequisite');
-  assert.ok(['diagnostic_probe', 'expose'].includes(plan.kind), `teach the prereq, got ${plan.kind}`);
-  assert.equal(stateOf(log, pre).state, 'NOT_SEEN');
+  assert.equal(plan.capabilityId, cap, 'planner teaches the failed capability — there is no prerequisite to walk to');
+  assert.ok(['diagnostic_probe', 'expose'].includes(plan.kind), `teach the cap, got ${plan.kind}`);
 
-  // Meaningful input on the prerequisite.
-  log.push(ev(pre, {
+  // Meaningful input on the failed capability.
+  log.push(ev(cap, {
     eventType: 'exposure',
     occurredAt: at(1_000),
     attempt: { observed: true, outcome: null, response: null, latencyMs: null }
   }));
-  assert.equal(stateOf(log, pre).state, 'EXPOSED');
-  assert.equal(planFor(log, opts).kind, 'resume', 'an open encounter resumes before anything else');
 
   // Guided retrieval with a hint — supported, not independent.
-  log.push(ev(pre, {
+  log.push(ev(cap, {
     eventType: 'recall_attempt',
     occurredAt: at(2_000),
     support: { hint: true, translation: false, transcript: false, modelAnswer: false, repeat: false }
   }));
-  assert.equal(stateOf(log, pre).state, 'SUPPORTED');
+  assert.equal(stateOf(log, cap).state, 'SUPPORTED');
   assert.equal(planFor(log, opts).kind, 'independent_attempt', 'supported work earns an unaided run');
 
-  // Unaided recall — prerequisite is now INDEPENDENT.
-  log.push(ev(pre, { eventType: 'recall_attempt', occurredAt: at(3_000) }));
+  // A second, independent capability learned EARLIER anchors the
+  // earliest-due ordering later on — no dependency between the two.
+  log.push(ev(pre, { eventType: 'exposure', occurredAt: at(100), attempt: { observed: true, outcome: null, response: null, latencyMs: null } }));
+  log.push(ev(pre, { eventType: 'recall_attempt', occurredAt: at(200) }));
   assert.equal(stateOf(log, pre).state, 'INDEPENDENT');
-  plan = planFor(log, opts);
-  assert.equal(plan.capabilityId, cap, 'prereq learned → target capability becomes eligible');
-  assert.ok(['diagnostic_probe', 'expose'].includes(plan.kind), `introduce the target, got ${plan.kind}`);
 
-  // Supported interaction on the target capability.
+  // Supported interaction on the failing capability — still SUPPORTED,
+  // not yet independent.
   log.push(ev(cap, {
     eventType: 'interaction_turn',
     occurredAt: at(4_000),
@@ -341,7 +342,7 @@ const planFor = (log, opts) => planNext(LEARNER, log, { tasks: allTasks(), ...op
   assert.equal(stateOf(log, cap).state, 'INDEPENDENT', 'unaided retry earns INDEPENDENT');
 
   // Once the retention window opens, the delayed check is the next work.
-  // Earliest-due wins: the prerequisite learned first is due first.
+  // Earliest-due wins: the capability learned first is due first.
   plan = planFor(log, { ...opts, now: at(6_000) + RETENTION_DELAY_MS });
   assert.equal(plan.kind, 'delayed_retrieval', 'after independence the next work is a delayed check');
   assert.equal(plan.capabilityId, pre, 'the earlier-learned capability is due first');
