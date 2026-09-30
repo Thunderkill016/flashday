@@ -183,3 +183,25 @@ Any host that isn't `flashday.web.app`, localhost, or a preview channel
 (`--` in hostname) is redirected to the canonical host before anything
 else runs — otherwise the auth helper iframe becomes cross-origin and
 lesson #1 happens again.
+
+## SWE work factory (missions/)
+
+Long autonomous missions run through the repo-local factory
+(`scripts/swe.mjs`, docs in `missions/README.md`, tests in
+`tests/swe-factory.test.mjs`). Lifecycle: QUEUED → RUNNING → VERIFYING →
+DONE / FAILED / BLOCKED — one non-terminal mission at a time.
+
+```bash
+npm run swe:start                  # refuses on dirty tree / active mission
+npm run swe:checkpoint -- <id> --file cp.md   # stamped, resumable state
+npm run swe:verify -- <id>         # runs the mission's allowlisted checks
+npm run swe:finish -- <id>         # DONE only with green verify on HEAD
+npm run swe:resume                 # context packet for a fresh session
+```
+
+Rules the factory enforces that must never be bypassed: verification
+commands are allowlisted shapes only (`npm run <script>`, `node tests/…`,
+`node scripts/…`); DONE requires the last `swe:verify` to be green on the
+current HEAD; a commit after verify forces re-verification. Mission files
+(`missions/<id>/mission.md`, see `missions/TEMPLATE.md`) are authored by
+agents/humans — V1 never generates new missions.
