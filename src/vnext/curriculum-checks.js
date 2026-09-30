@@ -151,6 +151,69 @@ export function checkCurriculum({ capabilities = [], missions = [], tasks = [], 
         problems.push(`${tag}: carrier '${capId}' owns a diagnostic/assessment task — carriers get no baseline and no certification`);
       }
     }
+
+    /* ── Support roles (#61): a declared support capability must be a
+     * REAL demand route, not paper — it must provide at least one
+     * function some mission task requires, own at least one support-
+     * purpose probe task, and never share a role with target/carrier/
+     * prerequisite surfaces. Tasks ON a support cap may only be support
+     * probes — a claim-bearing purpose would launder remediation work
+     * into capability evidence. */
+    const supports = mission?.supportCapabilities ?? [];
+    const supportSet = new Set(supports);
+    const roleOverlap = supports.filter((id) =>
+      targets.includes(id) ||
+      (mission?.carrierCapabilities ?? []).includes(id) ||
+      (mission?.prerequisiteCapabilities ?? []).includes(id));
+    for (const id of roleOverlap) {
+      problems.push(`${tag}: support '${id}' also appears as target/carrier/prerequisite — a capability holds exactly one mission role`);
+    }
+    const capByIdAll = new Map(capabilities.map((c) => [c.id, c]));
+    const missionRequiredFns = new Set();
+    for (const t of missionTasks) {
+      for (const fn of t.response?.requiredFunctions ?? []) missionRequiredFns.add(fn);
+    }
+    for (const capId of supports) {
+      const cap = capByIdAll.get(capId);
+      if (!cap) continue; // unknown id already flagged by validateMission
+      const provided = (cap.providesFunctions ?? []).filter((fn) => missionRequiredFns.has(fn));
+      if (!provided.length) {
+        problems.push(`${tag}: support '${capId}' provides no function any mission task requires — a dead paper support declaration`);
+      }
+      const capTasks = missionTasks.filter((t) => t.capabilityId === capId);
+      const probes = capTasks.filter((t) => t.purpose === 'support');
+      if (!probes.length) {
+        problems.push(`${tag}: support '${capId}' owns no support-purpose probe task — a demand could be issued but never served`);
+      }
+      if (capTasks.some((t) => t.purpose !== 'support')) {
+        problems.push(`${tag}: support '${capId}' owns a non-support task — remediation substrate cannot carry claim-bearing purposes`);
+      }
+      /* Function-scoped routing needs per-function servability: every
+       * mission-relevant provided function must be exercised by at
+       * least one probe (else its demand issues but is never correctly
+       * served), and a probe may only test functions the cap actually
+       * provides — otherwise its evidence is misprovenanced and could
+       * consume demands it never addressed. */
+      const covered = new Set();
+      for (const t of probes) {
+        for (const fn of t.response?.requiredFunctions ?? []) {
+          covered.add(fn);
+          if (!(cap.providesFunctions ?? []).includes(fn)) {
+            problems.push(`${tag}: support probe '${t.id}' tests '${fn}', which '${capId}' does not provide — misprovenanced substrate evidence`);
+          }
+        }
+      }
+      for (const fn of provided) {
+        if (!covered.has(fn)) {
+          problems.push(`${tag}: support '${capId}' provides '${fn}' but no probe on it tests that function — a demand for '${fn}' can issue but is unservable`);
+        }
+      }
+    }
+    for (const t of missionTasks) {
+      if (t.purpose === 'support' && !supportSet.has(t.capabilityId)) {
+        problems.push(`${tag}: task '${t.id}' has purpose 'support' on non-support capability '${t.capabilityId}' — support probes live on support roles only`);
+      }
+    }
   }
 
   /* ── 3a. Signature presence + canonical family ids ───────── */

@@ -1,0 +1,252 @@
+$ npm run verify:full
+
+
+> flashday@0.1.0 verify:full
+> npm run verify && npm run test:browser && npm run test:firestore
+
+
+> flashday@0.1.0 verify
+> npm run typecheck && npm test && npm run build
+
+
+> flashday@0.1.0 typecheck
+> node scripts/typecheck.mjs
+
+typecheck: 124 files OK
+
+> flashday@0.1.0 test
+> node tests/namespace.test.mjs && node tests/session.test.mjs && node tests/evidence.test.mjs && node tests/progress.test.mjs && node tests/scheduler.test.mjs && node tests/learner-model.test.mjs && node tests/time-gate.test.mjs && node tests/voice.test.mjs && node tests/cloud-sync.test.mjs && node tests/content.test.mjs && node tests/mission.test.mjs && node tests/vnext.test.mjs && node tests/vnext-contracts.test.mjs && node tests/vnext-slice.test.mjs && node tests/vnext-pilot.test.mjs && node tests/vnext-policy.test.mjs && node tests/vnext-persist.test.mjs && node tests/vnext-ui-session.test.mjs && node tests/vnext-support-demand.test.mjs && node tests/vnext-audit-kernel.test.mjs && node tests/vnext-curriculum.test.mjs && node tests/content-reuse.test.mjs && node tests/flashday-store.test.js && node tests/fsrs-scheduler.test.mjs && node tests/flashday-cloud.test.js && node tests/flashday-auth.test.mjs && node tests/cloud-compat.test.mjs && node tests/site-entrypoints.test.js && node tests/swe-factory.test.mjs
+
+FlashDay namespace: 3 checks passed
+FlashDay session: 4 checks passed
+FlashDay evidence: 3 checks passed
+FlashDay progress: 5 checks passed
+FlashDay scheduler: 6 checks passed
+FlashDay learner model: 10 checks passed
+FlashDay time gate: 12 checks passed
+FlashDay cloud sync: 4 checks passed
+FlashDay content: 5 checks passed
+FlashDay mission checks: 7 groups passed
+✓ graph: 12+ capabilities, all modalities, acyclic prerequisites
+✓ aided/self-reported success cannot become INDEPENDENT
+✓ immediate success cannot become RETAINED; delayed success can
+✓ same-prompt repeat is not TRANSFERRED; changed context is
+✓ modality isolation: speaking evidence cannot mark listening learned
+✓ risk priors schedule diagnostics only — never mark weakness
+✓ replay is deterministic; prefixes reproduce intermediate states
+✓ vertical slice: baseline fail → input → retrieval → supported → feedback → retry → INDEPENDENT → RETAINED → TRANSFERRED
+✓ planner: prerequisites gate introductions
+✓ review invariants: attempt-only credit, order-free replay, learner isolation, no due-loop, honest fluency, practiced ≠ novel
+✓ support conditions enforced: violated conditions cap at SUPPORTED; repeat_once needs counted provenance
+vNext headless engine: all checks passed
+✓ fixtures: both missions validate clean under contracts + injected content policy
+✓ task support cannot broaden capability support
+✓ caller cannot forge purpose, promptFamily, transfer status, or event type
+✓ teaching family cannot collide with fresh assessment family
+✓ transfer requires a changed dimension AND a genuinely novel family
+✓ answer reveal provenance survives retry inside the attempt boundary
+✓ self_report/asr/ai_llm evaluation can never award independence; authority is contract-derived
+✓ undeclared language fails validation; injected budgets are enforced
+✓ assessment binds fresh family + zero support; revealed answers invalidate it
+✓ fixture A: diagnostic → input → supported → feedback → independent → retained → transferred → fresh assessment
+✓ fixture B: drink mission drives the same contract chain; isolation + determinism hold
+✓ round-2 blockers: authority derived, assessment≠transfer, binder-only independence, taskIds scope, declared language, task-scoped sticky
+✓ trust boundary: forged bindings fail registry verification; eliciting tasks require a real evaluator contract
+✓ registry: revisions coexist, duplicate id@revision rejected, invalid tasks mint nothing
+✓ response×purpose: production+choice rejected, valid combos preserved
+✓ slice: baseline fail → input → retrieval → supported → feedback → retry → INDEPENDENT → RETAINED → TRANSFERRED → fresh assessment
+✓ baseline pass skips teaching; carriers never get probes, transfer or certification
+✓ aided retry inside one attempt boundary stays SUPPORTED
+✓ failed delayed retrieval routes to remediation, not another delayed check
+✓ missing transfer task → blocked with an explicit reason, never a substitute
+✓ fresh assessment cannot substitute for transfer — gated and non-crediting
+✓ task revision mismatch is never selected or credited
+✓ selector replay is deterministic and learner-isolated
+✓ selection is revision-scoped and only verified evidence consumes a task
+✓ missing or invalid declared tasks fail closed — never silently skipped
+✓ expose/resume fallback never drifts into remediation, delayed, transfer or assessment
+✓ M3 cross-mission slice: M1 evidence verifies via registry, mastered carrier not re-taught, backlog never blocks
+vNext slice: all checks passed
+vnext-pilot: cohort claims, baseline attribution, contradiction resolution, re-probe, replay & isolation — PASS
+vnext-policy: registry fail-closed, retention/remediation/claim thresholds versioned — PASS
+vnext-persist: exactly-once append, immutable conflict, replay parity, canonical order — PASS
+  ✓ intro → start → selector-driven diagnostic first screen
+  ✓ reload resumes same missionRunId + intact log
+  ✓ pre-commit support → support_use + stamped snapshot → never unaided
+  ✓ post-commit support cannot retro-contaminate; double commit no-op
+  ✓ diagnostic offers no pre-commit support
+  ✓ delayed_retrieval / transfer / assessment offer no pre-commit support
+  ✓ input view → single exposure event, never an attempt
+  ✓ feedback event appended strictly after the committed attempt
+  ✓ deterministic attemptId survives reload — no duplicate evidence
+  ✓ full mission → fresh checkpoint committed, outcome frozen in the event
+  ✓ abandon → new run; old evidence keeps its run provenance
+  ✓ summary reports observed evidence — baseline attributed, no mastery claims
+  ✓ identical script → identical log + summary (replay determinism)
+vnext-ui-session: 13 checks — PASS
+  ✓ evaluator attribution: choice miss → declared functions; text miss → []; unknown contract → no attribution
+  ✓ binder stamps missingFunctions ⊆ requiredFunctions; forged/malformed reports rejected
+  ✓ declared support cap never free-runs: no demand without an attributing miss
+  ✓ attributing miss on a provided function → SUPPORT_DEMAND with target/task provenance
+  ✓ demands require verified + observed + attributing-contract failures
+  ✓ probe served once, then selection returns to the failing target capability
+  ✓ support_attempt is remediation context — zero milestones on support or target
+  ✓ demand lifecycle: probe consumes (pass or fail), target recovery cancels, pair bound prevents loops
+  ✓ same evidence any order → same plan; demands are learner-isolated
+  ✓ mission trace: probe interposes after the miss exactly once; substrate never earns claims
+  ✓ unservable demand → skipped intent, mission continues — support backlog is never fatal
+  ✓ gate rejects: dead providesFunctions, probe-less support, claim-bearing probe, misplaced probe, role overlap
+  ✓ end-to-end: UI commit stamps attribution → probe interposes once → back to the mission path
+vnext-support-demand: 13 checks — PASS
+  ✓ A: recovered pair gets a fresh demand episode weeks later
+  ✓ A2: unrecovered pair stays bounded — no oscillation
+  ✓ B: probe for fn_a must not consume the pending fn_b demand
+  ✓ C: selector must serve the probe that covers the missing function
+  ✓ C2: uncovered demand is skipped non-fatally, never blocks the mission
+  ✓ D: target success not exercising the missing fn must not cancel its demand
+  ✓ D2: success on a task that DOES require the fn cancels the demand
+  ✓ E: carrier miss with declared provider routes demand (documented intent)
+  ✓ F: multi-function attribution stays bounded and independently served
+  ✓ G: support success + failed target retry mints zero claims anywhere
+  ✓ G2: stale-revision miss cannot mint a demand
+  ✓ G3: attemptId boundary is task-scoped — no cross-task support leak
+  ✓ H: pending demand never starves due retrieval
+  ✓ H2: multiple demands surface in deterministic canonical order
+  ✓ H3: cross-mission scope — undeclared provider cannot route
+  ✓ I: gate flags a provided function no probe covers
+  ✓ I2: gate flags a probe testing a function the cap does not provide
+  ✓ I3: deterministic provider pick under ambiguity
+  ✓ J: duplicate event delivery never changes demand state
+  ✓ J2: JSON persistence round-trip replays identically
+  ✓ J3: foreign learner cannot issue or consume demands
+  ✓ SIM-1 gap→support→recovery→same gap 30d later re-routes
+  ✓ SIM-4 recurring forgetful learner — every recovered episode re-arms
+  ✓ SIM-5 support-dependent learner stays bounded, never loops
+  ✓ SIM-7 carrier-only weakness still gets substrate repair
+
+vnext-audit-kernel: 25 checks pass, 0 CONFIRMED DEFECTS
+✓ seed curriculum passes DAG validity, evidenceability and novelty integrity
+✓ canonical prompt-family ids parse, hash the full signature, and reject malformed forms
+✓ dangling prerequisites and cycles fail the DAG check
+✓ a claim target without delayed/transfer coverage fails evidenceability
+✓ carriers cannot silently carry held-out transfer credit
+✓ family drift, fake novelty and unverifiable transfer deltas all fail
+✓ content contract enforced by the authoritative curriculum gate
+vnext-curriculum: all checks passed
+FlashDay content reuse: checkpoint targets reuse taught language
+FlashDay state integrity: 4 persistent-store checks passed
+FlashDay FSRS v6: 12 Unit-mode scheduling checks passed
+FlashDay cloud merge: 4 checks passed
+FlashDay auth contract: 26 checks passed
+cloud-compat tests passed
+FlashDay entrypoint contract: 11 groups of checks passed
+
+swe-factory: 33 checks — PASS
+  ✓ queued mission listed as QUEUED
+  ✓ start transitions to RUNNING with start sha
+  ✓ start refuses unsafe dirty tree
+  ✓ second mission start refused while first active
+  ✓ checkpoint missing sections refused
+  ✓ full checkpoint recorded + stamped with real sha
+  ✓ verify PASS recorded with sha
+  ✓ finish refused without any verification
+  ✓ finish refused when HEAD moved after verify
+  ✓ finish DONE after green verify on HEAD + REPORT.md written
+  ✓ verify FAIL exits nonzero and is recorded
+  ✓ finish refused after red verify
+  ✓ finish --result failed still allowed + report
+  ✓ blocked checkpoint sets BLOCKED
+  ✓ resume prints packet + unblocks
+  ✓ non-allowlisted verification command rejected
+  ✓ verification on missing file rejected
+  ✓ verification on unknown npm script rejected
+  ✓ resume warns on uncommitted tracked changes
+  ✓ checkpoint on DONE mission refused
+  ✓ second finish refused
+  ✓ verify still runs on dirty tree
+  ✓ finish DONE refused with uncommitted tracked change
+  ✓ finish --result failed still allowed on dirty tree
+  ✓ finish DONE refused with unsafe untracked file
+  ✓ finish DONE succeeds after committing the change + re-verify
+  ✓ uncommitted mission.md drift detected at verify
+  ✓ uncommitted mission.md drift detected at finish
+  ✓ uncommitted mission.md drift detected at resume
+  ✓ committed mission.md rewrite still detected
+  ✓ finish also refused after committed rewrite
+  ✓ restoring mission definition restores operation
+  ✓ state.missionSha256 persisted at start
+
+> flashday@0.1.0 build
+> vite build
+
+vite v8.2.2 building client environment for production...
+transforming...
+✓ 133 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/vnext/index.html                                       0.71 kB │ gzip:     0.39 kB
+dist/auth/index.html                                        1.56 kB │ gzip:     0.72 kB
+dist/app/index.html                                         1.75 kB │ gzip:     0.83 kB
+dist/index.html                                             2.84 kB │ gzip:     1.30 kB
+dist/login/index.html                                       5.19 kB │ gzip:     1.98 kB
+dist/assets/ort-wasm-simd-threaded.jsep-B0T3yYHD.wasm  21,596.01 kB │ gzip: 5,168.67 kB
+dist/assets/vnext-BAh0TI2n.css                              2.31 kB │ gzip:     0.81 kB
+dist/assets/site-BVsCd9uJ.css                              10.78 kB │ gzip:     3.01 kB
+dist/assets/app-D_fSwknx.css                               24.76 kB │ gzip:     5.20 kB
+dist/assets/modulepreload-polyfill-P2Xu9kJm.js              0.67 kB │ gzip:     0.38 kB
+dist/assets/auth-DENC4gmp.js                                1.87 kB │ gzip:     1.11 kB
+dist/assets/flashday-auth-BuwE_Qd5.js                       3.20 kB │ gzip:     1.52 kB
+dist/assets/speech-BzeBz07t.js                              4.49 kB │ gzip:     2.09 kB
+dist/assets/login-Cfzh6CPg.js                               8.79 kB │ gzip:     3.50 kB
+dist/assets/app-bw8d80Dd.js                                52.14 kB │ gzip:    16.10 kB
+dist/assets/firebase-client-B2XXgmqx.js                   121.47 kB │ gzip:    36.86 kB
+dist/assets/vnext-DA4AJzfQ.js                             160.77 kB │ gzip:    30.10 kB
+dist/assets/app-dcPqIqJD.js                               276.47 kB │ gzip:    77.97 kB
+dist/assets/index.esm-BqMLaEV3.js                         555.93 kB │ gzip:   162.28 kB
+dist/assets/transformers.web-Czv3cOib.js                  847.07 kB │ gzip:   216.25 kB
+
+✓ built in 1.72s
+
+> flashday@0.1.0 test:browser
+> node tests/app-browser.test.mjs
+
+  ✓ shell smoke at 390px
+  ✓ shell smoke at 1280px
+  ✓ write draft survives reload
+  ✓ quiz draft + pane identity survive step nav
+  ✓ quiz retry flow → 2 read events
+  ✓ stale draft → notice, empty textarea
+  ✓ account switch hides the other namespace draft
+  ✓ double "Lưu lần thử" → 1 write event
+  ✓ checkpoint → 4 steps, lands on read, enrolls chunks
+  ✓ hidden controls + empty save guarded
+  ✓ today due count + path pill + summary todo links
+  ✓ review reveal → grade → persisted scheduling
+  ✓ mid-debounce unmount → no stale-state crash
+  ✓ chunk + dialogue play buttons speak the target
+  ✓ write compare + retry records attempt 2
+  ✓ AI explain + write review + roleplay end-to-end (mocked tutor)
+  ✓ tutor absent → static fallbacks only
+  ✓ engagement layer: pager + match pairs + word bank + banner + progress + celebration + streak + path bars + review recap
+  ✓ mission: context→gist→notice→retrieve→interact→unaided exit→hinted retry (mobile, no AI)
+  ✓ learner name survives device-local draft loss — restored from the durable context event
+  ✓ no-TTS context falls back explicitly and mints zero tasks
+  ✓ explicit "Đọc thay vì nghe" skip is recorded and mints nothing
+  ✓ old lessons 2–30 still load via the five-pane runner
+  ✓ vnext: baseline first → support_use before commit → stamped attempt → reload resumes run
+  ✓ vnext page renders intro + first diagnostic on mobile and desktop
+  ✓ vnext: attributing miss → support probe once → mission resumes (issue #61)
+FlashDay app browser tests: 26 groups passed
+
+> flashday@0.1.0 test:firestore
+> env -u DEBUG npx --yes --package=firebase-tools@15.30.2 firebase emulators:exec --project demo-flashday-test --only firestore "node tests/firestore-emulator.test.mjs && node tests/firestore-vnext-emulator.test.mjs"
+
+i  emulators: Shutting down emulators.
+
+Error: Could not spawn `java -version`. Please make sure Java is installed and on your system PATH.
+
+[plugin builtin:vite-reporter] 
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.

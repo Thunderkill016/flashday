@@ -55,7 +55,11 @@ const INTENT_PURPOSES = {
   independent_attempt: ELICITABLE,
   delayed_retrieval: ['delayed_retrieval'],
   transfer: ['transfer'],
-  checkpoint: ['assessment']
+  checkpoint: ['assessment'],
+  /* Demand-routed substrate repair (issue #61): a support_demand intent
+   * can only be served by a support-purpose task — never substituted by
+   * a semantically different task on the support cap. */
+  support_demand: ['support']
 };
 
 const keyOf = (t) => `${t.id}@${t.revision ?? 1}`;
@@ -178,9 +182,21 @@ export function nextMissionTask({ learnerId, mission, tasks, capabilities, event
    * transfer sample — and once it succeeds the intent never fires
    * again. Diagnostics stay single-sample: a consumed probe already
    * answered what it was meant to ask. */
-  const REPEATABLE = new Set(['retrieval', 'production', 'interaction', 'remediation', 'delayed_retrieval', 'transfer']);
-  const pick = (capId, purposes, { unattemptedOnly = false } = {}) => {
-    const candidates = missionTasks.filter((t) => t.capabilityId === capId && purposes.includes(t.purpose));
+  /* 'support' is repeatable: a support probe may be re-served for a
+   * distinct later demand (a different target or function). Demand
+   * bounding lives in the planner's per-pair cycle cap — the selector
+   * just stays honest about consumption. */
+  const REPEATABLE = new Set(['retrieval', 'production', 'interaction', 'remediation', 'delayed_retrieval', 'transfer', 'support']);
+  /* `requiresFunction` scopes a pick to tasks that actually exercise
+   * the demanded function — a support_demand must be served by a probe
+   * that TESTS the missing function, not merely any task sharing the
+   * provider capability (#61 audit: capability-scoped picks serve the
+   * wrong evidence and can never consume the demand). */
+  const pick = (capId, purposes, { unattemptedOnly = false, requiresFunction = null } = {}) => {
+    const candidates = missionTasks.filter((t) =>
+      t.capabilityId === capId &&
+      purposes.includes(t.purpose) &&
+      (requiresFunction == null || (t.response?.requiredFunctions ?? []).includes(requiresFunction)));
     const fresh = candidates.filter((t) => !verifiedAttempt.has(keyOf(t)) && !verifiedEvent.has(keyOf(t)));
     if (fresh[0]) return fresh[0];
     if (unattemptedOnly || purposes.every((p) => !REPEATABLE.has(p))) return null;
@@ -217,7 +233,7 @@ export function nextMissionTask({ learnerId, mission, tasks, capabilities, event
     if (plan.kind === 'idle') break;
     const task = (plan.kind === 'expose' || plan.kind === 'resume')
       ? pickPendingPhase(plan.capabilityId)
-      : pick(plan.capabilityId, INTENT_PURPOSES[plan.kind] ?? []);
+      : pick(plan.capabilityId, INTENT_PURPOSES[plan.kind] ?? [], { requiresFunction: plan.demand?.missingFunction });
     if (task) {
       return ready(task, `${plan.kind} on ${plan.capabilityId}: ${plan.reason}`);
     }

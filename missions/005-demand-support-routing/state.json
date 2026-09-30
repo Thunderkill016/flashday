@@ -1,0 +1,62 @@
+{
+  "id": "005-demand-support-routing",
+  "status": "DONE",
+  "startedAt": "2026-09-30T08:49:17.081Z",
+  "finishedAt": "2026-09-30T09:21:50.573Z",
+  "startSha": "647b5065742e880e4768fe86e389db47ec8499c5",
+  "startBranch": "main",
+  "missionSha256": "b57e5d569a4e88568ff980373e75b41cf005771acb4676962d8afcb28d893d58",
+  "currentSha": "1c9ed407c4e5df35961cfeda0350481c0c14f713",
+  "checkpoints": [
+    {
+      "n": 1,
+      "file": "checkpoints/001-checkpoint.md",
+      "at": "2026-09-30T09:14:21.884Z",
+      "sha": "647b5065742e880e4768fe86e389db47ec8499c5"
+    }
+  ],
+  "commands": [
+    {
+      "at": "2026-09-30T08:49:17.111Z",
+      "type": "start",
+      "detail": "main@647b5065742e"
+    },
+    {
+      "at": "2026-09-30T09:14:21.891Z",
+      "type": "checkpoint",
+      "detail": "cp 1"
+    },
+    {
+      "at": "2026-09-30T09:20:55.679Z",
+      "type": "verify",
+      "detail": "PASS"
+    },
+    {
+      "at": "2026-09-30T09:21:50.574Z",
+      "type": "finish",
+      "detail": "done"
+    }
+  ],
+  "verifications": [
+    {
+      "at": "2026-09-30T09:20:55.678Z",
+      "sha": "1c9ed407c4e5df35961cfeda0350481c0c14f713",
+      "ok": true,
+      "results": [
+        {
+          "cmd": "npm run verify:full",
+          "exitCode": 0,
+          "ok": true,
+          "ms": 88707,
+          "log": "logs/verify-1790760055672-0.log"
+        }
+      ]
+    }
+  ],
+  "knownFailures": [],
+  "browserVerification": "support demand is exercised through the /vnext/ browser path if the served mission surfaces it; npm run test:browser (inside verify:full) re-verifies the mission flow end-to-end at both viewports",
+  "result": {
+    "status": "done",
+    "summary": "# Mission 005 — Demand-Driven Support Routing (#61)"
+  }
+}

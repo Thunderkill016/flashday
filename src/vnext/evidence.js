@@ -18,7 +18,12 @@ export const EVENT_TYPES = [
   'retry',
   'delayed_retrieval',
   'transfer_attempt',
-  'checkpoint'
+  'checkpoint',
+  /* Support-demand work (issue #61): an attempt on a support-purpose
+   * task. It is deliberately NOT a milestone-bearing attempt type — a
+   * support probe is remediation context, never proof of ability on the
+   * support capability or the target it served. */
+  'support_attempt'
 ];
 
 export const OUTCOMES = ['success', 'partial', 'fail'];
@@ -129,6 +134,11 @@ export function validateEvent(e) {
   }
   if (e.evaluation?.authority != null && !EVALUATION_AUTHORITIES.includes(e.evaluation.authority)) {
     problems.push(`unknown evaluation authority ${e.evaluation.authority}`);
+  }
+  if (e.evaluation?.missingFunctions != null &&
+      (!Array.isArray(e.evaluation.missingFunctions) ||
+       e.evaluation.missingFunctions.some((f) => typeof f !== 'string' || !f))) {
+    problems.push('evaluation.missingFunctions must be a list of function names');
   }
   if (!Number.isFinite(e.occurredAt)) problems.push('occurredAt must be a timestamp');
   return problems;

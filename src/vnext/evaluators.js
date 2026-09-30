@@ -204,7 +204,13 @@ const scoreFunctions = (task, response, { learnerName } = {}) => {
   return {
     outcome,
     functions: results,
-    missed: results.filter((r) => !r.met).map((r) => r.fn)
+    missed: results.filter((r) => !r.met).map((r) => r.fn),
+    /* Free-text scoring cannot attribute the miss: an absent production
+     * function means the formulation did not evidence it — whether the
+     * learner failed comprehension or production is not knowable from
+     * the produced text. Unknown cause → no substrate diagnosis (issue
+     * #61: missingFunctions stays empty; normal remediation continues). */
+    missingFunctions: []
   };
 };
 
@@ -212,10 +218,18 @@ const scoreChoice = (task, optionId) => {
   const options = task.response?.options ?? [];
   const chosen = options.find((o) => o.id === optionId);
   const correct = options.filter((o) => o.correct === true);
+  const required = task.response?.requiredFunctions ?? [];
+  const success = Boolean(chosen) && correct.some((o) => o.id === chosen.id);
   return {
-    outcome: chosen && correct.some((o) => o.id === chosen.id) ? 'success' : 'fail',
-    functions: (task.response?.requiredFunctions ?? []).map((fn) => ({ fn, met: chosen ? correct.some((o) => o.id === chosen.id) : false, known: true })),
-    missed: chosen && correct.some((o) => o.id === chosen.id) ? [] : (task.response?.requiredFunctions ?? [])
+    outcome: success ? 'success' : 'fail',
+    functions: required.map((fn) => ({ fn, met: success, known: true })),
+    missed: success ? [] : required,
+    /* A choice task's requiredFunctions ARE the thing the option set
+     * operationalizes — failing the choice is direct evidence those
+     * probed functions did not happen (e.g. a "which number did you
+     * hear?" miss attributes the number-catch substrate). Bounded to
+     * what the task declared. */
+    missingFunctions: success ? [] : [...required]
   };
 };
 
@@ -223,14 +237,28 @@ export const EVALUATORS = {
   'eval.required_functions.v1': {
     contractId: 'eval.required_functions.v1',
     describe: 'score = all declared requiredFunctions evidenced by structured match',
+    /* This contract cannot attribute a miss to a substrate function —
+     * it observes produced text only. */
+    attributesFunctions: false,
     score: (task, response, ctx) => scoreFunctions(task, response, ctx)
   },
   'eval.choice.correct.v1': {
     contractId: 'eval.choice.correct.v1',
     describe: 'success iff chosen option flagged correct in task.response.options',
+    /* The choice operationalizes the declared requiredFunctions, so a
+     * fail justifies them as missingFunctions. */
+    attributesFunctions: true,
     score: (task, response) => scoreChoice(task, response?.optionId ?? response)
   }
 };
+
+/* Whether an evaluation contract may attribute a failure to specific
+ * substrate functions. Demand derivation consults this on the TASK's
+ * declared contractId — a stamped missingFunctions on an event whose
+ * task contract cannot attribute is never trusted. */
+export function contractAttributesFunctions(contractId) {
+  return EVALUATORS[contractId]?.attributesFunctions === true;
+}
 
 /* Evaluate a learner response under the task's declared contract.
  * Returns null for an unregistered contract — the caller must then

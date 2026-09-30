@@ -1,0 +1,100 @@
+{
+  "id": "006-kernel-audit",
+  "status": "DONE",
+  "startedAt": "2026-09-30T09:29:09.588Z",
+  "finishedAt": "2026-09-30T09:59:51.677Z",
+  "startSha": "4d01ec0acbb29f53412e118edcf2ad78d01178f9",
+  "startBranch": "devin/m005-support-routing",
+  "missionSha256": "e241a6b13f17fca1f0bbd4cfe24b3344c5cd44a22fc67fbf9ce63fb035d48fec",
+  "currentSha": "4ee98c4f6b40b0f7d6ffa173633585814f92cb25",
+  "checkpoints": [
+    {
+      "n": 1,
+      "file": "checkpoints/001-checkpoint.md",
+      "at": "2026-09-30T09:47:48.574Z",
+      "sha": "4d01ec0acbb29f53412e118edcf2ad78d01178f9"
+    }
+  ],
+  "commands": [
+    {
+      "at": "2026-09-30T09:29:09.611Z",
+      "type": "start",
+      "detail": "devin/m005-support-routing@4d01ec0acbb2"
+    },
+    {
+      "at": "2026-09-30T09:47:48.581Z",
+      "type": "checkpoint",
+      "detail": "cp 1"
+    },
+    {
+      "at": "2026-09-30T09:55:42.597Z",
+      "type": "verify",
+      "detail": "PASS"
+    },
+    {
+      "at": "2026-09-30T09:57:30.408Z",
+      "type": "verify",
+      "detail": "FAIL"
+    },
+    {
+      "at": "2026-09-30T09:59:40.358Z",
+      "type": "verify",
+      "detail": "PASS"
+    },
+    {
+      "at": "2026-09-30T09:59:51.678Z",
+      "type": "finish",
+      "detail": "done"
+    }
+  ],
+  "verifications": [
+    {
+      "at": "2026-09-30T09:55:42.596Z",
+      "sha": "1e0cebb69ff507d139e6eff985df5aa25ae5b277",
+      "ok": true,
+      "results": [
+        {
+          "cmd": "npm run verify:full",
+          "exitCode": 0,
+          "ok": true,
+          "ms": 95477,
+          "log": "logs/verify-1790762142593-0.log"
+        }
+      ]
+    },
+    {
+      "at": "2026-09-30T09:57:30.407Z",
+      "sha": "4ee98c4f6b40b0f7d6ffa173633585814f92cb25",
+      "ok": false,
+      "results": [
+        {
+          "cmd": "npm run verify:full",
+          "exitCode": 1,
+          "ok": false,
+          "ms": 80811,
+          "log": "logs/verify-1790762250404-0.log"
+        }
+      ]
+    },
+    {
+      "at": "2026-09-30T09:59:40.357Z",
+      "sha": "4ee98c4f6b40b0f7d6ffa173633585814f92cb25",
+      "ok": true,
+      "results": [
+        {
+          "cmd": "npm run verify:full",
+          "exitCode": 0,
+          "ok": true,
+          "ms": 96708,
+          "log": "logs/verify-1790762380353-0.log"
+        }
+      ]
+    }
+  ],
+  "knownFailures": [],
+  "browserVerification": "npm run test:browser (inside verify:full) re-verifies the /vnext/ support-route drive end-to-end at both viewports",
+  "result": {
+    "status": "done",
+    "summary": null
+  }
+}
