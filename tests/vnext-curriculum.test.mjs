@@ -210,4 +210,32 @@ const run = (over = {}) => checkCurriculum({
   console.log('✓ family drift, fake novelty and unverifiable transfer deltas all fail');
 }
 
+// ── 10. Content contract is inside the authoritative gate (Finding C, review of #64) ──
+{
+  // A task that passes every structural check but requires language the
+  // mission never declared must still fail checkCurriculum — the gate is
+  // the contract, not a subset of it.
+  const m = MISSION_MEET_PERSON;
+  const baseSig = TASKS_MEET_PERSON.find((t) => t.purpose === 'retrieval').contextSignature;
+  const sig = { ...baseSig, cueTopology: 'ghost_cue_xx' };
+  const ghost = makeTask({
+    id: 't.ghost.language', missionId: m.id, capabilityId: 'production.speak.say_own_name',
+    modality: 'spoken_production', purpose: 'retrieval',
+    promptFamily: canonicalFamilyId('production.speak.say_own_name', sig, 1),
+    contextSignature: sig,
+    response: { type: 'spoken_turn', requiredFunctions: ['state_own_name'] },
+    evaluation: { authority: 'deterministic', contractId: 'eval.required_functions.v1' },
+    language: { requiredChunks: ['smuggled undeclared chunk'], requiredVocabulary: [], requiredConstructions: [] }
+  });
+  const problems = run({
+    missions: [{ ...m, taskIds: [...m.taskIds, ghost.id] }, ...ALL_MISSIONS.slice(1)],
+    tasks: [...ALL_TASKS, ghost]
+  });
+  assert.ok(
+    problems.some((p) => p.includes('t.ghost.language') && /undeclared/.test(p)),
+    `a task smuggling undeclared language must fail the gate:\n${problems.join('\n')}`
+  );
+  console.log('✓ content contract enforced by the authoritative curriculum gate');
+}
+
 console.log('vnext-curriculum: all checks passed');

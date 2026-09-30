@@ -68,6 +68,24 @@ export const EVENT_TYPES_FOR_PURPOSE = {
   assessment: ['checkpoint']
 };
 
+/* The deterministic UI mapping from (purpose, response kind) to the
+ * event type a commit emits. This is a CONTRACT, not a UI detail — it
+ * decides whether a task shape is servable at all: if the emitted type
+ * is not one the purpose may produce, the task wedges at bindAttempt
+ * (fail-closed, but a dead mission for the learner). validateTask
+ * rejects such shapes at authoring time. `responseKind` is 'choice' for
+ * option responses, 'text' for everything else. */
+export function emittedEventType(purpose, responseKind) {
+  return purpose === 'delayed_retrieval' ? 'delayed_retrieval'
+    : purpose === 'transfer' ? 'transfer_attempt'
+      : purpose === 'assessment' ? 'checkpoint'
+        : purpose === 'remediation' ? 'retry'
+          : purpose === 'interaction' ? 'interaction_turn'
+            : responseKind === 'choice' ? 'recognition_attempt'
+              : purpose === 'production' ? 'production_attempt'
+                : 'recall_attempt';
+}
+
 export const TRANSFER_DIMENSIONS = [
   'wording',
   'partner',
@@ -283,6 +301,18 @@ export function validateTask(task) {
   }
   if (ELICITING_PURPOSES.has(task?.purpose) && !isStr(task?.evaluation?.contractId)) {
     p.push(`purpose '${task?.purpose}' requires evaluation.contractId — evidence needs a named evaluator contract`);
+  }
+
+  /* Response shape × purpose compatibility: the UI commit path emits a
+   * deterministic event type for (purpose, response kind). If that type
+   * is one the purpose may never produce, the task is a wedge — it can
+   * never carry an attempt and would throw at every learner commit. */
+  if (ELICITING_PURPOSES.has(task?.purpose) && task?.response?.type != null) {
+    const kind = task.response.type === 'choice' ? 'choice' : 'text';
+    const emitted = emittedEventType(task.purpose, kind);
+    if (!(EVENT_TYPES_FOR_PURPOSE[task.purpose] ?? []).includes(emitted)) {
+      p.push(`purpose '${task.purpose}' + response.type '${task.response.type}' emits '${emitted}', which this purpose may never produce — an unservable task shape`);
+    }
   }
 
   if (task?.purpose === 'fluency') {

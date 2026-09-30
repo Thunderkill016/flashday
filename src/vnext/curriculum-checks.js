@@ -29,7 +29,8 @@ import {
   SIGNATURE_ID_FIELDS,
   SIGNATURE_FIELDS,
   signatureHash,
-  validateMission
+  validateMission,
+  validateMissionContent
 } from './contracts.js';
 import { validateGraph } from './capabilities.js';
 
@@ -81,17 +82,26 @@ const sigKey = (sig) =>
 
 const familyClass = (t) => t.freshness?.familyClass ?? 'practiced';
 
-export function checkCurriculum({ capabilities = [], missions = [], tasks = [] }) {
+export function checkCurriculum({ capabilities = [], missions = [], tasks = [], contentPolicy = {} }) {
   const problems = [];
   const taskById = new Map(tasks.map((t) => [t.id, t]));
 
   /* ── 1. DAG validity ─────────────────────────────────────── */
   for (const prob of validateGraph(capabilities)) problems.push(`graph: ${prob}`);
 
-  /* ── 2. Mission validity + evidenceability ───────────────── */
+  /* ── 2. Mission validity + evidenceability + content contract ──
+   * checkCurriculum is the authoritative authoring gate: a mission that
+   * passes structure but violates its own language declaration
+   * (undeclared chunks/vocabulary/constructions, over-budget
+   * introductions) must not ship. `contentPolicy` carries optional
+   * budgets (maxNewChunks / maxNewVocabulary / maxNewConstructions);
+   * budgets are only enforced when supplied. */
   for (const mission of missions) {
     const tag = mission?.id ?? '?';
     for (const prob of validateMission(mission, tasks, capabilities)) problems.push(`${tag}: ${prob}`);
+    for (const prob of validateMissionContent(mission, tasks, capabilities, contentPolicy)) {
+      problems.push(`${tag}: ${prob}`);
+    }
 
     const missionTasks = (mission?.taskIds ?? []).map((id) => taskById.get(id)).filter(Boolean);
     const targets = mission?.targetCapabilities ?? [];

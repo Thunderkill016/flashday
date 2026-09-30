@@ -36,8 +36,8 @@
  */
 import { projectLearnerState } from './projection.js';
 import { runMissionTrace } from './mission-runner.js';
-import { answerBearing } from './evidence.js';
-import { verifyEventTask } from './contracts.js';
+import { answerBearing, conditionsViolated, unionSupport } from './evidence.js';
+import { effectiveAllowedSupport, verifyEventTask } from './contracts.js';
 import { resolvePolicy } from './policy.js';
 
 const ATTEMPT_TYPES = new Set([
@@ -46,11 +46,17 @@ const ATTEMPT_TYPES = new Set([
 ]);
 const INDEPENDENT_AUTHORITIES = new Set(['deterministic', 'human']);
 
-const isUnaidedVerifiedSuccess = (e) =>
+/* The claim's notion of "unaided verified success" must be the SAME
+ * evidence the engine would promote — recomputed here, not copied: the
+ * caller supplies the attempt-boundary support union and the registered
+ * task/capability so conditions violations (e.g. a replay the contract
+ * does not permit) disqualify exactly as they do in the projection. */
+const isUnaidedVerifiedSuccess = (e, cap, task, support) =>
   ATTEMPT_TYPES.has(e.eventType) &&
   e.attempt?.outcome === 'success' &&
   e.attempt?.observed === true &&
-  !answerBearing(e.support) &&
+  !answerBearing(support) &&
+  !conditionsViolated(support, effectiveAllowedSupport(cap, task)) &&
   INDEPENDENT_AUTHORITIES.has(e.evaluation?.authority);
 
 /* Session buckets from the log itself: a gap larger than the policy's
@@ -147,34 +153,80 @@ export function evaluateClaim(learnerId, events, capabilities, tasks, capId, { r
    * contradiction; it simply does not exist for the claim. */
   const byKey = new Map(tasks.map((t) => [`${t.id}@${t.revision ?? 1}`, t]));
   const capById = new Map(capabilities.map((c) => [c.id, c]));
-  const mine = events.filter((e) => {
-    if (e.learnerId !== learnerId || e.capabilityId !== capId) return false;
+  const cap = capById.get(capId);
+
+  /* Support union and family rehearsal must scan the FULL learner log —
+   * the same events the projection sees (learner + capability +
+   * modality matched, deduped, canonical order), including UNVERIFIED
+   * records. A support_use or exposure event that fails contract
+   * verification still contaminates the engine's attempt history and
+   * rehearsal set; an oracle that only scans verified events would call
+   * evidence clean/novel where the engine correctly refuses. */
+  const allCap = [];
+  const seenIds = new Set();
+  for (const e of events) {
+    if (e.learnerId !== learnerId || e.capabilityId !== capId) continue;
+    if (!cap || e.modality !== cap.modality) continue;
+    if (seenIds.has(e.id)) continue;
+    seenIds.add(e.id);
+    allCap.push(e);
+  }
+  allCap.sort((a, b) => a.occurredAt - b.occurredAt || (a.id < b.id ? -1 : 1));
+
+  const supportByAttempt = new Map();
+  const supportOf = new Map();
+  const novelAtAttempt = new Map();
+  const seenFamilies = new Set();
+  for (const e of allCap) {
+    const aid = e.attempt?.attemptId;
+    if (aid) {
+      const key = `${e.taskId}::${aid}`;
+      const merged = unionSupport(supportByAttempt.get(key) ?? null, e.support);
+      supportByAttempt.set(key, merged);
+      supportOf.set(e, merged);
+    }
+    const fam = e.context?.promptFamily;
+    if (e.context?.practicedOrTransfer === 'transfer') {
+      novelAtAttempt.set(e, Boolean(fam) && !seenFamilies.has(fam));
+    } else if (fam) {
+      seenFamilies.add(fam);
+    }
+  }
+
+  /* Claims count only verified evidence — the same registry gate the
+   * engine applies. An unverifiable event is neither proof nor
+   * contradiction; it simply does not exist for the claim. */
+  const mine = allCap.filter((e) => {
     const t = byKey.get(`${e.taskId}@${e.taskRevision}`);
     const c = t ? capById.get(t.capabilityId) : null;
     return !!t && !!c && verifyEventTask(e, t, c);
-  }).sort((a, b) => a.occurredAt - b.occurredAt || (a.id < b.id ? -1 : 1));
+  });
   const bucketOf = sessionBuckets(mine, pol.independent.minSpacingGapMs);
 
+  const taskOf = (e) => byKey.get(`${e.taskId}@${e.taskRevision}`);
+  const isUnaided = (e) =>
+    isUnaidedVerifiedSuccess(e, capById.get(taskOf(e)?.capabilityId), taskOf(e), supportOf.get(e) ?? e.support);
+
   const attempts = mine.filter((e) => ATTEMPT_TYPES.has(e.eventType) && e.attempt?.outcome != null);
-  const unaided = mine.filter(isUnaidedVerifiedSuccess);
+  const unaided = mine.filter(isUnaided);
   const unaidedSessions = new Set(unaided.map((e) => bucketOf(e.occurredAt)));
   const firstUnaidedAt = unaided.length ? unaided[0].occurredAt : null;
 
   /* Baseline attribution — the first eliciting attempt decides. */
-  const baselineMastered = attempts.length > 0 && isUnaidedVerifiedSuccess(attempts[0]);
+  const baselineMastered = attempts.length > 0 && isUnaided(attempts[0]);
   const acquisitionSource = baselineMastered ? 'PREEXISTING' : 'FLASHDAY';
 
-  const delayedPasses = mine.filter((e) => e.eventType === 'delayed_retrieval' && e.attempt?.outcome === 'success');
+  const delayedPasses = mine.filter((e) => e.eventType === 'delayed_retrieval' && isUnaided(e));
   const retained24h = delayedPasses.some((e) => firstUnaidedAt != null && e.occurredAt >= firstUnaidedAt + lag);
   const retained72h = delayedPasses.some((e) => firstUnaidedAt != null && e.occurredAt >= firstUnaidedAt + 3 * lag);
 
-  /* Held-out transfer: the winning attempt's family must not have been
-   * rehearsed in a practiced/assessment context before it. */
-  const transferSuccess = mine.some((e) => {
-    if (e.eventType !== 'transfer_attempt' || e.attempt?.outcome !== 'success' || e.context?.practicedOrTransfer !== 'transfer') return false;
-    return !mine.some((p) => p.occurredAt < e.occurredAt && p.context?.practicedOrTransfer !== 'transfer' && p.context?.promptFamily === e.context.promptFamily);
-  });
-  const checkpointPass = mine.some((e) => e.eventType === 'checkpoint' && e.attempt?.outcome === 'success');
+  /* Held-out transfer: an UNAIDED verified success whose family was
+   * never rehearsed in a practiced/assessment context before it —
+   * canonical order, same as the engine. */
+  const transferSuccess = mine.some((e) =>
+    e.eventType === 'transfer_attempt' && e.context?.practicedOrTransfer === 'transfer'
+    && isUnaided(e) && novelAtAttempt.get(e) === true);
+  const checkpointPass = mine.some((e) => e.eventType === 'checkpoint' && isUnaided(e));
 
   /* Unresolved contradiction = latest outcome of a probe type is not
    * success. A failed probe repaired later resolves; one left standing
@@ -202,8 +254,13 @@ export function evaluateClaim(learnerId, events, capabilities, tasks, capId, { r
   }
 
   /* Integrity cross-check — milestone vs the primitives it claims to
-   * summarize. A mismatch is an engine promotion bug, not a gap. */
-  const primitiveTransfer = mine.some((e) => isUnaidedVerifiedSuccess(e) && e.context?.practicedOrTransfer === 'transfer');
+   * summarize. The primitive replicates the milestone's full semantics
+   * (unaided + conditions-valid + verified + novel family) — a weaker
+   * primitive would alarm whenever the engine correctly refuses a
+   * milestone on contaminated evidence, which is a false failure, not a
+   * promotion bug. */
+  const primitiveTransfer = mine.some((e) =>
+    e.context?.practicedOrTransfer === 'transfer' && isUnaided(e) && novelAtAttempt.get(e) === true);
   const integrity = {
     transferredMatchesPrimitives: slot?.milestones.transferred === primitiveTransfer
       ? true : `milestone=${slot?.milestones.transferred} vs primitive=${primitiveTransfer}`,

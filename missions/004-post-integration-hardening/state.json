@@ -1,0 +1,81 @@
+{
+  "id": "004-post-integration-hardening",
+  "status": "DONE",
+  "startedAt": "2026-09-30T08:09:01.023Z",
+  "finishedAt": "2026-09-30T08:27:04.928Z",
+  "startSha": "27574cbf74c9b734e3e3dad976a752a70e5880a4",
+  "startBranch": "main",
+  "missionSha256": "d4c9ec22da833c038b2a70764d3b2f245ed9db7b907b319dffdff3acbc6ce89b",
+  "currentSha": "d7aa301e31be5fd0129ad36301f79ab22d9eab92",
+  "checkpoints": [
+    {
+      "n": 1,
+      "file": "checkpoints/001-checkpoint.md",
+      "at": "2026-09-30T08:18:43.701Z",
+      "sha": "27574cbf74c9b734e3e3dad976a752a70e5880a4"
+    }
+  ],
+  "commands": [
+    {
+      "at": "2026-09-30T08:09:01.043Z",
+      "type": "start",
+      "detail": "main@27574cbf74c9"
+    },
+    {
+      "at": "2026-09-30T08:18:43.707Z",
+      "type": "checkpoint",
+      "detail": "cp 1"
+    },
+    {
+      "at": "2026-09-30T08:23:49.520Z",
+      "type": "verify",
+      "detail": "PASS"
+    },
+    {
+      "at": "2026-09-30T08:26:58.843Z",
+      "type": "verify",
+      "detail": "PASS"
+    },
+    {
+      "at": "2026-09-30T08:27:04.929Z",
+      "type": "finish",
+      "detail": "done"
+    }
+  ],
+  "verifications": [
+    {
+      "at": "2026-09-30T08:23:49.519Z",
+      "sha": "a2850ce8be3afa48ce13e579a252adbfad8e25bd",
+      "ok": true,
+      "results": [
+        {
+          "cmd": "npm run verify:full",
+          "exitCode": 0,
+          "ok": true,
+          "ms": 88550,
+          "log": "logs/verify-1790756629516-0.log"
+        }
+      ]
+    },
+    {
+      "at": "2026-09-30T08:26:58.838Z",
+      "sha": "d7aa301e31be5fd0129ad36301f79ab22d9eab92",
+      "ok": true,
+      "results": [
+        {
+          "cmd": "npm run verify:full",
+          "exitCode": 0,
+          "ok": true,
+          "ms": 92316,
+          "log": "logs/verify-1790756818821-0.log"
+        }
+      ]
+    }
+  ],
+  "knownFailures": [],
+  "browserVerification": "no UI-visible change intended; npm run test:browser (inside verify:full) re-verifies the /vnext/ flow end-to-end",
+  "result": {
+    "status": "done",
+    "summary": "# Mission 004 — Post-Integration Correctness Hardening"
+  }
+}

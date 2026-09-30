@@ -36,7 +36,7 @@
 import { nextMissionTask } from './mission-runner.js';
 import { projectLearnerState } from './projection.js';
 import { bindAttempt, bindObservation } from './bind.js';
-import { verifyEventTask } from './contracts.js';
+import { emittedEventType, verifyEventTask } from './contracts.js';
 import { evaluateAttempt, EVALUATOR_VERSION } from './evaluators.js';
 import { answerBearing, conditionsViolated } from './evidence.js';
 import { createMemoryEventStore, createMemoryRunStore } from './store-memory.js';
@@ -47,15 +47,11 @@ import { createMemoryEventStore, createMemoryRunStore } from './store-memory.js'
 const SUPPORTABLE_PURPOSES = new Set(['retrieval', 'production', 'interaction', 'remediation']);
 const EXPOSURE_PURPOSES = new Set(['input', 'notice']);
 
-const EVENT_TYPE_FOR = (purpose, responseType) =>
-  purpose === 'delayed_retrieval' ? 'delayed_retrieval'
-    : purpose === 'transfer' ? 'transfer_attempt'
-      : purpose === 'assessment' ? 'checkpoint'
-        : purpose === 'remediation' ? 'retry'
-          : purpose === 'interaction' ? 'interaction_turn'
-            : responseType === 'choice' ? 'recognition_attempt'
-              : purpose === 'production' ? 'production_attempt'
-                : 'recall_attempt';
+/* The commit event type is a contract (contracts.js emittedEventType) —
+ * the same rule validateTask uses to reject task shapes that would emit
+ * an event their purpose may never produce. Kept as a one-line alias so
+ * call sites stay readable. */
+const EVENT_TYPE_FOR = (purpose, responseType) => emittedEventType(purpose, responseType);
 
 /* Deterministic event ids — a re-delivered append dedupes on identical
  * content instead of double-writing, and ids stay stable across reloads.
