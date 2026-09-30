@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
+import { FIXTURES, capabilityById } from '../src/vnext/fixtures.js';
+import { attemptEvent } from '../experiments/next-for-you/scenarios.js';
 
 /* vNext mission page browser paths (mission 008C §34):
  * REFERENCE / B0 / SHADOW_B0 boot clean, the live-decision lock binds
@@ -56,6 +58,9 @@ async function drive(page, maxScreens = 24, opts = {}) {
       }
       const taskId = await card.getAttribute('data-task');
       served.push(taskId);
+      /* Observe the rendered prompt screen BEFORE answering (008E R2:
+       * situation-copy assertions must see the prompt-phase DOM). */
+      if (opts.inspect) await opts.inspect(taskId, page);
       if (opts.reloadAt === i) {
         await page.reload();
         continue;
@@ -69,7 +74,10 @@ async function drive(page, maxScreens = 24, opts = {}) {
         const idx = opts.wrong?.(taskId) && nOptions > 1 ? 1 : 0;
         await options.nth(idx).click();
       } else {
-        await page.locator('[data-role="answer"]').fill('hello');
+        /* opts.answers: per-task text keyed by task-id prefix — a task
+         * without an entry falls back to the generic wrong answer. */
+        const key = Object.keys(opts.answers ?? {}).find((p) => taskId.startsWith(p));
+        await page.locator('[data-role="answer"]').fill(key ? opts.answers[key] : 'hello');
         await page.locator('[data-role="commit"]').click();
       }
       if (opts.until?.(taskId)) return { served, done: false, untilHit: true };
@@ -251,6 +259,79 @@ try {
         `evidence timestamp ${t} diverges from wall clock ${probe.wallNow} — ?clockOffset is not inert`);
     }
     check('?clockOffset= has no effect on persisted evidence time (param ignored)');
+    await context.close();
+  }
+
+  // ── 008E R2: fresh assessment situation is learner-visible before the prompt ──
+  {
+    /* A fresh family only counts if the learner SEES the changed
+     * context — the signature dims must surface as the rendered
+     * .vnext-situation line, which mission-page.js appends ahead of the
+     * prompt. Seeding request_item's real evidence chain (independent
+     * → retained → transferred, on the real wall clock) makes the fresh
+     * assessment servable without driving the whole mission; the run
+     * itself still mints and selects through the production path. */
+    const learner = 'sim-fresh-sit';
+    const fx = FIXTURES.find((f) => f.mission.id === 'mission.complete_small_order');
+    const cap = capabilityById('interaction.request_item');
+    const task = (id) => fx.tasks.find((t) => t.id === id);
+    const base = Date.now();
+    const H = 3600_000;
+    /* Same hops the runtime trajectory drives: practiced success 27h
+     * ago → delayed-retrieval success past the 24h lag → fresh-transfer
+     * success. Learner id must match ?learner= or the projection
+     * filters the evidence out. */
+    const seed = [
+      ['task.order.diagnostic.request', base - 27 * H],
+      ['task.order.delayed.request', base - 2 * H],
+      ['task.order.transfer.stall', base - 1 * H]
+    ].map(([id, at]) => ({ ...attemptEvent(task(id), cap, { at }), learnerId: learner }));
+    const { context, page, errors } = await mk(learner);
+    await context.addInitScript(([key, value]) => {
+      if (localStorage.getItem(key) == null) localStorage.setItem(key, value);
+    }, [`fd.vnext.${learner}.events`, JSON.stringify(seed)]);
+    await page.goto(`${origin}vnext/?mission=mission.complete_small_order&learner=${learner}&mode=b0`);
+    let sawSituation = null;
+    const { served, untilHit } = await drive(page, 60, {
+      until: (id) => typeof id === 'string' && id.startsWith('task.order.assessment.request'),
+      inspect: async (taskId, pg) => {
+        if (typeof taskId !== 'string' || !taskId.startsWith('task.order.assessment.request')) return;
+        sawSituation = await pg.evaluate(() => {
+          const card = document.querySelector('.vnext-card');
+          const sit = card?.querySelector('.vnext-situation');
+          const dlg = card?.querySelector('[data-role="dialogue"]');
+          return {
+            text: sit?.textContent ?? null,
+            beforePrompt: Boolean(sit && dlg)
+              && (sit.compareDocumentPosition(dlg) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
+          };
+        });
+      },
+      answers: {
+        'task.order.diagnostic.request': 'a coffee please',
+        'task.order.diagnostic.choice': 'the small one please',
+        'task.order.retrieval.request': 'can i have a coffee',
+        'task.order.retrieval.choice': 'the large one',
+        'task.order.retrieval.greet': 'hello',
+        'task.order.interaction.request_guided': 'a tea please',
+        'task.order.interaction.request_unaided': 'can i have a tea',
+        'task.order.interaction.choice_guided': 'a large one',
+        'task.order.interaction.choice_unaided': 'small please',
+        'task.order.interaction.thanks': 'thank you',
+        'task.order.delayed.request': 'a coffee please',
+        'task.order.delayed.choice': 'the first one',
+        'task.order.transfer.takeaway': 'the second one',
+        'task.order.assessment.request': 'a tea please',
+        'task.order.assessment.checkpoint': 'the small one please, a coffee please, thank you'
+      }
+    });
+    assert.equal(errors.length, 0, `pageerrors: ${errors.join(' | ')}`);
+    assert.ok(untilHit, `fresh assessment never served on seeded history: ${served.join(' → ')}`);
+    assert.ok(sawSituation?.text?.includes('xe nước'),
+      `assessment prompt rendered without its drink-cart situation: ${JSON.stringify(sawSituation)}`);
+    assert.ok(sawSituation.beforePrompt,
+      'situation line did not precede the prompt in DOM order');
+    check('008E R2: fresh assessment renders its held-out context (xe nước / người bán) before the prompt');
     await context.close();
   }
 } finally {

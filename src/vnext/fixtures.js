@@ -159,10 +159,10 @@ const F = {
     lexicalDomain: 'greetings'
   }),
   /* 008E: genuinely fresh assessment context for say_own_name — an
-   * organizer requesting the learner's name for a sign-up sheet. Not the
-   * rehearsed peer cue ("What's your name?"): different cue topology,
-   * setting, register and partner, so the sample cannot lean on the
-   * practiced exchange. */
+   * organizer requesting the learner's name at a community sign-up.
+   * Different cue topology, setting, register and partner; the
+   * learner-visible situation line carries the held-out context while
+   * the English cue stays deliberately practiced (008E R2). */
   ownNameSignup: {
     communicativeFunction: 'state_own_name',
     cueTopology: 'signup_name_request',
@@ -465,10 +465,11 @@ export const TASKS_MEET_PERSON = [
     purpose: 'assessment',
     promptFamily: pf('production.speak.say_own_name', F.ownNameSignup),
     contextSignature: F.ownNameSignup,
-    /* The cue is an organizer's bare name request — every token is
-     * already inside this mission's practiced stimulus set, so the task
-     * measures stating one's name, never cue comprehension (008E R1). */
-    stimulus: { type: 'partner_turn', languageComponents: ['Hi — tell me your name.'] },
+    /* 008E R2: the cue is the mission's rehearsed direct name question —
+     * held-out novelty lives in the LEARNER-VISIBLE situation (organizer
+     * at a community sign-up), not in cue vocabulary. A novel cue would
+     * measure comprehension, not say_own_name. */
+    stimulus: { type: 'partner_turn', languageComponents: ["What's your name?"] },
     response: { type: 'spoken_turn', requiredFunctions: ['state_own_name'] },
     freshness: { required: true, familyClass: 'fresh_assessment' },
     supportPolicy: { allowed: [], revealModelAfterAttempt: false },
@@ -1357,9 +1358,9 @@ const OF = {
     lexicalDomain: 'food_drink'
   },
   /* 008E: fresh assessment context for request_item — a drink-cart
-   * vendor calling the queue forward. No direct "what can I get you"
-   * cue to echo: the learner must produce the request from the
-   * communicative situation, not a rehearsed prompt string. */
+   * vendor receiving the learner's order. The cue stays the practiced
+   * service invitation; the held-out context is the learner-visible
+   * cart/vendor situation, not novel cue vocabulary (008E R2). */
   requestCart: {
     communicativeFunction: 'request_item',
     cueTopology: 'cart_order_call',
@@ -1635,12 +1636,12 @@ export const TASKS_COMPLETE_ORDER = [
     purpose: 'assessment',
     promptFamily: pf('interaction.request_item', OF.requestCart),
     contextSignature: OF.requestCart,
-    /* The cue is the cart vendor's direct service invitation — every
-     * token already appears in this mission's practiced cues ("Yes?",
-     * "What can I get you?"), and a request is the immediate pragmatic
-     * response; a turn-taking-only answer ("I'm next") is NOT evidence
-     * of request_item and must score fail (008E R1). */
-    stimulus: { type: 'partner_turn', languageComponents: ['Yes? What can I get you?'] },
+    /* 008E R2: the cue is the mission's rehearsed service invitation —
+     * a request is the immediate pragmatic response, and a turn-taking-
+     * only answer ("I'm next") is NOT evidence of request_item and must
+     * score fail. Held-out novelty lives in the learner-visible drink-
+     * cart situation, not in cue vocabulary. */
+    stimulus: { type: 'partner_turn', languageComponents: ['What can I get you?'] },
     response: { type: 'spoken_turn', requiredFunctions: ['request_item'] },
     freshness: { required: true, familyClass: 'fresh_assessment' },
     supportPolicy: { allowed: [], revealModelAfterAttempt: false },
@@ -2955,7 +2956,10 @@ export const TASKS_SELF_FAMILY = [
       allowedLanguageRange: 'declared_target_range',
       answerRevealDuringAttempt: false
     },
-    language: { requiredChunks: ['I work in …', 'I study at …'], requiredVocabulary: ['work', 'study'], requiredConstructions: [] }
+    /* 008E R2: metadata must declare the response construct this cue
+     * actually invites — the from-detail family — not the work/study
+     * surface the removed work/student prompt belonged to. */
+    language: { requiredChunks: ["I'm from …"], requiredVocabulary: ['from'], requiredConstructions: [] }
   }),
   task({
     id: 'task.self.assessment.checkpoint',

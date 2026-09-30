@@ -120,9 +120,15 @@ export const CAP_LABEL = {
  * learner-facing context. Everything else derives from the task. */
 export const TASK_SITUATION = {
   'task.meet.transfer.street': 'Bạn gặp một người lạ ngoài phố — không phải ngữ cảnh lớp học nữa.',
+  /* 008E fresh assessments: the held-out context must be learner-
+   * visible, not just metadata — each line names the setting, the
+   * partner role and the situation its contextSignature declares. */
+  'task.meet.assessment.name_signup': 'Bạn đang đăng ký tham gia một hoạt động cộng đồng — người tổ chức hỏi tên bạn.',
   'task.meet.assessment.checkpoint': 'Một người mới bắt chuyện với bạn — làm trọn cả lượt trò chuyện.',
   'task.drink.transfer.stall': 'Quầy nước ngoài chợ — người bán hỏi theo cách khác.',
-  'task.drink.assessment.checkpoint': 'Một quán cà phê mới — tự gọi đồ uống trọn vẹn.'
+  'task.drink.assessment.checkpoint': 'Một quán cà phê mới — tự gọi đồ uống trọn vẹn.',
+  'task.order.assessment.request': 'Bạn đang đứng trước một xe nước — người bán quay sang hỏi bạn muốn gọi món gì.',
+  'task.self.assessment.detail': 'Bạn vừa đến một homestay — chủ nhà bắt chuyện và hỏi về bạn.'
 };
 
 export const MISSION_INTRO = {

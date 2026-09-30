@@ -21,25 +21,35 @@ trajectories — with zero Policy-B semantic change.
 - `33d17ad 008E: record exact-head CI green on 804d925`
 - `37d50a4 008E R1: construct-valid assessment cues + cue-alignment
   regressions` (PR comment 5919831496)
+- `510f340 008E: R1 checkpoint + report truth corrections + CI record`
+- R2 head pending — learner-visible fresh context + practiced-only cue
+  cover + metadata alignment (PR comment 5920114888)
 
-## Files changed vs start (5)
+## Files changed vs start (7)
 
 - `M src/vnext/fixtures.js` — 3 new context signatures, 5 authored
-  tasks, 5 revision bumps, taskIds ordering
+  tasks, 5 revision bumps, taskIds ordering; R2 cue simplification +
+  self-detail language metadata
+- `M src/vnext/ui/copy.js` — TASK_SITUATION entries for the three fresh
+  assessments (learner-visible held-out context, R2)
 - `M tests/vnext-next-for-you-runtime.test.mjs` — 008E-WITNESS / FAM /
-  CUE / REVPIN / TRAJ sections (+108 checks → 196 total)
+  CUE / SIT / REVPIN / TRAJ sections (+133 checks → 221 total)
+- `M tests/vnext-browser.test.mjs` — seeded-history drive proving the
+  fresh assessment's situation renders before the prompt (9 checks)
 - `M tests/vnext-slice.test.mjs` — scripted act + pinned sequence for
   `task.meet.assessment.name_signup`
 - `M tests/vnext-ui-session.test.mjs` — scripted answer for
   `task.meet.assessment.name_signup`
 - `A missions/008e-required-surface-closure/{mission.md,spec-source.md,
-  checkpoints/001-checkpoint.md,REPORT.md}`
+  checkpoints/,REPORT.md}`
 
 ## Acceptance criteria
 
 - [x] All five former witnesses replayed from `main@765a5d8` and
-      confirmed failing for the same reason (candidate mints,
-      `servableTask: null`) BEFORE authoring.
+      confirmed failing BEFORE authoring — via the two distinct modes
+      detailed under FIVE ORIGINAL WITNESSES (corrections mint a
+      candidate with `servableTask: null`; assessments mint zero
+      candidates — no authored task existed to iterate).
 - [x] Two authored remediation tasks satisfy the remediation contract
       and are reachable via the real B0 correction/refresh path.
 - [x] Three authored fresh assessments satisfy the assessment contract
@@ -115,14 +125,16 @@ were `servableTask: null` mints.)
 - Signature `F.ownNameSignup` (unchanged): organizer name-request
   context — cueTopology `signup_name_request`, setting `community`,
   register `neutral`, interlocutor `organizer`, first_meeting.
-- **R1 cue fix:** stimulus is now `Hi — tell me your name.` — every
-  token is already inside this mission's practiced stimulus surface;
-  the original "For the sign-up sheet —" cue loaded the learner with
-  uncomprehended vocabulary ("sign-up sheet"), making comprehension —
-  not `state_own_name` — the thing measured. Freshness now comes
-  entirely from the context signature, not lexical novelty. Bare
-  "Linh", "I am Linh", "My name is Linh" all score success under the
-  deterministic matcher (asserted in 008E-CUE).
+- **R1→R2 cue fixes:** the original "For the sign-up sheet —" cue
+  loaded the learner with uncomprehended vocabulary; R1's
+  "Hi — tell me your name." still drew `tell`/`me` from a held-out
+  *transfer* task, not the practiced surface. R2 stimulus is the
+  mission's rehearsed direct cue `What's your name?` — every token
+  provably practiced; freshness comes from the learner-visible
+  Vietnamese situation (`TASK_SITUATION`: community sign-up, organizer
+  asks the learner's name) plus the context signature, never from
+  lexical novelty. Bare "Linh", "I am Linh", "My name is Linh" all
+  score success under the deterministic matcher (asserted in 008E-CUE).
 - `capabilitySample: ['production.speak.say_own_name']` — direct sample;
   previously the capability was only covered transitively inside the
   multi-capability checkpoint.
@@ -134,14 +146,15 @@ were `servableTask: null` mints.)
 - Signature `OF.requestCart` (unchanged): drink-cart vendor context —
   cueTopology `cart_order_call`, setting `drink_cart`, interlocutor
   `vendor`.
-- **R1 cue fix:** stimulus is now `Yes? What can I get you?` — a
-  service invitation whose immediate pragmatic response IS the request.
-  The original "Cold drinks! Who is next?" invited the correct but
-  non-evidential reply "I'm next", measuring discourse inference, not
-  `request_item`. Every token is already inside this mission's
-  practiced cues ("Yes?", "What can I get you?"). Pinned regressions:
-  `a tea please` / `can i have a tea` / `tea please` succeed;
-  `i am next` stays non-evidence.
+- **R1→R2 cue fixes:** the original "Cold drinks! Who is next?"
+  invited the correct but non-evidential reply "I'm next", measuring
+  discourse inference, not `request_item`. R1's "Yes? What can I get
+  you?" still drew `Yes?` from a held-out transfer cue. R2 stimulus is
+  the mission's rehearsed service invitation `What can I get you?` —
+  the drink-cart/vendor context is carried by the learner-visible
+  Vietnamese situation line. Pinned regressions: `a tea please` /
+  `can i have a tea` / `tea please` succeed; `i am next` stays
+  non-evidence.
 
 ## SELF-DETAIL ASSESSMENT — `task.self.assessment.detail`
 
@@ -151,13 +164,18 @@ were `servableTask: null` mints.)
 - Signature `MF.selfHost` (unchanged): homestay-host context —
   cueTopology `host_arrival_detail`, setting `homestay`, interlocutor
   `host`.
-- **R1 cue fix:** stimulus is now `And where are you from?` — the
+- **R1→R2 fixes:** stimulus is `And where are you from?` — the
   mission's already-practiced personal-detail question frame. The
   original "Do you work, or are you a student?" invited the valid
   answer "I work." which the deterministic matcher cannot accept (it
   requires `I work in/at/as…` or `I am a …`) — an evaluator
   false-negative on a natural response. The where-from cue invites
   `I'm from Vietnam` / `I come from Vietnam` — all accepted forms.
+- **R2 metadata fix:** `language.requiredChunks/requiredVocabulary`
+  still declared the removed work/student surface (`I work in …`,
+  `work`, `study`); now declares the response construct actually
+  invited — `I'm from …` / `from` — inside the mission's declared
+  language range, with a staleness regression in 008E-SIT.
 
 ## MISSION REVISION BUMPS
 
@@ -233,10 +251,14 @@ claim-bearing dead ends.
 
 ## KNOWN LIMITATIONS
 
-- Browser-leg for the five new surfaces was not added: the runtime
-  trajectories exercise the identical `createMissionSession` → B0 →
-  validator → consume path that the browser drives (the 008D browser
-  slice already proves the mechanism end-to-end through the DOM).
+- The R2 browser leg proves the fresh assessment's situation renders
+  before the prompt on `task.order.assessment.request`; the other two
+  tasks share the identical render path and are pinned copy-side
+  (008E-SIT). A full in-browser trajectory to each assessment remains
+  uncovered — runtime trajectories exercise the same session path.
+- `TASK_SITUATION` coverage is opt-in per task id; nothing forces a
+  `freshness.required` task to declare a situation — a general
+  contract-level requirement is future work.
 - Remediation ordering relies on taskIds position (repair before
   re-drill) — this is authored ordering, not a policy change.
 - required=0 closes *proven* dead ends only; it does not assert A1

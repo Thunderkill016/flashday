@@ -11,15 +11,22 @@
 
 ## BEFORE (replayed on main@765a5d8)
 
-All five audit witnesses CONFIRMED failing for the same reason —
-candidate mints with `servableTask: null` (real reachability gap,
-not a policy bug):
+All five audit witnesses CONFIRMED failing — via TWO distinct modes
+(corrected in R1 durable-truth pass; an earlier draft wrongly claimed
+a single `servableTask: null` mode for all five):
 
 - correction @ buy_small_item | reception.listen.understand_spoken_price
+  — correction mints a candidate but `servableTask: null` (no authored
+  remediation task to bind)
 - correction @ find_a_place | reception.listen.follow_short_direction
+  — same mint-without-task mode
 - assessment @ meet_new_person | production.speak.say_own_name
+  — TRANSFERRED precondition reachable, but ZERO authored assessment
+  tasks → zero assessment candidates mint at all
 - assessment @ complete_small_order | interaction.request_item
+  — same zero-candidate mode
 - assessment @ talk_about_self_family | production.speak.state_basic_self_detail
+  — same zero-candidate mode
 
 ## WHAT LANDED (cdc7d7d)
 

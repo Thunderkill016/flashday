@@ -39,6 +39,7 @@ import { KINDS } from '../src/vnext/next-for-you/constants.js';
 import { stateDigest } from '../src/vnext/next-for-you/decision-log.js';
 import { canonicalFamilyId } from '../src/vnext/contracts.js';
 import { contractAttributesFunctions, evaluateAttempt } from '../src/vnext/evaluators.js';
+import { TASK_SITUATION, FUNCTION_MODEL } from '../src/vnext/ui/copy.js';
 import { attemptEvent, observeEvent } from '../experiments/next-for-you/scenarios.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -1539,28 +1540,40 @@ const consumedKinds = (session) => (session.selectionContext()?.actionsChosen ??
   say('008E-FAM: remediation deliberately practiced; all three fresh families collide with nothing');
 }
 
-/* ═══ 008E CUE-ALIGNMENT (R1, §7): the three fresh assessment cues
- * must solicit the capability they measure — no token outside the
- * mission's practiced stimulus/language surface, every naturally
- * invited answer scores under the deterministic evaluator, and a
- * turn-taking-only reply earns no request_item evidence. These pin the
- * construct validity, not just the family freshness. */
+/* ═══ 008E CUE-ALIGNMENT (R2): the three fresh assessment cues must
+ * solicit the capability they measure — every cue token drawn from the
+ * mission's GENUINELY PRACTICED surface only (fresh_transfer and
+ * fresh_assessment tasks are held-out by definition and can never
+ * prove a cue is "known"), every naturally invited answer scores under
+ * the deterministic evaluator, and a turn-taking-only reply earns no
+ * request_item evidence. Freshness lives in the learner-visible
+ * situation, never in novel cue vocabulary. */
 {
   const cueTokenCover = (fixture, task) => {
     const norm = (s) => s.toLowerCase().replace(/[—–\-?.,!;'"]/g, ' ').split(/\s+/).filter(Boolean);
     const cover = new Set();
+    /* Practiced-family task surfaces ONLY — a token attested solely on
+     * a held-out transfer/assessment task is not practiced evidence
+     * (008E R2 HIGH: the R1 cover counted those and masked unpracticed
+     * tokens like "tell me" / "yes?"). */
     for (const t of fixture.tasks) {
       if (t.id === task.id) continue;
+      if (t.freshness?.familyClass === 'fresh_transfer' || t.freshness?.familyClass === 'fresh_assessment') continue;
       for (const c of t.stimulus?.languageComponents ?? []) for (const w of norm(c)) cover.add(w);
       for (const c of t.language?.requiredChunks ?? []) for (const w of norm(c)) cover.add(w);
       for (const v of t.language?.requiredVocabulary ?? []) for (const w of norm(v)) cover.add(w);
     }
+    /* Mission-declared language is part of the known-input surface. */
+    for (const scope of ['introduced', 'assumedKnown']) {
+      for (const c of fixture.mission.language?.[scope]?.chunks ?? []) for (const w of norm(c)) cover.add(w);
+      for (const v of fixture.mission.language?.[scope]?.vocabulary ?? []) for (const w of norm(v)) cover.add(w);
+    }
     return (task.stimulus?.languageComponents ?? []).flatMap(norm).every((w) => cover.has(w));
   };
   for (const [fx, id, cue, accepts, nonEvidence] of [
-    [MEET, 'task.meet.assessment.name_signup', 'Hi — tell me your name.',
+    [MEET, 'task.meet.assessment.name_signup', "What's your name?",
       ['my name is linh', 'i am linh', 'linh'], null],
-    [ORDER, 'task.order.assessment.request', 'Yes? What can I get you?',
+    [ORDER, 'task.order.assessment.request', 'What can I get you?',
       ['a tea please', 'can i have a tea', 'tea please'], 'i am next'],
     [SELF, 'task.self.assessment.detail', 'And where are you from?',
       ["i'm from vietnam", 'i am from vietnam', 'i come from vietnam'], null]
@@ -1578,7 +1591,74 @@ const consumedKinds = (session) => (session.selectionContext()?.actionsChosen ??
       ok(r?.outcome !== 'success', `008E-CUE: turn-taking reply '${nonEvidence}' wrongly earns ${id} evidence`);
     }
   }
-  say('008E-CUE: fresh assessment prompts stay in-range and evaluator-aligned (R1)');
+  say('008E-CUE: fresh assessment cues stay inside the PRACTICED-only surface and evaluator-aligned (R2)');
+}
+
+/* ═══ 008E SITUATION (R2 BLOCKER): a fresh family is only fresh if the
+ * LEARNER experiences the changed context — TASK_SITUATION is the only
+ * channel that renders it (mission-page.js appends .vnext-situation
+ * before the prompt lines). Each fresh assessment must carry a
+ * situation that faithfully names the dimensions its contextSignature
+ * declares; the mission language metadata must describe the response
+ * construct the cue actually invites (no stale metadata from a removed
+ * prompt). The browser leg proves the rendered DOM order; here we pin
+ * copy existence + signature correspondence + metadata freshness. */
+{
+  /* situation copy ↔ contextSignature correspondence. Each entry:
+   * expected signature dims + Vietnamese markers that must appear in
+   * the learner-visible line (setting / partner role / situation). */
+  const SIG_EXPECT = {
+    'task.meet.assessment.name_signup': {
+      setting: 'community', interlocutorRole: 'organizer', cueTopology: 'signup_name_request',
+      markers: ['đăng ký', 'cộng đồng', 'người tổ chức']
+    },
+    'task.order.assessment.request': {
+      setting: 'drink_cart', interlocutorRole: 'vendor', cueTopology: 'cart_order_call',
+      markers: ['xe nước', 'người bán', 'gọi món']
+    },
+    'task.self.assessment.detail': {
+      setting: 'homestay', interlocutorRole: 'host', cueTopology: 'host_arrival_detail',
+      markers: ['homestay', 'chủ nhà', 'đến']
+    }
+  };
+  const norm = (s) => s.toLowerCase().replace(/[—–\-?.,!;'"]/g, ' ').split(/\s+/).filter(Boolean);
+  const ACCEPTED = {
+    'task.meet.assessment.name_signup': ['my name is linh', 'i am linh', 'linh'],
+    'task.order.assessment.request': ['a tea please', 'can i have a tea', 'tea please', 'some water please'],
+    'task.self.assessment.detail': ["i'm from vietnam", 'i am from vietnam', 'i come from vietnam']
+  };
+  for (const [id, spec] of Object.entries(SIG_EXPECT)) {
+    const t = TASK_REGISTRY.find((x) => x.id === id);
+    const copy = TASK_SITUATION[id];
+    ok(typeof copy === 'string' && copy.length > 8,
+      `008E-SIT: ${id} has no learner-visible situation — held-out context exists only as metadata`);
+    ok(t.contextSignature?.setting === spec.setting
+      && t.contextSignature?.interlocutorRole === spec.interlocutorRole
+      && t.contextSignature?.cueTopology === spec.cueTopology,
+      `008E-SIT: ${id} signature drifted — ${JSON.stringify(t.contextSignature)}`);
+    for (const marker of spec.markers) {
+      ok(copy.toLowerCase().includes(marker),
+        `008E-SIT: ${id} situation '${copy}' does not name ${marker} — signature dim not learner-visible`);
+    }
+    /* Metadata freshness: every declared chunk's fixed tokens and every
+     * required vocabulary word must appear in at least one naturally
+     * invited answer or the canonical model of a sampled function — a
+     * leftover from a removed prompt can never satisfy this. */
+    const surfaces = [
+      ...ACCEPTED[id].map(norm),
+      ...(t.response?.requiredFunctions ?? []).map((fn) => norm(FUNCTION_MODEL[fn] ?? ''))
+    ];
+    const covered = (tokens) => surfaces.some((ans) => tokens.every((w) => ans.includes(w)));
+    for (const chunk of t.language?.requiredChunks ?? []) {
+      const fixed = norm(chunk).filter((w) => w !== '…');
+      ok(covered(fixed), `008E-SIT: ${id} requiredChunk '${chunk}' is stale — no accepted answer or model instantiates it`);
+    }
+    for (const word of t.language?.requiredVocabulary ?? []) {
+      ok(surfaces.some((ans) => ans.includes(word.toLowerCase())),
+        `008E-SIT: ${id} requiredVocabulary '${word}' is stale — absent from every accepted answer`);
+    }
+  }
+  say('008E-SIT: three fresh assessments carry learner-visible situations matching their signatures; metadata fresh');
 }
 
 /* Answers shared by the 008E trajectory and REVPIN audit legs. */
