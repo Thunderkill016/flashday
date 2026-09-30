@@ -62,5 +62,122 @@ Mission 008B (ChatGPT control room): convert 008A evidence into a falsifiable fo
 ## Browser verification
 not required — isolated prototype/benchmark code; no product UI changes
 
+## Mission report — full results
+
+### BASE SHA
+`9cd77eb75ab289c6ac41f28ecd2481f0fcaa1119`
+
+### ENDING SHA
+`ed8db7f` (branch `devin/m008b-next-for-you-spec`; code head `5f61842`)
+
+### FORMAL DECISION CONTRACT
+`docs/specs/next-for-you-v0.md` — serializable episode-scoped
+DecisionContext; generateCandidates → hardFilter → tier → ordinal
+preferences → deterministic tie-break → explanation.
+
+### HARD FILTERS
+`no_servable_task`, `purpose_substitution`, `demand_no_longer_pending`,
+`probe_does_not_cover_function`, `failure_ceiling`,
+`identical_retry_after_failure_ceiling`, `diagnostic_budget`,
+`no_verified_failure`. Filters are binary violations — never score-
+compensated. Kernel invariants (learner isolation, revision validity,
+modality, prerequisites, function-scoped demands) enforced at
+generation via `verifyEventTask` + the shared support lifecycle.
+
+### CANDIDATE TAXONOMY
+`resume_in_flight`, `due_retrieval`, `refresh`, `correction`,
+`support_demand`, `transfer`, `independent_attempt`, `diagnostic_probe`,
+`mission_continuation`, `new_input`, `assessment`. Tiers: MANDATORY →
+REPAIR → MAINTENANCE → EVIDENCE → PROGRESS → INTRODUCE → TERMINAL.
+
+### ELIGIBILITY VS PRIORITY
+Eligibility = contract validity + kernel invariants + session budgets.
+Priority = tier → named ordinal preferences (`pending_demand`,
+`verified_failure_on_demonstrated`, `open_attributed_gap`,
+`support_dependency_fade`, `due`, `mission_assessment_plan`,
+`unattributed_failure`, `information_value`, `baseline_probe`,
+`transfer_pending`, `thread_continuation`, `breadth`) → deterministic
+tie-break. Every preference provenance-tagged KERNEL/EVIDENCE/
+SAFETY_PRIOR/EXPERIMENTAL.
+
+### POLICY A / B / C
+- A: corrected cascade reference (production order + identical-retry
+  ceiling as filter). Not the winner claim.
+- B: full filter→tier→ordinal→tie-break pipeline with suppression trace.
+- C: B + bounded `information_value` probe preference — categorical
+  uncertainty only, no psychometrics.
+
+### SESSION CONTEXT / DIAGNOSTIC BUDGET / ASSESSMENT / RELEARNING / NON-ATTRIBUTING FAILURE
+- Episode-scoped context, immutable recordChoice, thread preserved
+  across sessions; no fatigue proxy.
+- `diagnosticMaxPerEpisode=2` [SAFETY PRIOR]; baseline probes exempt
+  (R6 introduction path); non-attributing failure → budgeted probe or
+  honest skip, never fabricated diagnosis.
+- Assessment requires mission plan + `transferred`; re-probe only after
+  non-success; never substitutes for transfer, nor vice versa.
+- Refresh only on verified fail/partial on demonstrated capability —
+  30-day gap yields `due_retrieval`, `falseRelearningCount=0` verified.
+
+### EXPLANATION / VERSIONING / DECISION LOG / LEAKAGE
+- Every decision: whyExists, tier, preferences, penalties, beat,
+  suppressed, context summary.
+- `vnext.selection-policy.{a0,b0,c0}.v1` stamped per decision,
+  independent of learner-model/learning-policy versions.
+- Append-only decision log; no retro-mutation.
+- replayAt(T) truncates events at occurredAt≤T — byte-identical
+  decisions with later evidence appended (test §4, B and C PASS).
+
+### MISSION COVERAGE / ARCHETYPES
+All 7 authored missions × all policies: 0 unservable choices, 0
+task/cap mismatches. 14 synthetic archetypes (labeled synthetic).
+
+### PATHOLOGIES FOUND → PREVENTED
+- FOUND: identical retry 38× past ceiling on a naive cascade —
+  `identical_retry_after_failure_ceiling` hard filter + alternate-task
+  escape hatch now enforced.
+- FOUND: purpose substitution (probe served input task) — hard-filtered.
+- FOUND: duplicate probe generation for never-seen targets — gated.
+- PREVENTED: wrong-function probe, foreign-learner contamination, dup/
+  reorder drift, future leakage, unservable picks, false relearning,
+  assessment⇄transfer substitution, diagnostic spam, silent
+  stuck-capability blocking.
+
+### A/B/C COUNTERFACTUAL RESULTS
+`counterfactual()`/`counterfactualReport()` run all policies over the
+same frozen state; differences logged as `kind@capability` divergences
+with explanations. On mixed/failure states B differs from A in probe
+ordering and suppression visibility; C surfaces thin-evidence probes
+within budget.
+
+### WHERE B IMPROVES OVER A / WHERE A IS EQUAL
+B: explicit suppression trace, named ordinal reasons, ceiling applied
+to every kind. A: simpler and equal on all-success/fresh trajectories.
+
+### WHAT C ADDS / RISKS
+Adds: bounded information-value probe preference on thin/conflicting
+evidence. Risks: over-probing on thin-heavy states — budget caps it.
+
+### STARVATION / THRASHING RESULTS
+Starvation + deferral metrics recorded per run; no optimal ratio
+claimed. `capabilitySwitchRate` measured; `thread_continuation` is a
+bounded preference — no A/B/A/B observed in the suite.
+
+### REAL-DATA STATUS
+NO REAL VNEXT LEARNER EVENT CORPUS AVAILABLE — all synthetic.
+
+### RESEARCH-TRACEABILITY STATUS
+Every heuristic provenance-tagged to the 008A corpus; decisions and
+open numbers in `12-008b-decisions.md` / `13-open-calibration-questions.md`.
+
+### VERIFY:FULL RESULT
+PASS at `5f61842` — typecheck 127 files, all unit suites (next-for-you
+634 checks), vite build, browser 26 groups, Firestore emulator.
+`src/vnext/planner.js` diff vs main: 0 lines.
+
+### KNOWN LIMITATIONS
+Synthetic learners only; alternate-task escape unbounded per-session
+by design (spec §17), pacing is SESSION_LEN=4 modeling choice;
+counterfactual differences are descriptive, not causal.
+
 ## Final result
 Completed; required verification green on ending SHA.
