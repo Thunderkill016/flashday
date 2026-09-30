@@ -7,11 +7,17 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "node scripts/typecheck.mjs",
-    "test": "node tests/namespace.test.mjs && node tests/session.test.mjs && node tests/evidence.test.mjs && node tests/progress.test.mjs && node tests/scheduler.test.mjs && node tests/learner-model.test.mjs && node tests/time-gate.test.mjs && node tests/voice.test.mjs && node tests/cloud-sync.test.mjs && node tests/content.test.mjs && node tests/mission.test.mjs && node tests/vnext.test.mjs && node tests/vnext-contracts.test.mjs && node tests/vnext-slice.test.mjs && node tests/vnext-pilot.test.mjs && node tests/vnext-policy.test.mjs && node tests/vnext-persist.test.mjs && node tests/vnext-ui-session.test.mjs && node tests/vnext-curriculum.test.mjs && node tests/content-reuse.test.mjs && node tests/flashday-store.test.js && node tests/fsrs-scheduler.test.mjs && node tests/flashday-cloud.test.js && node tests/flashday-auth.test.mjs && node tests/cloud-compat.test.mjs && node tests/site-entrypoints.test.js",
+    "test": "node tests/namespace.test.mjs && node tests/session.test.mjs && node tests/evidence.test.mjs && node tests/progress.test.mjs && node tests/scheduler.test.mjs && node tests/learner-model.test.mjs && node tests/time-gate.test.mjs && node tests/voice.test.mjs && node tests/cloud-sync.test.mjs && node tests/content.test.mjs && node tests/mission.test.mjs && node tests/vnext.test.mjs && node tests/vnext-contracts.test.mjs && node tests/vnext-slice.test.mjs && node tests/vnext-pilot.test.mjs && node tests/vnext-policy.test.mjs && node tests/vnext-persist.test.mjs && node tests/vnext-ui-session.test.mjs && node tests/vnext-curriculum.test.mjs && node tests/content-reuse.test.mjs && node tests/flashday-store.test.js && node tests/fsrs-scheduler.test.mjs && node tests/flashday-cloud.test.js && node tests/flashday-auth.test.mjs && node tests/cloud-compat.test.mjs && node tests/site-entrypoints.test.js && node tests/swe-factory.test.mjs",
     "verify": "npm run typecheck && npm test && npm run build",
     "test:browser": "node tests/app-browser.test.mjs",
     "verify:full": "npm run verify && npm run test:browser && npm run test:firestore",
-    "test:firestore": "env -u DEBUG npx --yes --package=firebase-tools@15.30.2 firebase emulators:exec --project demo-flashday-test --only firestore \"node tests/firestore-emulator.test.mjs && node tests/firestore-vnext-emulator.test.mjs\""
+    "test:firestore": "env -u DEBUG npx --yes --package=firebase-tools@15.30.2 firebase emulators:exec --project demo-flashday-test --only firestore \"node tests/firestore-emulator.test.mjs && node tests/firestore-vnext-emulator.test.mjs\"",
+    "swe:status": "node scripts/swe.mjs status",
+    "swe:start": "node scripts/swe.mjs start",
+    "swe:checkpoint": "node scripts/swe.mjs checkpoint",
+    "swe:verify": "node scripts/swe.mjs verify",
+    "swe:finish": "node scripts/swe.mjs finish",
+    "swe:resume": "node scripts/swe.mjs resume"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",
