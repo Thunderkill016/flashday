@@ -20,6 +20,7 @@
  * Env overrides (tests): SWE_REPO (repo root), SWE_HOME (missions dir).
  */
 import { execFileSync, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
@@ -184,6 +185,26 @@ const loadMission = (id) => {
   return { id, meta, body, file };
 };
 
+/*
+ * Mission definition identity: the sha256 of mission.md at start is
+ * pinned in state.json. Operations that trust mission semantics
+ * (verify, finish, resume) re-hash and compare — a mission may not
+ * rewrite its own contract mid-flight, committed or not. Restoring the
+ * original bytes restores the hash and normal operation.
+ */
+const missionHash = (id) =>
+  createHash('sha256').update(readFileSync(missionFile(id))).digest('hex');
+
+const assertMissionIntegrity = (id, state) => {
+  const current = missionHash(id);
+  if (!state.missionSha256 || state.missionSha256 !== current)
+    die(
+      `mission '${id}': mission definition changed since start ` +
+        `(pinned ${state.missionSha256?.slice(0, 12) ?? 'none'}, current ${current.slice(0, 12)}). ` +
+        `Mission contracts are immutable — restore the original mission.md or abandon.`
+    );
+};
+
 const loadState = (id) =>
   existsSync(stateFile(id)) ? JSON.parse(readFileSync(stateFile(id), 'utf8')) : null;
 
@@ -284,6 +305,7 @@ const cmdStart = (id) => {
     finishedAt: null,
     startSha: headSha(),
     startBranch: branch(),
+    missionSha256: missionHash(id),
     currentSha: headSha(),
     checkpoints: [],
     commands: [],
@@ -342,6 +364,7 @@ const cmdVerify = (id) => {
   const mission = loadMission(id);
   const s = loadState(id) ?? die(`mission '${id}' has no state — start it first`);
   if (TERMINAL.has(s.status)) die(`mission '${id}' is ${s.status} — terminal`);
+  assertMissionIntegrity(id, s);
 
   // VERIFYING is observable in state.json while the run is in flight; a
   // crash mid-verify leaves the status visible for resume to diagnose.
@@ -381,10 +404,23 @@ const cmdFinish = (id, args) => {
   const mission = loadMission(id);
   const s = loadState(id) ?? die(`mission '${id}' has no state — start it first`);
   if (TERMINAL.has(s.status)) die(`mission '${id}' is already ${s.status}`);
+  assertMissionIntegrity(id, s);
   const wanted = args.result ?? 'done';
   if (!['done', 'failed'].includes(wanted)) die(`--result must be done|failed`);
 
   if (wanted === 'done') {
+    // DONE must describe a durable, reproducible repository state: the
+    // tree may not carry uncommitted product work, and the last green
+    // verification must cover the current HEAD.
+    const dirty = dirtyTree();
+    if (!dirty.clean) {
+      const parts = [];
+      if (dirty.tracked.length)
+        parts.push(`uncommitted tracked changes: ${dirty.tracked.join(', ')}`);
+      if (dirty.untracked.length)
+        parts.push(`untracked files outside missions/: ${dirty.untracked.join(', ')}`);
+      die(`refusing DONE: working tree is not clean (${parts.join('; ')}). Commit or remove first.`);
+    }
     const v = s.verifications.at(-1);
     if (!v) die(`refusing DONE: no verification was ever run — run swe:verify`);
     if (!v.ok) die(`refusing DONE: last verification FAILED — fix and re-verify, or finish --result failed`);
@@ -470,6 +506,7 @@ const cmdResume = (id) => {
   id = pickMission(id, { wantActive: true });
   const mission = loadMission(id);
   const s = loadState(id) ?? die(`mission '${id}' has no state`);
+  assertMissionIntegrity(id, s);
 
   const dirty = dirtyTree();
   const commits = commitsSince(s.startSha);

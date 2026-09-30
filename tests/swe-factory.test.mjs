@@ -297,5 +297,96 @@ const makeRepo = () => {
     assert.match(r.swe(['finish', '001-one'], { ok: false }), /already DONE/));
 }
 
+/* 12. Finding 1 (0A.1): DONE must never land on uncommitted work.
+ * Verify may run on a dirty tree (agents test mid-work), but finish DONE
+ * requires a clean tracked tree + no unsafe untracked files. */
+{
+  const r = makeRepo();
+  r.addMission('001-one');
+  r.swe(['start']);
+  writeFileSync(join(r.dir, 'tests/ok.mjs'), 'process.exit(0) // uncommitted product change\n');
+  check('verify still runs on dirty tree', () =>
+    assert.match(r.swe(['verify', '001-one']), /verification PASS/));
+  check('finish DONE refused with uncommitted tracked change', () =>
+    assert.match(r.swe(['finish', '001-one'], { ok: false }), /uncommitted|not clean/i));
+  check('finish --result failed still allowed on dirty tree', () =>
+    assert.match(r.swe(['finish', '001-one', '--result', 'failed']), /FAILED/));
+}
+
+{
+  const r = makeRepo();
+  r.addMission('001-one');
+  r.swe(['start']);
+  writeFileSync(join(r.dir, 'stray-product.js'), 'x\n');
+  r.swe(['verify', '001-one']);
+  check('finish DONE refused with unsafe untracked file', () =>
+    assert.match(r.swe(['finish', '001-one'], { ok: false }), /uncommitted|not clean/i));
+}
+
+{
+  const r = makeRepo();
+  r.addMission('001-one');
+  r.swe(['start']);
+  writeFileSync(join(r.dir, 'tests/ok.mjs'), 'process.exit(0) // committed change\n');
+  r.g(['add', 'tests/ok.mjs']);
+  r.g(['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'product change']);
+  r.swe(['verify', '001-one']);
+  check('finish DONE succeeds after committing the change + re-verify', () =>
+    assert.match(r.swe(['finish', '001-one']), /DONE/));
+}
+
+/* 13. Finding 2 (0A.1): mission definition is immutable after start.
+ * Hash captured at start; verify/finish/resume fail closed on drift —
+ * committed or not. Restoring the definition restores operation. */
+{
+  const r = makeRepo();
+  r.addMission('001-one');
+  r.swe(['start']);
+  writeFileSync(join(r.dir, 'missions/001-one/mission.md'),
+    readFileSync(join(r.dir, 'missions/001-one/mission.md'), 'utf8').replace('validate the factory', 'WEAKENED'));
+  check('uncommitted mission.md drift detected at verify', () =>
+    assert.match(r.swe(['verify', '001-one'], { ok: false }), /mission definition changed/i));
+  check('uncommitted mission.md drift detected at finish', () =>
+    assert.match(r.swe(['finish', '001-one'], { ok: false }), /mission definition changed/i));
+  check('uncommitted mission.md drift detected at resume', () =>
+    assert.match(r.swe(['resume', '001-one'], { ok: false }), /mission definition changed/i));
+}
+
+{
+  const r = makeRepo();
+  r.addMission('001-one');
+  r.swe(['start']);
+  writeFileSync(join(r.dir, 'missions/001-one/mission.md'), missionMd('001-one', ['node tests/fail.mjs']));
+  r.g(['add', 'missions/001-one/mission.md']);
+  r.g(['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'rewrite contract']);
+  check('committed mission.md rewrite still detected', () =>
+    assert.match(r.swe(['verify', '001-one'], { ok: false }), /mission definition changed/i));
+  check('finish also refused after committed rewrite', () =>
+    assert.match(r.swe(['finish', '001-one'], { ok: false }), /mission definition changed/i));
+}
+
+{
+  const r = makeRepo();
+  r.addMission('001-one');
+  r.swe(['start']);
+  const orig = readFileSync(join(r.dir, 'missions/001-one/mission.md'), 'utf8');
+  writeFileSync(join(r.dir, 'missions/001-one/mission.md'), orig.replace('validate the factory', 'WEAKENED'));
+  r.swe(['verify', '001-one'], { ok: false });
+  writeFileSync(join(r.dir, 'missions/001-one/mission.md'), orig);
+  check('restoring mission definition restores operation', () => {
+    assert.match(r.swe(['verify', '001-one']), /verification PASS/);
+    assert.match(r.swe(['finish', '001-one']), /DONE/);
+  });
+}
+
+/* 14. mission.md hash is stored in state at start */
+{
+  const r = makeRepo();
+  r.addMission('001-one');
+  r.swe(['start']);
+  check('state.missionSha256 persisted at start', () =>
+    assert.match(r.state('001-one').missionSha256 ?? '', /^[0-9a-f]{64}$/));
+}
+
 console.log(`\nswe-factory: ${results.length} checks — PASS`);
 results.forEach((r) => console.log('  ' + r.split('\n')[0]));
