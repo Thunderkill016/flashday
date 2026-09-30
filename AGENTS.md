@@ -108,6 +108,27 @@ the deterministic next-action policy in `src/core/planner.js` — AI never
 chooses what the learner studies next. Full rationale:
 `docs/adr/learning-core-v3.md`.
 
+## Evidence engine vNext (`src/vnext/`)
+
+The greenfield learning loop — headless, append-only evidence,
+replay-derived capability states (`NOT_SEEN → EXPOSED → SUPPORTED →
+INDEPENDENT → RETAINED → TRANSFERRED`), versioned thresholds
+(`src/vnext/policy.js`), deterministic planner, contract-validated
+tasks (`contracts.js`), and a thin honest UI at `/vnext/`
+(`ui-session.js` + `ui/`).
+
+Curriculum authoring is gated by `src/vnext/curriculum-checks.js`
+(run in `tests/vnext-curriculum.test.mjs`): capability ids are
+namespaced `reception.*`/`production.*`/`interaction.*`; missions
+declare `targetCapabilities` (claim-bearing, ≤3 — each owes practiced
++ delayed + fresh_transfer + assessment-sample coverage),
+`carrierCapabilities` (rehearsed, never fresh_transfer), and
+`supportCapabilities`. Every task carries a `contextSignature` and a
+canonical `pf.<cap>.<cueTopology>.<setting>.<register>.<channel>.vN`
+prompt family; transfer `changedDimensions` must differ from every
+practiced family on real signature fields. Only verified events consume
+tasks; delayed re-checks reuse the rehearsed family.
+
 ## Pages and auth flow
 
 | Route        | File             | Role                                   |
