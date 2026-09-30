@@ -7,7 +7,7 @@
  * The append path dedupes identical re-deliveries and throws on
  * same-id/different-content — matching persist.js semantics.
  */
-import { eventFingerprint } from '../store-memory.js';
+import { eventFingerprint, decisionFingerprint } from '../store-memory.js';
 
 const eventsKey = (learnerId) => `fd.vnext.${learnerId}.events`;
 const runsKey = (learnerId) => `fd.vnext.${learnerId}.runs`;
@@ -84,6 +84,34 @@ export function createLocalRunStore(learnerId) {
     },
     async list() {
       return all();
+    }
+  };
+}
+
+/* 008C §11: consumed-decision audit trail — same append-only contract
+ * as the event store, keyed by decisionId. */
+export function createLocalDecisionStore(learnerId) {
+  const key = `fd.vnext.${learnerId}.decisions`;
+  const all = () => readJson(key, []);
+  return {
+    async append(record) {
+      const byId = new Map(all().map((r) => [r.decisionId, r]));
+      const existing = byId.get(record.decisionId);
+      if (existing) {
+        if (decisionFingerprint(existing) !== decisionFingerprint(record)) {
+          throw new Error(`decision conflict '${record.decisionId}' — same id, different content; refusing to overwrite audit`);
+        }
+        return { appended: 0, deduped: 1 };
+      }
+      byId.set(record.decisionId, record);
+      writeJson(key, [...byId.values()]);
+      return { appended: 1, deduped: 0 };
+    },
+    async list() {
+      return all().sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0) || (a.decisionId < b.decisionId ? -1 : 1));
+    },
+    async clear() {
+      localStorage.removeItem(key);
     }
   };
 }

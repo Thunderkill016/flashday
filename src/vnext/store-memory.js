@@ -82,3 +82,44 @@ export function createMemoryRunStore(seed = []) {
     }
   };
 }
+
+/* 008C §11: consumed-decision audit store — append-only, keyed by
+ * decisionId. Same rules as the event store: identical re-delivery
+ * dedupes; same id + different content is a conflict, never a rewrite.
+ * Records are compact provenance — no learner snapshots, no response
+ * text. */
+const DECISION_FINGERPRINT_FIELDS = [
+  'decisionId', 'learnerId', 'missionId', 'missionRevision', 'taskId',
+  'taskRevision', 'capabilityId', 'selectionPolicyVersion',
+  'learningPolicyVersion', 'decisionInputDigest', 'decisionEpisodeId',
+  'sessionId', 'chosenKind', 'timestamp', 'reasonCodes', 'shadow',
+  'contextVersion'
+];
+
+export function decisionFingerprint(record) {
+  return JSON.stringify(DECISION_FINGERPRINT_FIELDS.map((k) => [k, record?.[k] ?? null]));
+}
+
+export function createMemoryDecisionStore(seed = []) {
+  const byId = new Map();
+  for (const r of seed) byId.set(r.decisionId, r);
+  return {
+    async append(record) {
+      const existing = byId.get(record.decisionId);
+      if (existing) {
+        if (decisionFingerprint(existing) !== decisionFingerprint(record)) {
+          throw new Error(`decision conflict '${record.decisionId}' — same id, different content; refusing to overwrite audit`);
+        }
+        return { appended: 0, deduped: 1 };
+      }
+      byId.set(record.decisionId, record);
+      return { appended: 1, deduped: 0 };
+    },
+    async list(learnerId) {
+      return [...byId.values()]
+        .filter((r) => !learnerId || r.learnerId === learnerId)
+        .sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0) || (a.decisionId < b.decisionId ? -1 : 1));
+    },
+    async clear() { byId.clear(); }
+  };
+}

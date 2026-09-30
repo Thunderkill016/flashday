@@ -8,7 +8,8 @@
  * evidence-derived descriptors.
  */
 import { createMissionSession } from '../ui-session.js';
-import { createLocalEventStore, createLocalRunStore } from './local-store.js';
+import { createLocalEventStore, createLocalRunStore, createLocalDecisionStore } from './local-store.js';
+import { SELECTION_MODES } from '../next-for-you/constants.js';
 import {
   PURPOSE_FRAME, FUNCTION_MODEL, FUNCTION_HINT, CAP_LABEL,
   TASK_SITUATION, MISSION_INTRO, progressCopy, SUMMARY_COPY,
@@ -57,6 +58,17 @@ export async function bootMissionPage(root) {
     return;
   }
 
+  /* 008C §19: this dedicated surface deliberately runs B0 by default;
+   * ?mode=reference|shadow overrides for comparison and debugging. An
+   * unrecognized value fails closed to reference, never silently to an
+   * unintended policy. */
+  const modeParam = params.get('mode');
+  const selectionMode = modeParam == null
+    ? SELECTION_MODES.B0
+    : Object.values(SELECTION_MODES).includes(modeParam)
+      ? modeParam
+      : SELECTION_MODES.REFERENCE;
+
   const session = createMissionSession({
     learnerId,
     mission: spec.mission,
@@ -65,7 +77,9 @@ export async function bootMissionPage(root) {
     riskPriors: RISK_PRIORS,
     policy: LEARNING_POLICY_V1,
     eventStore: createLocalEventStore(learnerId),
-    runStore: createLocalRunStore(learnerId)
+    runStore: createLocalRunStore(learnerId),
+    decisionStore: createLocalDecisionStore(learnerId),
+    selectionMode
   });
 
   // Test/debug seam — never used by the page itself.
