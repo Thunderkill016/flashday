@@ -1,11 +1,12 @@
 /*
- * Counterfactual + no-future-leakage replay (spec §10/§28/§29).
+ * Replay + counterfactual harness (spec §10).
  *
- * replayAt(state, t): recompute a decision over events filtered to
- * occurredAt ≤ t — identical state ⇒ identical choice, and events
- * after t can never influence the result.
+ * replayAt(state, policy, T): recompute the decision that would have
+ * been made at T — the event log, the DecisionContext AND the clock
+ * are truncated at T (future `now` leaks eligibility through due/age
+ * gates — review BLOCKER-3 round 2).
  *
- * counterfactual(state, {A,B,C}): run all policies over the same
+ * counterfactual(state, policies): run A/B/C side by side on the same
  * frozen state without mutating it, and diff their choices.
  */
 import { POLICIES } from './policies.js';
@@ -13,52 +14,36 @@ import { emptyContext, contextAt } from './decision-context.js';
 
 const withoutFuture = (events, t) => events.filter((e) => e.occurredAt <= t);
 
-/* Recompute the decision "as of T": events AND DecisionContext are
- * truncated at T — actions recorded after T (diagnostic spend, thread
- * changes) must not influence a historical replay (BLOCKER 3). */
+/* Recompute the decision "as of T": events, DecisionContext, and the
+ * clock are all pinned at T — actions recorded after T AND any later
+ * `now` must not influence a historical replay (BLOCKER 3 r1+r2). */
 export function replayAt(state, policyName, t) {
   const policy = POLICIES[policyName];
   const sliced = {
     ...state,
+    now: t,
     events: withoutFuture(state.events, t),
     decisionContext: contextAt(state.decisionContext, t)
   };
   return policy(sliced, { selection: state.selection });
 }
 
-/* Determinism probe: same inputs → same decisionId-free choice fields. */
+/* Determinism probe: run the same policy twice on the same frozen
+ * state; choices must be identical. */
 export function replayDeterminism(state, policyName) {
-  const a = policyOutput(POLICIES[policyName]({ ...state, decisionContext: state.decisionContext ?? emptyContext('a') }, { selection: state.selection }));
-  const b = policyOutput(POLICIES[policyName]({ ...state, decisionContext: state.decisionContext ?? emptyContext('a') }, { selection: state.selection }));
-  return { same: a === b, a, b };
+  const policy = POLICIES[policyName];
+  const a = policy(state, { selection: state.selection });
+  const b = policy(state, { selection: state.selection });
+  const key = (d) => `${d.chosen.kind}|${d.chosen.capabilityId}|${d.chosen.taskId}`;
+  return { same: key(a) === key(b), a: key(a), b: key(b) };
 }
 
-export function counterfactual(state) {
+/* Counterfactual: same state, all policies; returns per-policy choice
+ * keys plus whether they agree. State is not mutated. */
+export function counterfactual(state, names = ['A', 'B', 'C']) {
+  const key = (d) => `${d.chosen.kind}@${d.chosen.capabilityId}:${d.chosen.taskId ?? 'none'}`;
   const out = {};
-  for (const name of Object.keys(POLICIES)) {
-    const frozen = { ...state, decisionContext: state.decisionContext ?? emptyContext('cf') };
-    out[name] = POLICIES[name](frozen, { selection: state.selection });
-  }
-  return {
-    choices: Object.fromEntries(Object.entries(out).map(([k, v]) => [k, `${v.chosen.kind}@${v.chosen.capabilityId ?? 'none'}`])),
-    differences: diffChoices(out),
-    raw: out
-  };
-}
-
-function policyOutput(d) {
-  return `${d.chosen.kind}|${d.chosen.capabilityId}|${d.chosen.taskId}`;
-}
-
-function diffChoices(out) {
-  const names = Object.keys(out);
-  const diffs = [];
-  for (let i = 0; i < names.length; i++) {
-    for (let j = i + 1; j < names.length; j++) {
-      const a = policyOutput(out[names[i]]);
-      const b = policyOutput(out[names[j]]);
-      if (a !== b) diffs.push(`${names[i]}→${a} vs ${names[j]}→${b}`);
-    }
-  }
-  return diffs;
+  for (const p of names) out[p] = key(POLICIES[p](state, { selection: state.selection }));
+  const uniq = new Set(Object.values(out));
+  return { choices: out, agree: uniq.size === 1 };
 }

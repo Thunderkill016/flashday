@@ -180,16 +180,21 @@ Every decision returns:
 
 ```js
 {
-  decisionId,                    // deterministic: dec:{episodeId}#{decision ordinal}:{policyVersion}:{kind}@{capabilityId}:{taskId|idle}
-                                 // — derived from explicit inputs only; no module-global
-                                 //   counters or time reads (same inputs ⇒ identical id)
+  decisionId,                    // deterministic: dec:{episodeId}#{ordinal}:{policyVersion}:{inputDigest16}:{stub}
+                                 // — the input digest makes same-ordinal decisions on
+                                 //   different input states distinguishable (§12.8)
   selectionPolicyVersion, learnerModelVersion,
+  missionId, missionRevision,    // exact mission revision the decision ran against
   learnerId, timestamp,
-  chosen: { kind, capabilityId, taskId, tier },
+  chosen: { kind, capabilityId, taskId, taskRevision, tier,
+            demandProvenance? },  // support_demand: targetCapabilityId|targetTaskId@rev|
+                                  // missingFunction|sourceEventId|issuedAt|supportCapabilityId
   eligibilityEvidence: [...],      // which filters each candidate passed/failed
   preferenceReasons: [...],        // named ordinal contributions that decided it
   penalties: [...],
-  suppressedAlternatives: [{ kind, capabilityId, reason }], // why each lost
+  beat: [{ kind, capabilityId, taskId@rev, tier, preferences, penalties,
+           lostTo, lostBecause }], // every eligible loser — why-not-B is auditable
+  suppressedAlternatives: [{ kind, capabilityId, reason }],
   tieBreak: {...},
   decisionContextSummary: {...}
 }
@@ -201,9 +206,9 @@ beat each rival, which policy version decided [KERNEL].
 ## 9. Policies
 
 - **Policy A** `vnext.selection-policy.a0.v1` — reference cascade:
-  kernel order + the three 008A corrections (failure ceiling,
-  non-attributing admission, refresh-on-verified-failure). Baseline,
-  not the winner.
+  production kernel order over the SAME hard-filtered eligibility set
+  as B/C (§12.4 — parity in safety, difference only in ordering) +
+  the three 008A corrections. Baseline, not the winner.
 - **Policy B** `vnext.selection-policy.b0.v1` — full pipeline above.
 - **Policy C** `vnext.selection-policy.c0.v1` — B + bounded
   information-value heuristic: thinness/conflicting-outcome/
@@ -220,12 +225,19 @@ rebuilt from actions ≤ T) — future events *and* future context must
 not influence candidates, tiers, preferences, or choice.
 Counterfactual replay runs A/B/C on the same state without mutation.
 
-Each log entry carries a canonical `stateFingerprint` digest over
-every decision-relevant input: ordered event identities
-(id, task@rev, type, outcome, occurredAt) for the scoped learner plus
-the DecisionContext — two different histories can never share a
-fingerprint (the old `eventCount:capabilityCount:lastEventId` summary
-was provably collidable).
+Each log entry carries a canonical `stateFingerprint` = SHA-256 over
+the decision-input snapshot (§12.2): every decision-relevant input —
+ordered learner-scoped events with full provenance (id, task@rev,
+type, outcome, occurredAt, `attempt.observed`, support flags,
+evaluation contract + missingFunctions, context family), `now`,
+learning policy, selection config, mission id@revision, the full task
+revision surface (id@rev, purpose, capability, modality, prompt
+family, required functions), roles, and the whole DecisionContext.
+SHA-256 makes collisions overwhelmingly unlikely — "resistant", never
+claimed "impossible" (§12.2). Replay at T also pins `now = T` — a
+future clock leaks eligibility through due/age gates (§12.1). `append`
+deep-clones + deep-freezes each entry, so post-append mutation of the
+caller's decision object cannot rewrite history (§12.7).
 
 **Independent validation.** `validator.js` re-checks every chosen
 decision against contracts + kernel facts recomputed *outside* the
@@ -257,3 +269,89 @@ open.
   are all non-attributing. Correction liveness is exercised via a
   labeled synthetic task; authoring a real remediation surface is
   content work for a later mission.
+
+## 12. Round-2 hardening contract (PR #69 review 5911702205)
+
+Amendments to the v0 semantics above; where they conflict this section
+wins.
+
+### 12.1 Clock-safe replay
+`replayAt(state, policy, T)` truncates events at `occurredAt ≤ T`,
+rebuilds DecisionContext from `atDecision ≤ T`, AND pins `now = T`.
+A future clock leaks eligibility through due/retention gates.
+Regression: a cap due at T+30d replays its historical (non-due)
+decision at T.
+
+### 12.2 Canonical decision-input digest
+`stateDigest` = SHA-256 over `decisionInputSnapshot` — canonical JSON
+of every decision-relevant input (listed in §10). The mutation matrix
+(support flags, `observed`, missing functions, prompt family, task
+revision, policy, selection config, `now`, diagnostic context, mission
+revision) must each change the digest; identical inputs must produce
+identical digests. SHA-256 is collision-RESISTANT — never claimed
+collision-free.
+
+### 12.3 Revision-safe provenance
+`chosen` stamps `taskId`, `taskRevision`, `missionId`,
+`missionRevision`; `support_demand` additionally stamps full demand
+provenance (`targetCapabilityId`, `targetTaskId@revision`,
+`missingFunction`, `sourceEventId`, `issuedAt`, `supportCapabilityId`)
+plus the serving task id@revision. The validator resolves the EXACT
+task revision referenced — historical decisions against `X@v1` remain
+auditable after `X@v2` exists, and a forged revision flags
+`task_revision_missing`.
+
+### 12.4 Policy A safety parity
+All three policies run the SAME `hardFilter` envelope (purpose
+compatibility, demand pending + probe covers function, failure
+ceiling, identical-retry, per-cap episode repair bound, diagnostic
+budget, refresh-on-observed-failure). A differs only in ordering
+(cascade vs tier+ordinal) — never in what is permissible.
+
+### 12.5 Assessment freshness is a POLICY choice
+Production (mission-runner) re-probes a failed assessment task after
+remediation — so "consumed forever" is NOT kernel truth. Policy A
+mirrors production (`assessmentMode: 'production'`). Policies B/C run
+`assessmentMode: 'fresh'` [SAFETY_PRIOR/EXPERIMENTAL]: a consumed
+assessment task is hard-filtered (`assessment_consumed`); a different
+unused assessment task on the plan is served instead; if none exists
+the candidate stays visibly filtered (assessment-content backlog —
+authoring gap, see §11).
+
+### 12.6 BLOCKED ≠ IDLE
+`chosen.kind === 'idle'` iff no candidate exists (genuinely empty
+surface). `chosen.kind === 'blocked'` iff candidates or integrity
+violations exist but nothing may honestly be served; `blocked`
+decisions carry `blockedReasons` + `integrityViolations`. A decision
+claiming `idle` while an eligible candidate stands is a validator
+violation (`fabricated_idle`).
+
+### 12.7 Immutable decision log + strict observation
+`log.append` deep-clones + deep-freezes each decision (post-append
+caller mutation cannot rewrite history). Direct verified evidence
+requires `attempt.observed === true` — a missing/`false` flag is
+context, never performance evidence; the validator re-checks the same
+bar independently.
+
+### 12.8 Bounded repair + starvation variants
+Per-cap episode repair bound [SAFETY_PRIOR]: after
+`repairMaxPerEpisodePerCap` (default 3) correction/refresh actions on
+one capability in an episode, REPAIR stops monopolizing —
+sideways/maintenance/forward work proceeds, or `blocked` if nothing
+else is honestly servable. Alternating repair across two tasks on the
+same cap cannot evade it. Starvation guard variants
+(`review`/`balanced`/`forward` — limits 8/4/2) are a bounded escape
+valve: when one tier monopolizes ≥ limit consecutive decisions and
+other tiers have eligible work, one decision escapes. Eliminating
+pathological variants only — no educational optimum claimed.
+
+### 12.9 Validator coverage
+`validateDecision` receives the ACTUAL learning policy, selection
+config, and DecisionContext the decision ran under, and independently
+re-verifies: task existence + exact revision + registry validity,
+mission membership + revision match, capability/task modality
+compatibility, purpose↔kind mapping, prerequisites, diagnostic budget,
+failure ceiling, repair bound, exact support-demand provenance,
+assessment/transfer freshness (policy-aware: A allows re-probe),
+strict observation, learner isolation, future evidence, and
+idle/blocked honesty.

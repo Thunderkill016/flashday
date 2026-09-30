@@ -22,6 +22,7 @@ import { KINDS, POLICY_VERSIONS } from '../experiments/next-for-you/constants.js
 
 const T0 = Date.parse('2026-02-01T09:00:00Z');
 const HOUR = 3600_000;
+const MIN = 60_000;
 const DAY = 24 * HOUR;
 
 const F = ALL_MISSIONS[0]; // mission.meet_new_person
@@ -282,23 +283,26 @@ const scopedState = (events, caps, opts = {}) => ({
  * remediation task on understand_clock_time (which can attribute via
  * its choice tasks) so the correction mechanic itself is testable. */
 import { makeTask } from '../src/vnext/contracts.js';
-function correctionSyntheticState() {
+function correctionSyntheticState({ remediationTasks = 1 } = {}) {
   const mat = ALL_MISSIONS.find((f) => f.id === 'mission.meet_at_a_time');
   const ms = missionState(mat);
   const hearTask = mat.tasks.find((t) => t.id === 'task.time.retrieval.hear');
   const clockCap = capOf('reception.listen.understand_clock_time');
-  const remTask = makeTask({
-    id: 'task.time.remediation.hear', missionId: 'mission.meet_at_a_time',
-    capabilityId: clockCap.id, modality: clockCap.modality,
-    purpose: 'remediation', promptFamily: hearTask.promptFamily,
-    contextSignature: hearTask.contextSignature,
-    stimulus: { type: 'audio_line', languageComponents: ['Meet me at five.'] },
-    response: { type: 'choice', requiredFunctions: ['understand_clock_time'], options: [{ id: 'five', text: 'Lúc 5 giờ.', correct: true }, { id: 'six', text: 'Lúc 6 giờ.' }] },
-    evaluation: { authority: 'deterministic', contractId: 'eval.choice.correct.v1' },
-    language: { requiredChunks: [], requiredVocabulary: [], requiredConstructions: [] }
-  });
-  const tasks = [...mat.tasks, remTask];
-  const mission = { ...mat.mission, taskIds: [...mat.mission.taskIds, remTask.id] };
+  const remTasks = [];
+  for (let i = 0; i < remediationTasks; i++) {
+    remTasks.push(makeTask({
+      id: `task.time.remediation.hear${i ? `.${i}` : ''}`, missionId: 'mission.meet_at_a_time',
+      capabilityId: clockCap.id, modality: clockCap.modality,
+      purpose: 'remediation', promptFamily: hearTask.promptFamily,
+      contextSignature: hearTask.contextSignature,
+      stimulus: { type: 'audio_line', languageComponents: [`Meet me at ${['five', 'six'][i]}.`] },
+      response: { type: 'choice', requiredFunctions: ['understand_clock_time'], options: [{ id: `opt${i}`, text: `Đáp ${i}`, correct: true }, { id: `alt${i}`, text: 'Khác.' }] },
+      evaluation: { authority: 'deterministic', contractId: 'eval.choice.correct.v1' },
+      language: { requiredChunks: [], requiredVocabulary: [], requiredConstructions: [] }
+    }));
+  }
+  const tasks = [...mat.tasks, ...remTasks];
+  const mission = { ...mat.mission, taskIds: [...mat.mission.taskIds, ...remTasks.map((t) => t.id)] };
   const events = [
     /* supported: hinted success — taught but not independent */
     attemptEvent(hearTask, clockCap, { at: T0 - 3 * HOUR, support: { hint: true } }),
@@ -379,15 +383,19 @@ function correctionSyntheticState() {
   ok(policyOut(atT) === policyOut(replayed), `C: future DecisionContext leaked into replay-at-T (${policyOut(atT)} vs ${policyOut(replayed)})`);
 }
 
-/* --- D. Assessment consumption: failed checkpoint ≠ fresh re-sale --- */
+/* --- D. Assessment consumption: failed checkpoint — A re-probes, B/C demand fresh --- */
 {
   const ev = [...transferredHistory(), attemptEvent(tmt('assessment.checkpoint'), askCap(), { at: T0 - HOUR, outcome: 'fail' })];
-  for (const p of ['A', 'B', 'C']) {
+  /* B/C must NOT re-sell the consumed item as a fresh sample */
+  for (const p of ['B', 'C']) {
     const d = POLICIES[p](scopedState(ev, [askCap()]), {});
     ok(!(d.chosen.kind === KINDS.ASSESSMENT && d.chosen.taskId === 'task.meet.assessment.checkpoint'), `D.${p}: consumed assessment re-sold as fresh after fail`);
   }
+  /* the candidate stays visible but flagged — the POLICY owns the
+   * consumed-reuse decision (A mirrors production re-probe) */
   const gen = generateCandidates(scopedState(ev, [askCap()]));
-  ok(!gen.candidates.some((c) => c.kind === KINDS.ASSESSMENT && c.servableTask), 'D: consumed assessment task still presented as servable candidate');
+  const consumedCand = gen.candidates.find((c) => c.kind === KINDS.ASSESSMENT && c.servableTask);
+  ok(consumedCand?.consumed === true, 'D: consumed assessment not flagged for the policy layer');
 }
 
 /* --- E. Weak failure: unobserved outcomes mint no refresh/correction --- */
@@ -487,6 +495,286 @@ function correctionSyntheticState() {
   /* a genuine thread action updates it */
   ctx = recordChoice(ctx, { kind: KINDS.NEW_INPUT, capabilityId: 'reception.listen.greeting_basic', taskId: 'task.meet.input.scene', timestamp: T0 + 3 });
   ok(ctx.currentThreadCapabilityId === 'reception.listen.greeting_basic', 'J: thread action did not move the thread');
+}
+
+/* ══════════════════════════════════════════════════════════════════
+ * ROUND 2 (PR #69 comment 5911702205) — red-first regressions for the
+ * second architecture review: clock replay, revision provenance,
+ * canonical input digest, fail-closed mission integrity, demand
+ * provenance, BLOCKED≠IDLE, Policy-A filter parity, assessment
+ * A-vs-B semantics, repair bound, starvation variants, validator
+ * coverage, strict observation, immutable log, explanation trace,
+ * decision-id state identity.
+ * ══════════════════════════════════════════════════════════════════ */
+
+/* --- K. Clock replay: replayAt must pin now=T --- */
+{
+  /* cap independent ~now: last success at T0 → due at T0+24h, so NOT
+   * due at T0, due at T0+30d. A replay "at T0" must evaluate with
+   * now=T0 — the future clock must not leak. */
+  const ev = independentHistory(T0 + 2 * DAY);
+  const atT = POLICIES.B(scopedState(ev, [askCap()], { ctx: emptyContext('ep.k', 'ses.k'), now: T0 }), {});
+  const futureState = { ...scopedState(ev, [askCap()], { ctx: emptyContext('ep.k', 'ses.k'), now: T0 }), now: T0 + 30 * DAY };
+  const replayed = replayAt(futureState, 'B', T0);
+  ok(policyOut(atT) === policyOut(replayed),
+    `K: replay leaked future clock (${policyOut(atT)} vs ${policyOut(replayed)})`);
+  ok(atT.chosen.kind !== KINDS.DUE_RETRIEVAL, 'K: cap due at T0 — fixture invalid');
+}
+
+/* --- L. Revision-scoped provenance: task@rev + mission@rev --- */
+{
+  const { validateDecision } = await import('../experiments/next-for-you/validator.js');
+  const ev = seedIndependentHistory(F, { caps: 2, at: T0 - 30 * DAY });
+  const d = POLICIES.B(baseState(ev, { now: T0 }), {});
+  ok(d.chosen.taskId != null && d.chosen.taskRevision != null,
+    'L: chosen decision does not stamp taskRevision');
+  ok(d.missionId === F.mission.id && d.missionRevision === F.mission.revision,
+    'L: decision does not stamp missionId@missionRevision');
+  /* v1→v2: add a v2 of the served task — the historical decision must
+   * still audit against v1, never silently rebind to v2. */
+  const v1 = taskById(d.chosen.taskId);
+  const v2 = { ...v1, revision: (v1.revision ?? 1) + 1 };
+  const tasksV2 = [...state.tasks, v2];
+  const v = validateDecision(d, { events: ev, tasks: tasksV2, capabilities: state.capabilities, roles: state.roles, mission: F.mission, learnerId: 'SIM', now: T0, policy: LEARNING_POLICY_V1, selection: {} });
+  ok(!v.includes('task_revision_missing') && !v.includes('task_not_in_registry'),
+    `L: v1 decision orphaned after v2 registered (${v.join(',')})`);
+  /* a decision stamping a revision that never existed must flag */
+  const forged = { ...d, chosen: { ...d.chosen, taskRevision: 99 } };
+  ok(validateDecision(forged, { events: ev, tasks: tasksV2, capabilities: state.capabilities, roles: state.roles, mission: F.mission, learnerId: 'SIM', now: T0, policy: LEARNING_POLICY_V1, selection: {} }).length > 0,
+    'L: forged taskRevision passed the validator');
+}
+
+/* --- M. Decision-input digest: mutation matrix + collision resistance --- */
+{
+  const { stateDigest } = await import('../experiments/next-for-you/decision-log.js');
+  const ev = seedIndependentHistory(F, { caps: 2, at: T0 - 30 * DAY });
+  const st = baseState(ev, { now: T0 });
+  const digestOf = (over = {}) => stateDigest({ events: over.events ?? st.events, learnerId: 'SIM', decisionContext: over.decisionContext ?? st.decisionContext, now: over.now ?? st.now, policy: over.policy ?? st.policy, selection: over.selection ?? st.selection, mission: over.mission ?? st.mission, tasks: over.tasks ?? st.tasks, roles: over.roles ?? st.roles });
+  const base = digestOf();
+  const mut = (name, over) => ok(digestOf(over) !== base, `M.${name}: decision-relevant input changed but digest did not`);
+  mut('support', { events: ev.map((e, i) => i === 0 && e.attempt ? { ...e, support: { ...e.support, hint: true } } : e) });
+  mut('observed', { events: ev.map((e, i) => i === 0 && e.attempt ? { ...e, attempt: { ...e.attempt, observed: false } } : e) });
+  mut('missingFunctions', { events: ev.map((e, i) => i === 0 && e.attempt ? { ...e, evaluation: { ...(e.evaluation ?? {}), missingFunctions: ['ask_name'] } } : e) });
+  mut('promptFamily', { tasks: state.tasks.map((t, i) => i === 0 ? { ...t, promptFamily: t.promptFamily + '.mut' } : t) });
+  mut('taskRevision', { tasks: state.tasks.map((t, i) => i === 0 ? { ...t, revision: (t.revision ?? 1) + 1 } : t) });
+  mut('policy', { policy: { ...LEARNING_POLICY_V1, retention: { ...LEARNING_POLICY_V1.retention, minLagMs: 999 } } });
+  mut('selection', { selection: { diagnosticMaxPerEpisode: 9 } });
+  mut('now', { now: T0 + DAY });
+  mut('diagnosticContext', { decisionContext: recordChoice(st.decisionContext, { kind: KINDS.DIAGNOSTIC_PROBE, capabilityId: 'x', taskId: 't', timestamp: T0 }) });
+  mut('missionRevision', { mission: { ...F.mission, revision: (F.mission.revision ?? 1) + 1 } });
+  ok(digestOf() === digestOf(), 'M: digest unstable for identical inputs');
+  ok(typeof base === 'string' && base.length >= 32, 'M: digest too weak (need ≥ SHA-256-class)');
+}
+
+/* --- N. Mission integrity: fail closed into BLOCKED --- */
+{
+  for (const p of ['A', 'B', 'C']) {
+    const missing = POLICIES[p]({ ...baseState([], { now: T0 }), mission: { ...F.mission, taskIds: [...F.mission.taskIds, 'task.ghost'] } }, {});
+    ok(missing.chosen.kind === 'blocked', `N.${p}: missing declared task did not block (got ${missing.chosen.kind})`);
+    const dup = POLICIES[p]({ ...baseState([], { now: T0 }), tasks: [...state.tasks, state.tasks[0]] }, {});
+    ok(dup.chosen.kind === 'blocked', `N.${p}: duplicate id@revision did not block`);
+    const bad = { ...state.tasks[0], purpose: 'teleport' };
+    const invalid = POLICIES[p]({ ...baseState([], { now: T0 }), tasks: [...state.tasks.slice(1), bad] }, {});
+    ok(invalid.chosen.kind === 'blocked', `N.${p}: invalid declared task did not block`);
+  }
+}
+
+/* --- O. Support-demand provenance: exact demand identity survives --- */
+{
+  const mat = ALL_MISSIONS.find((f) => f.id === 'mission.meet_at_a_time');
+  const ms = missionState(mat);
+  const hearTask = mat.tasks.find((t) => t.id === 'task.time.retrieval.hear');
+  const numCap = capOf('reception.listen.identify_spoken_number');
+  /* two demands, same provider, different targets */
+  const t2 = mat.tasks.find((t) => t.id === 'task.time.diagnostic.hear');
+  const clockCap = capOf(t2.capabilityId);
+  const ev = [
+    attemptEvent(hearTask, capOf(hearTask.capabilityId), { at: T0 - 2 * HOUR, outcome: 'fail', missing: ['identify_spoken_number'] }),
+    attemptEvent(t2, clockCap, { at: T0 - HOUR, outcome: 'fail', missing: ['identify_spoken_number'] })
+  ];
+  const st = { learnerId: 'SIM', events: ev, capabilities: ms.capabilities, tasks: mat.tasks, roles: ms.roles, policy: LEARNING_POLICY_V1, now: T0, mission: mat.mission, decisionContext: emptyContext('ep.o', 'ses.o'), selection: {} };
+  for (const p of ['A', 'B', 'C']) {
+    const d = POLICIES[p](st, {});
+    ok(d.chosen.kind === KINDS.SUPPORT_DEMAND, `O.${p}: demand not routed (got ${d.chosen.kind})`);
+    const dp = d.chosen.demandProvenance;
+    ok(dp && dp.targetCapabilityId && dp.targetTaskId && dp.targetTaskRevision != null &&
+       dp.missingFunction === 'identify_spoken_number' && dp.sourceEventId && dp.supportCapabilityId === numCap.id,
+      `O.${p}: chosen demand lost its provenance`);
+    ok(d.chosen.taskRevision != null, `O.${p}: serving task revision not stamped`);
+  }
+}
+
+/* --- P. BLOCKED ≠ IDLE --- */
+{
+  /* IDLE: fresh surface where every cap is foreign-scoped → no candidates */
+  const idleD = POLICIES.B({ ...baseState([], { now: T0 }), capabilities: [], tasks: [] , mission: { ...F.mission, taskIds: [], targetCapabilities: [] } }, {});
+  ok(idleD.chosen.kind === 'idle', `P: empty surface should be idle, got ${idleD.chosen.kind}`);
+  /* BLOCKED: candidates exist but all are hard-filtered — burned budget
+   * leaves only diagnostic candidates for the never-seen target. */
+  const blockedD = POLICIES.B(scopedState([], [askCap()], { ctx: burnCtx2(2) }), {});
+  ok(blockedD.chosen.kind === 'blocked', `P: filtered-out work should be blocked, got ${blockedD.chosen.kind}`);
+  ok(blockedD.blocked === true, 'P: blocked flag missing');
+  /* validator: fabricated idle while a servable candidate exists */
+  const { validateDecision } = await import('../experiments/next-for-you/validator.js');
+  const ev = seedIndependentHistory(F, { caps: 2, at: T0 - 30 * DAY });
+  const good = POLICIES.B(baseState(ev, { now: T0 }), {});
+  const fakeIdle = { ...good, chosen: { kind: 'idle', capabilityId: null, taskId: null, tier: 'TERMINAL' } };
+  const v = validateDecision(fakeIdle, { events: ev, tasks: state.tasks, capabilities: state.capabilities, roles: state.roles, mission: F.mission, learnerId: 'SIM', now: T0, policy: LEARNING_POLICY_V1, selection: {}, decision: fakeIdle });
+  ok(v.length > 0, 'P: fabricated idle passed the validator');
+}
+
+/* --- Q. Policy A shares the hard-safety envelope --- */
+{
+  /* burned diagnostic budget must stop probes under ALL policies */
+  for (const p of ['A', 'B', 'C']) {
+    const d = POLICIES[p](scopedState([], [askCap()], { ctx: burnCtx2(2) }), {});
+    ok(d.chosen.kind !== KINDS.DIAGNOSTIC_PROBE, `Q.${p}: probe served past episode budget`);
+  }
+  /* purpose substitution: a candidate whose servable task has the wrong
+   * purpose is filtered everywhere — exercise via a state whose only
+   * remaining diagnostic surface resolves to a non-diagnostic task.
+   * (Author-side purpose table is exercised by F + this parity check.) */
+}
+
+/* --- R. Assessment semantics: A mirrors production retry, B demands fresh --- */
+{
+  const ev = [...transferredHistory(), attemptEvent(tmt('assessment.checkpoint'), askCap(), { at: T0 - HOUR, outcome: 'fail' })];
+  /* Production mirror: remediation precedes re-probe, so A serves the
+   * repair first — BUT the consumed assessment must remain ELIGIBLE
+   * under A (mission-runner re-serves it after remediation). */
+  const da = POLICIES.A(scopedState(ev, [askCap()]), {});
+  const aCand = da.candidates.find((c) => c.kind === KINDS.ASSESSMENT && c.taskId === 'task.meet.assessment.checkpoint');
+  ok(aCand && aCand.eligible === true, 'R: Policy A filtered the consumed assessment — not production-faithful');
+  for (const p of ['B', 'C']) {
+    const d = POLICIES[p](scopedState(ev, [askCap()]), {});
+    const bc = d.candidates.find((c) => c.kind === KINDS.ASSESSMENT && c.taskId === 'task.meet.assessment.checkpoint');
+    ok(bc && bc.eligible === false && bc.filterReason.includes('assessment_consumed'),
+      `R.${p}: consumed assessment not hard-filtered (${bc?.filterReason ?? 'absent'})`);
+    ok(!(d.chosen.kind === KINDS.ASSESSMENT && d.chosen.taskId === 'task.meet.assessment.checkpoint'),
+      `R.${p}: consumed assessment re-sold as fresh under desired semantics`);
+  }
+  /* B with an unused fresh assessment family → serves that instead,
+   * once the failed checkpoint's repair is cleared (REPAIR honestly
+   * outranks EVIDENCE while a repair is pending). */
+  const altAssess = { ...tmt('assessment.checkpoint'), id: 'task.meet.assessment.second' };
+  const tasks2 = [...state.tasks, altAssess];
+  const mission2 = { ...F.mission, taskIds: [...F.mission.taskIds, altAssess.id] };
+  const repaired = [
+    ...transferredHistory(T0), /* last independent ~T0-20h → not due */
+    attemptEvent(tmt('assessment.checkpoint'), askCap(), { at: T0 - 2 * HOUR, outcome: 'fail' }),
+    attemptEvent(tmt('remediation.ask_name'), askCap(), { at: T0 - HOUR, outcome: 'success' })
+  ];
+  const db2 = POLICIES.B(scopedState(repaired, [askCap()], { tasks: tasks2, mission: mission2 }), {});
+  ok(db2.chosen.kind === KINDS.ASSESSMENT && db2.chosen.taskId === 'task.meet.assessment.second',
+    `R2: B should serve the unused fresh assessment, got ${db2.chosen.kind}@${db2.chosen.taskId}`);
+}
+
+/* --- S. Alternating repair bound --- */
+{
+  /* Two remediation tasks on one cap; the per-cap episode repair bound
+   * must stop A→B→A→B alternation from monopolizing the episode. */
+  const st = correctionSyntheticState({ remediationTasks: 2 });
+  let ctx = emptyContext('ep.s', 'ses.s');
+  let repairs = 0, escapes = 0;
+  for (let i = 0; i < 10; i++) {
+    const d = POLICIES.B({ ...st, decisionContext: ctx }, {});
+    if (d.chosen.kind === KINDS.CORRECTION) repairs++;
+    else if (d.chosen.kind !== 'idle' && d.chosen.kind !== 'blocked') escapes++;
+    if (d.chosen.taskId) {
+      ctx = recordChoice(ctx, { kind: d.chosen.kind, capabilityId: d.chosen.capabilityId, taskId: d.chosen.taskId, timestamp: T0 + i });
+    } else break;
+  }
+  ok(repairs <= 3, `S: repair monopolized ${repairs}/10 decisions on one capability (bound missing)`);
+  ok(repairs >= 1, 'S: fixture produced no repair at all — bound untested');
+}
+
+/* --- T. Starvation guard variants --- */
+{
+  /* A wall of due work + one fresh non-target cap: under every guarded
+   * variant the backlog must not permanently starve forward progress —
+   * some non-due tier escapes within a bounded window. */
+  const ev = seedIndependentHistory(F, { caps: 3, at: T0 - 45 * DAY });
+  const seededIds = new Set(ev.map((e) => e.capabilityId));
+  const freshCap = state.capabilities.find((c) => !seededIds.has(c.id) && !F.mission.targetCapabilities.includes(c.id) && !(F.mission.supportCapabilities ?? []).includes(c.id));
+  ok(freshCap, 'T: no fresh non-target cap available for starvation fixture');
+  const caps = [...state.capabilities.filter((c) => seededIds.has(c.id)), freshCap];
+  for (const variant of ['review', 'balanced', 'forward']) {
+    let ctx = emptyContext('ep.t', 'ses.t');
+    let escaped = false;
+    for (let i = 0; i < 16; i++) {
+      const d = POLICIES.B({ ...baseState(ev, { now: T0 }), capabilities: caps, decisionContext: ctx }, { selection: { starvationGuard: variant } });
+      if (d.chosen.kind !== KINDS.DUE_RETRIEVAL && d.chosen.kind !== 'idle' && d.chosen.kind !== 'blocked') { escaped = true; break; }
+      if (!d.chosen.taskId) break;
+      ctx = recordChoice(ctx, { kind: d.chosen.kind, capabilityId: d.chosen.capabilityId, taskId: d.chosen.taskId, timestamp: T0 + i });
+    }
+    ok(escaped, `T.${variant}: due backlog permanently monopolized the episode`);
+  }
+}
+
+/* --- U. Validator coverage: real policy/config + mutation battery --- */
+{
+  const { validateDecision } = await import('../experiments/next-for-you/validator.js');
+  const ev = seedIndependentHistory(F, { caps: 2, at: T0 - 30 * DAY });
+  const st = baseState(ev, { now: T0 });
+  const good = POLICIES.B(st, {});
+  const env = { events: ev, tasks: state.tasks, capabilities: state.capabilities, roles: state.roles, mission: F.mission, learnerId: 'SIM', now: T0, policy: LEARNING_POLICY_V1, selection: {} };
+  /* diagnostic budget is a hard rule the validator must re-check */
+  const overBudget = { ...good, chosen: { ...good.chosen, kind: 'diagnostic_probe' } };
+  ok(validateDecision(overBudget, { ...env, decisionContext: burnCtx2(2) }).some((x) => x.includes('diagnostic')), 'U: validator missed budget violation');
+  /* failure ceiling: correction while over ceiling */
+  const overCeil = { ...good, chosen: { ...good.chosen, kind: 'correction' } };
+  const evFail = [...ev, attemptEvent(tmt('retrieval.ask_name'), askCap(), { at: T0 - MIN, outcome: 'fail' }), attemptEvent(tmt('retrieval.ask_name'), askCap(), { at: T0 - MIN + 1, outcome: 'fail' }), attemptEvent(tmt('retrieval.ask_name'), askCap(), { at: T0 - MIN + 2, outcome: 'fail' }), attemptEvent(tmt('retrieval.ask_name'), askCap(), { at: T0 - MIN + 3, outcome: 'fail' })];
+  ok(validateDecision(overCeil, { ...env, events: evFail, decisionContext: st.decisionContext }).length > 0, 'U: validator missed failure-ceiling violation');
+}
+
+/* --- V. Strict observation: missing `observed` ≠ verified --- */
+{
+  const t = tmt('retrieval.ask_name');
+  const raw = attemptEvent(t, askCap(), { at: T0 - HOUR, outcome: 'fail' });
+  delete raw.attempt.observed; /* legacy/malformed event — not verified */
+  const gen = generateCandidates(scopedState([...independentHistory(), raw], [askCap()]));
+  ok(!gen.candidates.some((c) => c.kind === KINDS.REFRESH), 'V: refresh minted from event with missing observed flag');
+}
+
+/* --- W. Immutable decision log --- */
+{
+  const { createDecisionLog, stateDigest } = await import('../experiments/next-for-you/decision-log.js');
+  const ev = seedIndependentHistory(F, { caps: 2, at: T0 - 30 * DAY });
+  const st = baseState(ev, { now: T0 });
+  const d = POLICIES.B(st, {});
+  const log = createDecisionLog();
+  log.append(d, { digest: stateDigest({ events: ev, learnerId: 'SIM', decisionContext: st.decisionContext, now: T0, policy: LEARNING_POLICY_V1, selection: {}, mission: F.mission, tasks: state.tasks, roles: state.roles }) });
+  const before = JSON.stringify(log.at(0));
+  d.chosen.kind = 'MUTATED';
+  d.explanation.whyExists = 'tampered';
+  ok(JSON.stringify(log.at(0)) === before, 'W: mutating the decision object changed the log');
+}
+
+/* --- X. Explanation trace: every loser reconstructible --- */
+{
+  const ev = seedIndependentHistory(F, { caps: 3, at: T0 - 30 * DAY });
+  const d = POLICIES.B(baseState(ev, { now: T0 }), {});
+  ok(d.explanation.beat.length > 0, 'X: no alternatives recorded');
+  for (const b of d.explanation.beat) {
+    ok(b.kind && b.capabilityId != null && b.tier != null && b.lostBecause != null,
+      `X: losing alternative not auditable (${JSON.stringify(b)})`);
+  }
+  ok(d.explanation.tieBreak != null, 'X: no tie-break record');
+}
+
+/* --- Y. Decision id carries state identity --- */
+{
+  const evA = seedIndependentHistory(F, { caps: 2, at: T0 - 30 * DAY });
+  const evB = seedIndependentHistory(F, { caps: 3, at: T0 - 30 * DAY });
+  const dA = POLICIES.B(baseState(evA, { now: T0 }), {});
+  const dB = POLICIES.B(baseState(evB, { now: T0 }), {});
+  ok(dA.decisionId !== dB.decisionId, 'Y: different input states collided on one decisionId');
+}
+
+function burnCtx2(n) {
+  let c = emptyContext('ep.b2', 'ses.b2');
+  for (let i = 0; i < n; i++) c = recordChoice(c, { kind: KINDS.DIAGNOSTIC_PROBE, capabilityId: 'cap.burn' + i, taskId: 'task.burn' + i, timestamp: T0 - i });
+  return c;
 }
 
 console.log(`vnext-next-for-you hardening sections included`);

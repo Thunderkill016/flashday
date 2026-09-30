@@ -89,25 +89,47 @@ export function generateCandidates({ learnerId, events, capabilities, tasks, rol
   const ceiling = selection.failureCeiling ?? 3;
   const diagnosticBudget = selection.diagnosticMaxPerEpisode ?? 2;
 
+  /* Mission/task registry integrity (BLOCKER-4, mirrors production
+   * fail-closed): validated BEFORE any derived state is built — the
+   * projection throws on duplicate registrations, and a missing,
+   * invalid, or duplicated declared task must become an explicit
+   * BLOCKED, never a silently narrowed surface. */
+  const integrityViolations = [];
+  const taskByRev = new Map();
+  const latestById = new Map();
+  for (const t of tasks) {
+    const k = keyOf(t);
+    if (taskByRev.has(k)) integrityViolations.push(`duplicate_task_revision:${k}`);
+    taskByRev.set(k, t);
+    const prev = latestById.get(t.id);
+    if (!prev || (t.revision ?? 1) > (prev.revision ?? 1)) latestById.set(t.id, t);
+    if (validateTask(t).length) integrityViolations.push(`invalid_task_contract:${k}`);
+  }
+  const missionTaskIds = mission ? new Set(mission.taskIds ?? []) : null;
+  let missionTasks = tasks;
+  if (mission) {
+    missionTasks = [];
+    for (const id of missionTaskIds) {
+      const t = latestById.get(id);
+      if (!t) { integrityViolations.push(`missing_declared_task:${id}`); continue; }
+      missionTasks.push(t);
+    }
+  }
+  if (integrityViolations.length) {
+    return {
+      candidates: [],
+      skipped: capabilities.map((c) => ({ kind: null, capabilityId: c.id, reason: `mission_integrity: ${integrityViolations.join('; ')}` })),
+      model: null, projection: null, pendingDemands: [],
+      integrityViolations
+    };
+  }
+
   const model = buildLearnerModel({ learnerId, events, capabilities, tasks, policy: pol, now, roles });
   const projection = projectLearnerState(learnerId, events, capabilities, tasks, { retentionDelayMs: lag, policy: pol });
   const lifecycle = deriveSupportLifecycle(learnerId, events, { capabilities, tasks, roles, policy: pol });
   const pendingDemands = lifecycle.pending;
 
   const capById = new Map(capabilities.map((c) => [c.id, c]));
-  const taskByRev = new Map(tasks.map((t) => [keyOf(t), t]));
-  const latestById = new Map();
-  for (const t of tasks) {
-    const prev = latestById.get(t.id);
-    if (!prev || (t.revision ?? 1) > (prev.revision ?? 1)) latestById.set(t.id, t);
-  }
-
-  /* Mission surface: candidates may only serve tasks the mission
-   * declares. Without a mission the full registry is the surface. */
-  const missionTaskIds = mission ? new Set(mission.taskIds ?? []) : null;
-  const missionTasks = mission
-    ? [...missionTaskIds].map((id) => latestById.get(id)).filter(Boolean)
-    : tasks;
 
   const roleOf = roles
     ? (id) => (roles.targets?.has(id) ? 'target' : roles.supports?.has(id) ? 'support' : 'carrier')
@@ -135,7 +157,10 @@ export function generateCandidates({ learnerId, events, capabilities, tasks, rol
       /* Refresh/correction semantics require OBSERVED direct failure —
        * self-reported (observed:false) outcomes are context, never
        * verified performance evidence (review HIGH-5). */
-      if (e.attempt.observed !== false) {
+      if (e.attempt.observed === true) {
+        /* STRICT (MEDIUM-11): only an explicit observed===true counts as
+         * direct verified performance evidence — a legacy/malformed raw
+         * event missing the flag is context, never verified evidence. */
         lastObservedAttemptByCap.set(t.capabilityId, { outcome: e.attempt.outcome, task: t, event: e });
         observedFailStreak.set(t.capabilityId, e.attempt.outcome === 'success' ? 0 : (observedFailStreak.get(t.capabilityId) ?? 0) + 1);
       }
@@ -398,22 +423,24 @@ export function generateCandidates({ learnerId, events, capabilities, tasks, rol
       if (!f.milestones.transferred) continue;
       const latestStatus = f.assessmentStatus;
       if (latestStatus === 'success') continue;
-      /* HIGH-4: a consumed assessment task is never a fresh sample.
-       * Production treats assessment as non-repeatable; after a failed
-       * checkpoint with no unused assessment left the honest state is
-       * backlog/blocked, not re-selling the same task. */
-      if (verifiedEventKey.has(keyOf(t))) {
-        skip(t.capabilityId, KINDS.ASSESSMENT, 'assessment task consumed — no fresh checkpoint remains (backlog state)');
-        continue;
-      }
+      /* HIGH-8 correction: production DOES re-probe a failed assessment
+       * (mission-runner re-serves it after remediation) — so "consumed
+       * forever" is NOT a kernel invariant. The candidate carries a
+       * `consumed` flag; the POLICY decides: A mirrors production retry,
+       * B/C filter consumed tasks to a fresh alternate or honest
+       * assessment backlog [SAFETY_PRIOR/EXPERIMENTAL]. */
+      const consumed = verifiedEventKey.has(keyOf(t));
       push({
         kind: KINDS.ASSESSMENT, capabilityId: t.capabilityId,
         facts: f,
         servableTask: t,
+        consumed,
         preferences: [{ name: 'mission_assessment_plan', provenance: PROVENANCE.KERNEL }],
-        penalties: [],
+        penalties: consumed ? [{ name: 'assessment_consumed', provenance: PROVENANCE.SAFETY }] : [],
         provenance: [PROVENANCE.KERNEL],
-        why: latestStatus ? `assessment re-probe after ${latestStatus}` : 'assessment plan requires a fresh sample post-transfer'
+        why: consumed
+          ? 'consumed assessment task — Policy A re-probes (production mirror); B/C require a fresh family'
+          : latestStatus ? `assessment re-probe after ${latestStatus}` : 'assessment plan requires a fresh sample post-transfer'
       });
     }
   }

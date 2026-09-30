@@ -48,15 +48,15 @@ export function runScenario({ fixture, archetype, archetypeName, policyName, ste
     /* Independent validator (review HIGH-6/F): the chosen decision is
      * re-checked against contracts + kernel facts by code that did NOT
      * generate it. Violations are real, counted, and fail runs. */
-    const violations = validateDecision(d, { events, tasks, capabilities, roles, mission, learnerId: 'SIM', now });
+    const violations = validateDecision(d, { events, tasks, capabilities, roles, mission, learnerId: 'SIM', now, policy: LEARNING_POLICY_V1, selection, decisionContext: ctx });
     metrics.hardViolationCount += violations.length;
     if (violations.length) (metrics.violations ??= []).push({ step, violations });
     metrics.invalidCandidateCount += (d.explanation?.suppressed ?? []).filter((x) => x.includes('filtered')).length;
-    log.append(d, { digest: stateDigest({ events, learnerId: 'SIM', decisionContext: ctx }) });
+    log.append(d, { digest: stateDigest({ events, learnerId: 'SIM', decisionContext: ctx, now, policy: LEARNING_POLICY_V1, selection, mission, tasks, roles, capabilities }) });
     trace.push(d);
     recordDecisionMetrics(metrics, d, ctx, trace);
 
-    if (d.chosen.kind === 'idle') break;
+    if (d.chosen.kind === 'idle' || d.chosen.kind === 'blocked') break;
 
     /* Simulate the learner's response for the chosen task (the decision
      * stamps the latest-revision task id; resolve by id). */
@@ -134,7 +134,7 @@ function recordDecisionMetrics(m, d, ctx, trace) {
   const s = m._streaks;
   const { kind, capabilityId, taskId } = d.chosen;
   if (kind === 'idle') { m.terminalReason = 'idle'; return; }
-  if (d.blocked) { m.blockedDecisionCount++; m.terminalReason = 'blocked'; }
+  if (kind === 'blocked') { m.blockedDecisionCount++; m.terminalReason = 'blocked'; return; }
 
   if (!d.explanation?.whyExists || !d.explanation?.tier) m.explanationMissingCount++;
   if (taskId == null && kind !== 'idle') m.unservableChosenCount++;
@@ -149,7 +149,7 @@ function recordDecisionMetrics(m, d, ctx, trace) {
   m.maxConsecutiveRepairActions = Math.max(m.maxConsecutiveRepairActions, s.repair);
 
   /* deferral streaks: due-retrieval existed but wasn't served */
-  const candidatesKinds = new Set((trace.at(-1)?.explanation?.beat ?? []).map((x) => x.split('@')[0]));
+  const candidatesKinds = new Set((trace.at(-1)?.explanation?.beat ?? []).map((x) => x.kind ?? String(x).split('@')[0]));
   s.dueDeferred = (kind !== KINDS.DUE_RETRIEVAL && candidatesKinds.has(KINDS.DUE_RETRIEVAL)) ? s.dueDeferred + 1 : 0;
   s.transferDeferred = (kind !== KINDS.TRANSFER && candidatesKinds.has(KINDS.TRANSFER)) ? s.transferDeferred + 1 : 0;
   m.maxDueDeferralActions = Math.max(m.maxDueDeferralActions, s.dueDeferred);
@@ -219,13 +219,13 @@ function finalizeMetrics(m, trace, ctx, events, capabilities, tasks, roles, miss
     if (!key.startsWith('done@')) m.supportDemandResolutionSteps.push(trace.length - start); // unresolved at end
   }
 
-  /* idleWhileValidActionExists: terminal idle with eligible candidates
-   * recorded in the last decision's suppressed list only counts when a
-   * non-suppressed candidate existed — replaying the terminal state. */
+  /* idleWhileValidActionExists: a terminal `idle` while the decision's
+   * own candidate view records eligible work is a fabricated idle —
+   * the validator also flags it (hardViolationCount); this metric makes
+   * the pathology visible in the run summary. */
   const last = trace.at(-1);
-  if (last?.chosen.kind === 'idle' && (last.candidateCount ?? 0) > 0 && !last.blocked) {
-    const suppressedAll = last.explanation.suppressed.every((s) => s.includes('filtered') || s.includes(':'));
-    if (!suppressedAll) m.idleWhileValidActionExists++;
+  if (last?.chosen.kind === 'idle' && (last.candidates ?? []).some((c) => c.eligible === true)) {
+    m.idleWhileValidActionExists++;
   }
 
   delete m._streaks;
