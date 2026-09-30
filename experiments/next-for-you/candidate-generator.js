@@ -41,9 +41,25 @@ const keyOf = (t) => `${t.id}@${t.revision ?? 1}`;
 
 /* Facts every capability view supplies to candidacy — pure reads from
  * the learner model + projection; each labeled by provenance. */
+/* Absent entries mean "no evidence" — a capability with zero events has
+ * no projection row, and a cap outside the scoped registry has no model
+ * row. Both collapse to the never-seen fact set rather than crashing
+ * (assessment tasks reference caps that may have no events yet). */
+const EMPTY_MILESTONES = { supported: false, independent: false, retained: false, transferred: false, fluent: false };
+const EMPTY_FACTS = {
+  state: 'NOT_SEEN', milestones: EMPTY_MILESTONES, consecutiveFailures: 0,
+  lastAttemptOutcome: null, lastIndependentSuccessAt: null,
+  unresolvedFunctions: [], recurringFunctions: [], supportDependent: false,
+  pendingFunctions: [], evidenceSufficient: false, reasonCodes: [],
+  independentSuccessCount: 0, assessmentDemonstrated: false,
+  assessmentStatus: null, transferDemonstrated: false,
+  retainedDemonstrated: false, sinceLastIndependentMs: null, modality: null
+};
+
 function capFacts(capId, model, projection, capability) {
   const v = model.capabilities[capId];
   const p = projection.byCapability.get(capId);
+  if (!v || !p) return { ...EMPTY_FACTS, capabilityId: capId, modality: capability?.modality ?? null };
   return {
     capabilityId: capId,
     state: p.state,                                   // KERNEL
@@ -103,6 +119,8 @@ export function generateCandidates({ learnerId, events, capabilities, tasks, rol
   const verifiedAttemptKey = new Set();
   const verifiedEventKey = new Set();
   const lastAttemptByCap = new Map();
+  const lastObservedAttemptByCap = new Map();
+  const observedFailStreak = new Map();
   const seen = new Set();
   for (const e of [...events].sort((a, b) => a.occurredAt - b.occurredAt || (a.id < b.id ? -1 : 1))) {
     if (e.learnerId !== learnerId || seen.has(e.id)) continue;
@@ -114,6 +132,13 @@ export function generateCandidates({ learnerId, events, capabilities, tasks, rol
     if (e.attempt?.outcome != null) {
       verifiedAttemptKey.add(keyOf(t));
       lastAttemptByCap.set(t.capabilityId, { outcome: e.attempt.outcome, task: t, event: e });
+      /* Refresh/correction semantics require OBSERVED direct failure —
+       * self-reported (observed:false) outcomes are context, never
+       * verified performance evidence (review HIGH-5). */
+      if (e.attempt.observed !== false) {
+        lastObservedAttemptByCap.set(t.capabilityId, { outcome: e.attempt.outcome, task: t, event: e });
+        observedFailStreak.set(t.capabilityId, e.attempt.outcome === 'success' ? 0 : (observedFailStreak.get(t.capabilityId) ?? 0) + 1);
+      }
     }
   }
   const REPEATABLE = new Set(['retrieval', 'production', 'interaction', 'remediation', 'delayed_retrieval', 'transfer', 'support']);
@@ -201,8 +226,10 @@ export function generateCandidates({ learnerId, events, capabilities, tasks, rol
       }
     }
 
-    /* --- REFRESH [KERNEL boundary: only on direct verified failure] --- */
-    if (f.milestones.independent && (f.lastAttemptOutcome === 'fail' || f.lastAttemptOutcome === 'partial')) {
+    /* --- REFRESH [KERNEL boundary: only on direct OBSERVED verified
+     * failure — self-reported outcomes never mint refresh] --- */
+    const lastObserved = lastObservedAttemptByCap.get(id);
+    if (f.milestones.independent && (lastObserved?.outcome === 'fail' || lastObserved?.outcome === 'partial')) {
       push({
         kind: KINDS.REFRESH, capabilityId: id,
         facts: f,
@@ -216,12 +243,13 @@ export function generateCandidates({ learnerId, events, capabilities, tasks, rol
 
     /* --- CORRECTION (bounded; attributed failures only) --- */
     const taught = f.milestones.supported || f.milestones.independent;
-    const last = lastAttemptByCap.get(id);
+    const last = lastObservedAttemptByCap.get(id);
     const attributed = f.unresolvedFunctions.length > 0 ||
       (last && contractAttributesFunctions(last.task.evaluation?.contractId) && (last.event.evaluation?.missingFunctions ?? []).length > 0);
-    if (taught && f.consecutiveFailures >= pol.remediation.minConsecutiveFailures) {
+    const observedFails = observedFailStreak.get(id) ?? 0;
+    if (taught && observedFails >= pol.remediation.minConsecutiveFailures) {
       if (attributed) {
-        if (f.consecutiveFailures >= ceiling) {
+        if (observedFails >= ceiling) {
           skip(id, KINDS.CORRECTION, `failure ceiling ${ceiling} reached — same-task retry suppressed (SAFETY_PRIOR)`);
         } else {
           push({
@@ -229,9 +257,9 @@ export function generateCandidates({ learnerId, events, capabilities, tasks, rol
             facts: f,
             servableTask: servable(id, INTENT_PURPOSES.correction),
             preferences: [{ name: 'open_attributed_gap', detail: f.unresolvedFunctions.join(','), provenance: PROVENANCE.EVIDENCE }],
-            penalties: f.consecutiveFailures > 1 ? [{ name: 'same_action_recently_failed', detail: `${f.consecutiveFailures} consecutive`, provenance: PROVENANCE.SAFETY }] : [],
+            penalties: observedFails > 1 ? [{ name: 'same_action_recently_failed', detail: `${observedFails} observed consecutive`, provenance: PROVENANCE.SAFETY }] : [],
             provenance: [PROVENANCE.EVIDENCE, PROVENANCE.SAFETY],
-            why: `${f.consecutiveFailures} consecutive failures with attributed gap — repair via self-repair`
+            why: `${observedFails} observed consecutive failures with attributed gap — repair via self-repair`
           });
         }
       } else {
@@ -370,6 +398,14 @@ export function generateCandidates({ learnerId, events, capabilities, tasks, rol
       if (!f.milestones.transferred) continue;
       const latestStatus = f.assessmentStatus;
       if (latestStatus === 'success') continue;
+      /* HIGH-4: a consumed assessment task is never a fresh sample.
+       * Production treats assessment as non-repeatable; after a failed
+       * checkpoint with no unused assessment left the honest state is
+       * backlog/blocked, not re-selling the same task. */
+      if (verifiedEventKey.has(keyOf(t))) {
+        skip(t.capabilityId, KINDS.ASSESSMENT, 'assessment task consumed — no fresh checkpoint remains (backlog state)');
+        continue;
+      }
       push({
         kind: KINDS.ASSESSMENT, capabilityId: t.capabilityId,
         facts: f,
@@ -379,6 +415,18 @@ export function generateCandidates({ learnerId, events, capabilities, tasks, rol
         provenance: [PROVENANCE.KERNEL],
         why: latestStatus ? `assessment re-probe after ${latestStatus}` : 'assessment plan requires a fresh sample post-transfer'
       });
+    }
+  }
+
+  /* Normalize taskPick → servableTask + retry flags (BLOCKER 1: every
+   * consumer reads servableTask — a candidate that hid its task under
+   * taskPick was silently unservable). */
+  for (const c of candidates) {
+    if (c.taskPick) {
+      c.servableTask = c.taskPick.task;
+      if (c.taskPick.identicalRetry) c.identicalRetry = true;
+      if (c.taskPick.alternateTask) c.alternateTask = true;
+      delete c.taskPick;
     }
   }
 

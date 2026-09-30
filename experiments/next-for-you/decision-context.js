@@ -27,8 +27,21 @@ export function emptyContext(decisionEpisodeId = 'ep0', sessionId = 'ses0') {
     },
     recentCapabilities: [],   // most-recent-last
     recentTaskIds: [],
-    currentThreadCapabilityId: null
+    lastActedCapabilityId: null,
+    currentThreadCapabilityId: null  // pedagogical thread only — see THREAD_OWNERS
   };
+}
+
+/* Context snapshot "as of T": rebuild a context whose actions are
+ * truncated at occurredAt ≤ t so future actions cannot leak into a
+ * historical replay (review BLOCKER 3). */
+export function contextAt(ctx, t) {
+  if (!ctx) return ctx;
+  let rebuilt = { ...emptyContext(ctx.decisionEpisodeId, ctx.sessionId) };
+  for (const a of ctx.actionsChosen.filter((a) => a.atDecision != null && a.atDecision <= t)) {
+    rebuilt = recordChoice(rebuilt, { kind: a.kind, capabilityId: a.capabilityId, taskId: a.taskId, timestamp: a.atDecision });
+  }
+  return rebuilt;
 }
 
 const COUNT_OF_KIND = {
@@ -46,6 +59,16 @@ const COUNT_OF_KIND = {
   independent_attempt: 'continuation'
 };
 
+/* Kinds that own the pedagogical "learning thread". Interruptions —
+ * support substrate probes, due review, transfer checks, assessment —
+ * update lastActedCapabilityId but must NOT steal the thread
+ * (review MEDIUM-9): hysteresis belongs to what the learner is
+ * currently learning, not whatever was served last. */
+const THREAD_OWNERS = new Set([
+  'mission_continuation', 'new_input', 'independent_attempt',
+  'correction', 'refresh', 'diagnostic_probe', 'resume_in_flight'
+]);
+
 /* Record a chosen action — returns a NEW context (immutable update so a
  * recorded context is never retro-mutated by later decisions). */
 export function recordChoice(ctx, { kind, capabilityId, taskId, timestamp }) {
@@ -62,6 +85,9 @@ export function recordChoice(ctx, { kind, capabilityId, taskId, timestamp }) {
     recentTaskIds: taskId
       ? [...ctx.recentTaskIds.filter((t) => t !== taskId), taskId].slice(-16)
       : ctx.recentTaskIds,
-    currentThreadCapabilityId: capabilityId ?? ctx.currentThreadCapabilityId
+    lastActedCapabilityId: capabilityId ?? ctx.lastActedCapabilityId,
+    currentThreadCapabilityId: THREAD_OWNERS.has(kind) && capabilityId
+      ? capabilityId
+      : ctx.currentThreadCapabilityId
   };
 }

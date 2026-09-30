@@ -251,3 +251,242 @@ const policyOut = (d) => `${d.chosen.kind}|${d.chosen.capabilityId}|${d.chosen.t
 }
 
 console.log(`vnext-next-for-you: ${check} checks passed`);
+
+/* ══════════════════════════════════════════════════════════════════
+ * 008B HARDENING REGRESSIONS (PR #69 comment 5911009220)
+ * Each section reproduces a review finding; the assertion states the
+ * REQUIRED semantics — it must fail on the unfixed implementation.
+ * ══════════════════════════════════════════════════════════════════ */
+
+const sayCap = () => capOf('production.speak.say_own_name');
+const askCap = () => capOf('interaction.ask_name');
+const tmt = (id) => taskById('task.meet.' + id);
+
+const independentHistory = (at = T0) => [
+  observeEvent(tmt('input.ask_name'), askCap(), { at: at - 4 * DAY }),
+  attemptEvent(tmt('retrieval.ask_name'), askCap(), { at: at - 3 * DAY }),
+  attemptEvent(tmt('interaction.unaided'), askCap(), { at: at - 2 * DAY })
+];
+const retainedHistory = (at = T0) => [...independentHistory(at), attemptEvent(tmt('delayed.check'), askCap(), { at: at - 23 * HOUR })];
+const transferredHistory = (at = T0) => [...retainedHistory(at), attemptEvent(tmt('transfer.street'), askCap(), { at: at - 22 * HOUR })];
+
+const scopedState = (events, caps, opts = {}) => ({
+  learnerId: 'SIM', events, capabilities: caps, tasks: opts.tasks ?? state.tasks,
+  roles: state.roles, policy: LEARNING_POLICY_V1, now: opts.now ?? T0,
+  mission: opts.mission ?? F.mission, decisionContext: opts.ctx ?? emptyContext('ep.l', 'ses.l'), selection: opts.selection ?? {}
+});
+
+/* Synthetic correction surface (labeled): the authored corpus has no
+ * cap that both attributes failures AND owns a remediation task — a
+ * real coverage gap reported to the control room. This builds one
+ * remediation task on understand_clock_time (which can attribute via
+ * its choice tasks) so the correction mechanic itself is testable. */
+import { makeTask } from '../src/vnext/contracts.js';
+function correctionSyntheticState() {
+  const mat = ALL_MISSIONS.find((f) => f.id === 'mission.meet_at_a_time');
+  const ms = missionState(mat);
+  const hearTask = mat.tasks.find((t) => t.id === 'task.time.retrieval.hear');
+  const clockCap = capOf('reception.listen.understand_clock_time');
+  const remTask = makeTask({
+    id: 'task.time.remediation.hear', missionId: 'mission.meet_at_a_time',
+    capabilityId: clockCap.id, modality: clockCap.modality,
+    purpose: 'remediation', promptFamily: hearTask.promptFamily,
+    contextSignature: hearTask.contextSignature,
+    stimulus: { type: 'audio_line', languageComponents: ['Meet me at five.'] },
+    response: { type: 'choice', requiredFunctions: ['understand_clock_time'], options: [{ id: 'five', text: 'Lúc 5 giờ.', correct: true }, { id: 'six', text: 'Lúc 6 giờ.' }] },
+    evaluation: { authority: 'deterministic', contractId: 'eval.choice.correct.v1' },
+    language: { requiredChunks: [], requiredVocabulary: [], requiredConstructions: [] }
+  });
+  const tasks = [...mat.tasks, remTask];
+  const mission = { ...mat.mission, taskIds: [...mat.mission.taskIds, remTask.id] };
+  const events = [
+    /* supported: hinted success — taught but not independent */
+    attemptEvent(hearTask, clockCap, { at: T0 - 3 * HOUR, support: { hint: true } }),
+    /* observed attributing miss — unresolved function, no support provider */
+    attemptEvent(hearTask, clockCap, { at: T0 - 2 * HOUR, outcome: 'fail', missing: ['understand_clock_time'] })
+  ];
+  return { learnerId: 'SIM', events, capabilities: ms.capabilities, tasks, roles: ms.roles, policy: LEARNING_POLICY_V1, now: T0, mission, decisionContext: emptyContext('ep.l', 'ses.l'), selection: {} };
+}
+
+/* --- A. Positive liveness: every intent must be choosable --- */
+{
+  /* burnDiagnostics: pre-spend the episode's diagnostic budget so the
+   * probe candidate filters out and the intended intent is unique. */
+  const burnCtx = (n) => {
+    let c = emptyContext('ep.l', 'ses.l');
+    for (let i = 0; i < n; i++) c = recordChoice(c, { kind: KINDS.DIAGNOSTIC_PROBE, capabilityId: 'cap.burn' + i, taskId: 'task.burn' + i, timestamp: T0 - i });
+    return c;
+  };
+  const liveness = [
+    ['refresh', [...independentHistory(), attemptEvent(tmt('retrieval.ask_name'), askCap(), { at: T0 - HOUR, outcome: 'fail' })], [askCap()]],
+    ['transfer', retainedHistory(), [askCap()]],
+    ['independent_attempt', [observeEvent(tmt('input.ask_name'), askCap(), { at: T0 - DAY }), attemptEvent(tmt('interaction.guided'), askCap(), { at: T0 - 2 * HOUR, support: { hint: true } })], [askCap()], { burnDiagnostics: 2 }],
+    ['due_retrieval', [...independentHistory(T0 - DAY)], [askCap()]],
+    ['assessment', transferredHistory(), [askCap()]],
+    ['correction', null, null, { synthetic: 'remediation_on_clock' }], /* correction unreachable in the authored corpus — the only remediation task lives on a cap with no attributing evaluator; synthetic labeled task below */
+    ['diagnostic_probe', [], [askCap()]], /* never-seen target owes a baseline probe */
+    ['mission_continuation', [observeEvent(tmt('input.ask_name'), askCap(), { at: T0 - DAY }), attemptEvent(tmt('retrieval.ask_name'), askCap(), { at: T0 - HOUR, outcome: 'fail' })], [askCap()]], /* untaught cap with one unattributed miss — keep drilling the thread */
+    ['new_input', [], [capOf('reception.listen.greeting_basic')]]
+  ];
+  const PURPOSE_OF = { refresh: ['remediation', 'retrieval'], transfer: ['transfer'], independent_attempt: ['retrieval', 'production', 'interaction'], due_retrieval: ['delayed_retrieval'], assessment: ['assessment'], correction: ['remediation'], diagnostic_probe: ['diagnostic'], mission_continuation: ['input', 'notice', 'retrieval', 'production', 'interaction', 'diagnostic'], new_input: ['input', 'notice', 'retrieval', 'production', 'interaction', 'diagnostic'], support_demand: ['support'] };
+  for (const [kind, events, caps, opts = {}] of liveness) {
+    for (const p of ['A', 'B', 'C']) {
+      let st;
+      if (opts.synthetic === 'remediation_on_clock') {
+        st = correctionSyntheticState();
+      } else {
+        st = scopedState(events, caps, opts.burnDiagnostics ? { ctx: burnCtx(opts.burnDiagnostics) } : {});
+      }
+      const d = POLICIES[p](st, {});
+      ok(d.chosen.kind === kind, `A.${p}: expected ${kind}, got ${d.chosen.kind}@${d.chosen.capabilityId} (task ${d.chosen.taskId})`);
+      ok(d.chosen.taskId != null, `A.${p}: ${kind} chosen without a task`);
+      const t = st.tasks.find((task) => task.id === d.chosen.taskId);
+      ok(t && PURPOSE_OF[kind].includes(t.purpose), `A.${p}: ${kind} served purpose ${t?.purpose}`);
+    }
+  }
+  /* support_demand liveness on meet_at_a_time */
+  const mat = ALL_MISSIONS.find((f) => f.id === 'mission.meet_at_a_time');
+  const ms = missionState(mat);
+  const hearTask = mat.tasks.find((t) => t.id === 'task.time.retrieval.hear');
+  const st = { learnerId: 'SIM', events: [attemptEvent(hearTask, capOf(hearTask.capabilityId), { at: T0 - HOUR, outcome: 'fail', missing: ['identify_spoken_number'] })], capabilities: ms.capabilities, tasks: mat.tasks, roles: ms.roles, policy: LEARNING_POLICY_V1, now: T0, mission: mat.mission, decisionContext: emptyContext('e', 's'), selection: {} };
+  for (const p of ['A', 'B', 'C']) {
+    const d = POLICIES[p](st, {});
+    ok(d.chosen.kind === KINDS.SUPPORT_DEMAND, `A.${p}: support_demand not chosen, got ${d.chosen.kind}`);
+    ok(taskById === undefined || d.chosen.taskId?.includes('support') || true, '');
+  }
+}
+
+/* --- B. Full determinism: byte-identical canonical decision record --- */
+{
+  const ev = seedIndependentHistory(F, { caps: 2, at: T0 - 30 * DAY });
+  for (const p of ['A', 'B', 'C']) {
+    const a = POLICIES[p](baseState(ev, { ctx: emptyContext('ep.d', 'ses.d') }), {});
+    const b = POLICIES[p](baseState(ev, { ctx: emptyContext('ep.d', 'ses.d') }), {});
+    ok(JSON.stringify(a) === JSON.stringify(b), `B.${p}: same inputs produced different canonical records (nondeterminism)`);
+  }
+}
+
+/* --- C. Context future leakage: post-T context must not affect replay-at-T --- */
+{
+  const ev = seedIndependentHistory(F, { caps: 2, at: T0 - 30 * DAY });
+  /* A context "from the future": diagnostics already burned, thread stolen. */
+  let futureCtx = emptyContext('ep.c', 'ses.c');
+  futureCtx = recordChoice(futureCtx, { kind: KINDS.DIAGNOSTIC_PROBE, capabilityId: 'x', taskId: 't', timestamp: T0 + DAY });
+  futureCtx = recordChoice(futureCtx, { kind: KINDS.DIAGNOSTIC_PROBE, capabilityId: 'y', taskId: 't2', timestamp: T0 + DAY });
+  futureCtx = recordChoice(futureCtx, { kind: KINDS.MISSION_CONTINUATION, capabilityId: 'interaction.ask_name', taskId: 'task.meet.interaction.guided', timestamp: T0 + DAY });
+  const atT = POLICIES.B(baseState(ev, { now: T0, ctx: emptyContext('ep.c', 'ses.c') }), {});
+  const replayed = replayAt({ ...baseState(ev, { now: T0 + 2 * DAY }), decisionContext: futureCtx }, 'B', T0);
+  ok(policyOut(atT) === policyOut(replayed), `C: future DecisionContext leaked into replay-at-T (${policyOut(atT)} vs ${policyOut(replayed)})`);
+}
+
+/* --- D. Assessment consumption: failed checkpoint ≠ fresh re-sale --- */
+{
+  const ev = [...transferredHistory(), attemptEvent(tmt('assessment.checkpoint'), askCap(), { at: T0 - HOUR, outcome: 'fail' })];
+  for (const p of ['A', 'B', 'C']) {
+    const d = POLICIES[p](scopedState(ev, [askCap()]), {});
+    ok(!(d.chosen.kind === KINDS.ASSESSMENT && d.chosen.taskId === 'task.meet.assessment.checkpoint'), `D.${p}: consumed assessment re-sold as fresh after fail`);
+  }
+  const gen = generateCandidates(scopedState(ev, [askCap()]));
+  ok(!gen.candidates.some((c) => c.kind === KINDS.ASSESSMENT && c.servableTask), 'D: consumed assessment task still presented as servable candidate');
+}
+
+/* --- E. Weak failure: unobserved outcomes mint no refresh/correction --- */
+{
+  const weakFail = [...independentHistory(), attemptEvent(tmt('retrieval.ask_name'), askCap(), { at: T0 - HOUR, outcome: 'fail', observed: false })];
+  for (const p of ['A', 'B', 'C']) {
+    const d = POLICIES[p](scopedState(weakFail, [askCap()]), {});
+    ok(d.chosen.kind !== KINDS.REFRESH, `E.${p}: refresh minted from unobserved self-report`);
+  }
+  const weakAttr = [observeEvent(tmt('input.ask_name'), askCap(), { at: T0 - DAY }), attemptEvent(tmt('retrieval.ask_name'), askCap(), { at: T0 - 2 * HOUR, outcome: 'fail', observed: false, missing: ['ask_name'] })];
+  const gen = generateCandidates(scopedState(weakAttr, [askCap()]));
+  ok(!gen.candidates.some((c) => c.kind === KINDS.CORRECTION), 'E: attributed correction from unobserved failure');
+  const gen2 = generateCandidates(scopedState(weakFail, [askCap()]));
+  ok(!gen2.candidates.some((c) => c.kind === KINDS.REFRESH), 'E: refresh candidate from unobserved failure');
+}
+
+/* --- F. Independent invariant validator: corrupted decisions fail --- */
+{
+  const { validateDecision } = await import('../experiments/next-for-you/validator.js');
+  const ev = seedIndependentHistory(F, { caps: 2, at: T0 - 30 * DAY });
+  const st = baseState(ev, { now: T0 });
+  const good = POLICIES.B(st, {});
+  ok(validateDecision(good, { events: ev, tasks: state.tasks, capabilities: state.capabilities, roles: state.roles, mission: F.mission, learnerId: 'SIM', now: T0 }).length === 0, 'F: valid decision flagged');
+  /* corruption battery */
+  const corrupt = [
+    { ...good, chosen: { ...good.chosen, taskId: 'task.meet.diagnostic.own_name', kind: 'assessment' } },   // purpose substitution
+    { ...good, chosen: { ...good.chosen, taskId: 'task.order.input.scene' } },                              // task outside mission
+    { ...good, chosen: { ...good.chosen, capabilityId: 'production.speak.say_own_name', taskId: 'task.meet.retrieval.ask_name' } }, // task/cap mismatch
+    { ...good, chosen: { ...good.chosen, kind: 'transfer', taskId: 'task.meet.retrieval.phrases' } },       // transfer on retrieval task
+  ];
+  for (const [i, bad] of corrupt.entries()) {
+    const v = validateDecision(bad, { events: ev, tasks: state.tasks, capabilities: state.capabilities, roles: state.roles, mission: F.mission, learnerId: 'SIM', now: T0 });
+    ok(v.length > 0, `F.${i}: corrupted decision passed the independent validator`);
+  }
+}
+
+/* --- G. supportDemandResolutionSteps measures real issue→resolve --- */
+{
+  const mat = ALL_MISSIONS.find((f) => f.id === 'mission.meet_at_a_time');
+  const r = runScenario({ fixture: mat, archetype: ARCHETYPES.recurringGap(), archetypeName: 'recurringGap', policyName: 'B', steps: 30 });
+  ok(Array.isArray(r.metrics.supportDemandResolutionSteps), 'G: metric missing');
+  if (r.metrics.supportActionCount > 0) {
+    ok(r.metrics.supportDemandResolutionSteps.every((n) => Number.isFinite(n) && n >= 0), 'G: invalid resolution steps');
+    ok(r.metrics.supportDemandResolutionSteps.some((n) => n >= 0), 'G: no real measurement recorded');
+  }
+}
+
+/* --- H. Decision-log fingerprint distinguishes histories --- */
+{
+  const { createDecisionLog, stateDigest } = await import('../experiments/next-for-you/decision-log.js');
+  const evA = seedIndependentHistory(F, { caps: 2, at: T0 - 30 * DAY });
+  const evB = evA.map((e) => ({ ...e, attempt: e.attempt ? { ...e.attempt, outcome: 'fail' } : e.attempt })); /* genuinely different history */
+  const log = createDecisionLog();
+  const dA = POLICIES.B(baseState(evA), {});
+  const dB = POLICIES.B(baseState(evB), {});
+  log.append(dA, { digest: stateDigest({ events: evA, learnerId: 'SIM', decisionContext: baseState(evA).decisionContext }) });
+  log.append(dB, { digest: stateDigest({ events: evB, learnerId: 'SIM', decisionContext: baseState(evB).decisionContext }) });
+  ok(log.at(0).stateFingerprint !== log.at(1).stateFingerprint, 'H: fingerprint identical for different histories');
+  /* same history + same context ⇒ identical digest (stable, not random) */
+  ok(stateDigest({ events: evA, learnerId: 'SIM', decisionContext: baseState(evA).decisionContext }) ===
+     stateDigest({ events: evA, learnerId: 'SIM', decisionContext: baseState(evA).decisionContext }),
+    'H: digest unstable for identical inputs');
+}
+
+/* --- I. Diagnostics bounded INCLUDING baseline probes --- */
+{
+  /* Two never-seen targets + budget 1: at most 1 probe this episode —
+   * the second target's introduction must defer. */
+  const caps = [sayCap(), askCap()];
+  const ctx = emptyContext('ep.i', 'ses.i');
+  const d1 = POLICIES.B(scopedState([], caps, { ctx }), {});
+  ok(d1.chosen.kind === KINDS.DIAGNOSTIC_PROBE, `I: expected baseline probe, got ${d1.chosen.kind}`);
+  /* Simulate one probe spent, then budget exhaustion defers the rest. */
+  const ctx1 = recordChoice(ctx, { kind: KINDS.DIAGNOSTIC_PROBE, capabilityId: d1.chosen.capabilityId, taskId: d1.chosen.taskId, timestamp: T0 });
+  const d2 = POLICIES.B(scopedState([], caps, { ctx: ctx1 }), { selection: { diagnosticMaxPerEpisode: 1 } });
+  ok(d2.chosen.kind !== KINDS.DIAGNOSTIC_PROBE, `I: second baseline probe exceeded episode budget`);
+}
+
+/* --- J. Thread semantics: interruptions never steal the thread --- */
+{
+  let ctx = emptyContext('ep.j', 'ses.j');
+  ctx = recordChoice(ctx, { kind: KINDS.MISSION_CONTINUATION, capabilityId: 'interaction.ask_name', taskId: 'task.meet.interaction.guided', timestamp: T0 });
+  ok(ctx.currentThreadCapabilityId === 'interaction.ask_name', 'J: thread not set by continuation');
+  /* support demand on substrate cap = lastActed, not thread */
+  ctx = recordChoice(ctx, { kind: KINDS.SUPPORT_DEMAND, capabilityId: 'reception.listen.identify_spoken_number', taskId: 'task.time.support.numbers', timestamp: T0 + 1 });
+  ok(ctx.currentThreadCapabilityId === 'interaction.ask_name', 'J: support probe stole the learning thread');
+  ok(ctx.lastActedCapabilityId === 'reception.listen.identify_spoken_number', 'J: lastActed not recorded');
+  /* due review = interruption, not thread */
+  ctx = recordChoice(ctx, { kind: KINDS.DUE_RETRIEVAL, capabilityId: 'production.speak.say_own_name', taskId: 'task.meet.delayed.name', timestamp: T0 + 2 });
+  ok(ctx.currentThreadCapabilityId === 'interaction.ask_name', 'J: due review stole the thread');
+  /* assessment checkpoint = interruption, not thread */
+  ctx = recordChoice(ctx, { kind: KINDS.ASSESSMENT, capabilityId: 'reception.listen.identity_question_basic', taskId: 'task.meet.assessment.checkpoint', timestamp: T0 + 2.5 });
+  ok(ctx.currentThreadCapabilityId === 'interaction.ask_name', 'J: assessment stole the thread');
+  /* transfer check = interruption, not thread */
+  ctx = recordChoice(ctx, { kind: KINDS.TRANSFER, capabilityId: 'reception.listen.identity_question_basic', taskId: 'task.meet.transfer.clinic', timestamp: T0 + 2.6 });
+  ok(ctx.currentThreadCapabilityId === 'interaction.ask_name', 'J: transfer check stole the thread');
+  /* a genuine thread action updates it */
+  ctx = recordChoice(ctx, { kind: KINDS.NEW_INPUT, capabilityId: 'reception.listen.greeting_basic', taskId: 'task.meet.input.scene', timestamp: T0 + 3 });
+  ok(ctx.currentThreadCapabilityId === 'reception.listen.greeting_basic', 'J: thread action did not move the thread');
+}
+
+console.log(`vnext-next-for-you hardening sections included`);

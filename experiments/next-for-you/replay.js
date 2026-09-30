@@ -9,13 +9,20 @@
  * frozen state without mutating it, and diff their choices.
  */
 import { POLICIES } from './policies.js';
-import { emptyContext } from './decision-context.js';
+import { emptyContext, contextAt } from './decision-context.js';
 
 const withoutFuture = (events, t) => events.filter((e) => e.occurredAt <= t);
 
+/* Recompute the decision "as of T": events AND DecisionContext are
+ * truncated at T — actions recorded after T (diagnostic spend, thread
+ * changes) must not influence a historical replay (BLOCKER 3). */
 export function replayAt(state, policyName, t) {
   const policy = POLICIES[policyName];
-  const sliced = { ...state, events: withoutFuture(state.events, t) };
+  const sliced = {
+    ...state,
+    events: withoutFuture(state.events, t),
+    decisionContext: contextAt(state.decisionContext, t)
+  };
   return policy(sliced, { selection: state.selection });
 }
 

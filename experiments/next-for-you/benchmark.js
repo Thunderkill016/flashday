@@ -11,6 +11,8 @@ import { emptyContext, recordChoice } from './decision-context.js';
 import { createDecisionLog } from './decision-log.js';
 import { missionState, attemptEvent, observeEvent, seedIndependentHistory, ARCHETYPES } from './scenarios.js';
 import { LEARNING_POLICY_V1 } from '../../src/vnext/policy.js';
+import { validateDecision } from './validator.js';
+import { stateDigest } from './decision-log.js';
 import { KINDS } from './constants.js';
 
 const HOUR = 3600e3;
@@ -43,7 +45,14 @@ export function runScenario({ fixture, archetype, archetypeName, policyName, ste
       policy: LEARNING_POLICY_V1, now, mission, decisionContext: ctx, selection
     };
     const d = policy(state, { selection });
-    log.append(d, { eventCount: events.length, capabilityCount: capabilities.length, lastEventId: events.at(-1)?.id });
+    /* Independent validator (review HIGH-6/F): the chosen decision is
+     * re-checked against contracts + kernel facts by code that did NOT
+     * generate it. Violations are real, counted, and fail runs. */
+    const violations = validateDecision(d, { events, tasks, capabilities, roles, mission, learnerId: 'SIM', now });
+    metrics.hardViolationCount += violations.length;
+    if (violations.length) (metrics.violations ??= []).push({ step, violations });
+    metrics.invalidCandidateCount += (d.explanation?.suppressed ?? []).filter((x) => x.includes('filtered')).length;
+    log.append(d, { digest: stateDigest({ events, learnerId: 'SIM', decisionContext: ctx }) });
     trace.push(d);
     recordDecisionMetrics(metrics, d, ctx, trace);
 
@@ -190,15 +199,25 @@ function finalizeMetrics(m, trace, ctx, events, capabilities, tasks, roles, miss
     }
   }
 
-  /* Support-demand resolution: decisions between demand issue and its
-   * probe being served — computed from the trace's support events. */
-  let openAt = null;
+  /* Support-demand resolution (review HIGH-6/G): for each demand key,
+   * measure decisions from first appearance in openDemands until it
+   * disappears (probe consumed / cancelled / recovered). */
+  const firstSeen = new Map();
+  m.supportDemandResolutionSteps = [];
   trace.forEach((d, i) => {
-    if (d.chosen.kind === KINDS.SUPPORT_DEMAND) {
-      if (openAt == null) m.supportDemandResolutionSteps.push(0);
-      openAt = null;
+    const open = new Set(d.openDemands ?? []);
+    for (const key of open) if (!firstSeen.has(key)) firstSeen.set(key, i);
+    for (const [key, start] of firstSeen) {
+      if (!open.has(key) && !key.startsWith('done@')) {
+        m.supportDemandResolutionSteps.push(i - start);
+        firstSeen.delete(key);
+        firstSeen.set('done@' + key, i);
+      }
     }
   });
+  for (const [key, start] of firstSeen) {
+    if (!key.startsWith('done@')) m.supportDemandResolutionSteps.push(trace.length - start); // unresolved at end
+  }
 
   /* idleWhileValidActionExists: terminal idle with eligible candidates
    * recorded in the last decision's suppressed list only counts when a

@@ -16,9 +16,7 @@ import { KINDS, POLICY_VERSIONS, PROVENANCE, TIER_OF } from './constants.js';
 import { generateCandidates } from './candidate-generator.js';
 import { LEARNER_MODEL_VERSION } from '../../src/vnext/learner-model.js';
 
-let decisionSeq = 0;
-
-function makeDecision({ policy, version, chosen, candidates, skipped, model, ctx }) {
+function makeDecision({ policy, version, chosen, candidates, skipped, model, ctx, pendingDemands = [] }) {
   const explanation = chosen
     ? {
         whyExists: chosen.why,
@@ -36,12 +34,16 @@ function makeDecision({ policy, version, chosen, candidates, skipped, model, ctx
     : { whyExists: 'no valid candidate', tier: 'TERMINAL', preferences: [], penalties: [], beat: [], suppressed: skipped.map((s) => `${s.kind}@${s.capabilityId}: ${s.reason}`) };
 
   return {
-    decisionId: `d${++decisionSeq}`,
+    /* Deterministic id: episode + decision ordinal + policy + chosen.
+     * Identical inputs produce an identical id — no module-global
+     * counters, no time reads (BLOCKER 2). */
+    decisionId: `dec:${ctx?.decisionEpisodeId ?? 'ep'}#${ctx?.actionsChosen?.length ?? 0}:${version}:${chosen ? `${chosen.kind}@${chosen.capabilityId}:${chosen.servableTask?.id ?? 'none'}` : 'idle'}`,
     selectionPolicyVersion: version,
     learnerModelVersion: LEARNER_MODEL_VERSION,
     chosen: chosen ? { kind: chosen.kind, capabilityId: chosen.capabilityId, taskId: chosen.servableTask?.id ?? null, tier: chosen.tierName } : { kind: 'idle', capabilityId: null, taskId: null, tier: 'TERMINAL' },
     explanation,
     decisionContextSummary: ctx ? { episode: ctx.decisionEpisodeId, counts: { ...ctx.counts }, thread: ctx.currentThreadCapabilityId } : null,
+    openDemands: pendingDemands.map((d) => `${d.targetCapabilityId}|${d.missingFunction}|${d.supportCapabilityId}`),
     candidateCount: candidates.length,
     blocked: chosen == null && candidates.length > 0
   };
@@ -50,7 +52,7 @@ function makeDecision({ policy, version, chosen, candidates, skipped, model, ctx
 /* ============ POLICY A — corrected reference cascade ============ */
 
 export function policyA(state, { selection = {} } = {}) {
-  const { candidates, skipped, model } = generateCandidates(state);
+  const { candidates, skipped, model, pendingDemands } = generateCandidates(state);
   const ceiling = selection.failureCeiling ?? 3;
 
   const order = [
@@ -74,10 +76,10 @@ export function policyA(state, { selection = {} } = {}) {
       if (kind === KINDS.CORRECTION && hit.facts.consecutiveFailures >= ceiling) continue;
       if (hit.identicalRetry) continue;
       hit.tierName = tierNameOf(kind);
-      return makeDecision({ version: POLICY_VERSIONS.A, chosen: hit, candidates, skipped, model, ctx: state.decisionContext });
+      return makeDecision({ version: POLICY_VERSIONS.A, chosen: hit, candidates, skipped, model, ctx: state.decisionContext, pendingDemands });
     }
   }
-  return makeDecision({ version: POLICY_VERSIONS.A, chosen: null, candidates, skipped, model, ctx: state.decisionContext });
+  return makeDecision({ version: POLICY_VERSIONS.A, chosen: null, candidates, skipped, model, ctx: state.decisionContext, pendingDemands });
 }
 
 /* ============ Hard filters (spec §4) ============ */
@@ -119,10 +121,11 @@ function hardFilter(cand, { ctx, selection, pendingDemands, roles }) {
   if (cand.identicalRetry) {
     reasons.push('identical_retry_after_failure_ceiling');
   }
-  if (cand.kind === KINDS.DIAGNOSTIC_PROBE && (ctx?.counts?.diagnostic ?? 0) >= diagBudget &&
-      !cand.preferences.some((p) => p.name === 'baseline_probe')) {
-    /* Budget is per-episode [SAFETY_PRIOR]; baseline probes for never-seen
-     * targets stay admissible because they are the introduction path. */
+  if (cand.kind === KINDS.DIAGNOSTIC_PROBE && (ctx?.counts?.diagnostic ?? 0) >= diagBudget) {
+    /* Budget is per-episode and applies to EVERY probe, baseline
+     * included — an exhausted budget defers new-target introduction to
+     * a later episode instead of silently unbounding diagnostics
+     * (review MEDIUM-8). */
     reasons.push(`diagnostic_budget:${diagBudget}`);
   }
   if (cand.kind === KINDS.REFRESH && !(cand.facts.lastAttemptOutcome === 'fail' || cand.facts.lastAttemptOutcome === 'partial')) {
@@ -146,7 +149,7 @@ export function policyB(state, { selection = {} } = {}) {
   }
   const eligible = candidates.filter((c) => c.eligible);
   const chosen = pickOrdinal(eligible, ctx, selection);
-  return makeDecision({ version: POLICY_VERSIONS.B, chosen, candidates, skipped, model, ctx });
+  return makeDecision({ version: POLICY_VERSIONS.B, chosen, candidates, skipped, model, ctx, pendingDemands });
 }
 
 /* ============ POLICY C — B + bounded information value ============ */
@@ -174,7 +177,7 @@ export function policyC(state, { selection = {} } = {}) {
   }
   const eligible = result.candidates.filter((c) => c.eligible);
   const chosen = pickOrdinal(eligible, ctx, selection, { informationValue: true });
-  return makeDecision({ version: POLICY_VERSIONS.C, chosen, candidates: result.candidates, skipped: result.skipped, model: result.model, ctx });
+  return makeDecision({ version: POLICY_VERSIONS.C, chosen, candidates: result.candidates, skipped: result.skipped, model: result.model, ctx, pendingDemands: result.pendingDemands });
 }
 
 /* Ordinal preference: within a tier, apply named comparisons in order;

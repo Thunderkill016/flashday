@@ -81,20 +81,26 @@ tiers + ordinal preferences + tie-break. `[KERNEL]`
 7. `support_cap_isolation` — support-role caps are reachable ONLY via
    support_demand [KERNEL].
 8. `attribution_boundary` — correction candidates require attributed
-   unresolved functions or an attributing last failure
+   unresolved functions or an attributing last failure, and only
+   *observed* failures count: `attempt.observed === false`
+   (self-report) is context, never verified performance evidence
    [KERNEL + EVIDENCE].
 9. `transfer_freshness` — transfer tasks must exercise a family not
    already rehearsed; a success on a rehearsed family is not novel
    transfer [KERNEL].
-10. `assessment_freshness` — assessment only post-TRANSFERRED, and not
-    already observed-success [KERNEL].
+10. `assessment_freshness` — assessment only post-TRANSFERRED, not
+    already observed-success, and *revision-scoped consumed*: a
+    task@rev carrying any verified learner event is consumed forever —
+    it is never re-served as a fresh sample. When no unused valid
+    assessment remains after failure the honest state is
+    backlog/blocked, not re-sale of the same checkpoint [KERNEL].
 11. `curriculum_surface` — task must belong to the active mission's
     declared taskIds [KERNEL].
 12. `no_fabricated_gap` — never stamp `missingFunctions` a task's
     contract can't attribute [KERNEL].
 13. `no_time_only_forgetting` — no intent is generated from elapsed
-    time alone; refresh requires a verified failure [KERNEL — Mission
-    007 boundary].
+    time alone; refresh requires an *observed* verified failure as the
+    last observed attempt [KERNEL — Mission 007 boundary].
 14. `no_exposure_claim` — input/notice tasks cannot carry claim-bearing
     intents (their candidates are MISSION_CONTINUATION/NEW_INPUT only)
     [KERNEL].
@@ -109,7 +115,10 @@ tiers + ordinal preferences + tie-break. `[KERNEL]`
     [SAFETY_PRIOR].
 18. `fluency_reserved` — FLUENCY candidates rejected [KERNEL].
 19. `diagnostic_budget` — `context.counts.diagnostic <
-    diagnosticMaxPerEpisode` else probe candidates filtered
+    diagnosticMaxPerEpisode` else probe candidates filtered. The
+    budget applies to EVERY probe, baseline included: an exhausted
+    budget defers new-target introduction to a later episode rather
+    than unbounding diagnostics through the baseline exemption
     [SAFETY_PRIOR].
 
 ## 5. DecisionContext (serializable, no hidden state)
@@ -123,9 +132,18 @@ tiers + ordinal preferences + tie-break. `[KERNEL]`
             transfer, newInput, continuation },
   recentCapabilities: string[],   // last N capability ids chosen
   recentTaskIds: string[],
-  currentThreadCapabilityId: string | null
+  lastActedCapabilityId: string | null,    // any chosen action
+  currentThreadCapabilityId: string | null // pedagogical thread only
 }
 ```
+
+**Thread ownership.** `currentThreadCapabilityId` (hysteresis anchor)
+moves only on thread-owning kinds: `mission_continuation`, `new_input`,
+`independent_attempt`, `correction`, `refresh`, `diagnostic_probe`,
+`resume_in_flight`. Interruptions — `support_demand`, `due_retrieval`,
+`transfer`, `assessment` — update `lastActedCapabilityId` but never
+steal the thread, so the learner's thread survives a substrate probe or
+a spaced review [KERNEL].
 
 No `elapsedActiveMs` — session fatigue cannot be measured reliably and
 is excluded rather than faked [SPEC §9]. Same inputs + context + policy
@@ -162,7 +180,10 @@ Every decision returns:
 
 ```js
 {
-  decisionId, selectionPolicyVersion, learnerModelVersion,
+  decisionId,                    // deterministic: dec:{episodeId}#{decision ordinal}:{policyVersion}:{kind}@{capabilityId}:{taskId|idle}
+                                 // — derived from explicit inputs only; no module-global
+                                 //   counters or time reads (same inputs ⇒ identical id)
+  selectionPolicyVersion, learnerModelVersion,
   learnerId, timestamp,
   chosen: { kind, capabilityId, taskId, tier },
   eligibilityEvidence: [...],      // which filters each candidate passed/failed
@@ -192,10 +213,33 @@ beat each rival, which policy version decided [KERNEL].
 ## 10. Decision log & replay
 
 Append-only records stamped with `selectionPolicyVersion` +
-`learnerModelVersion` + at-time facts only. Replay at T truncates the
-event log at `occurredAt ≤ T` — future events must not influence
-candidates, tiers, preferences, or choice. Counterfactual replay runs
-A/B/C on the same state without mutation.
+`learnerModelVersion` + at-time facts only. Replay at T truncates
+BOTH the event log at `occurredAt ≤ T` AND the DecisionContext at
+`atDecision ≤ T` (actions, counts, recent lists, thread state are
+rebuilt from actions ≤ T) — future events *and* future context must
+not influence candidates, tiers, preferences, or choice.
+Counterfactual replay runs A/B/C on the same state without mutation.
+
+Each log entry carries a canonical `stateFingerprint` digest over
+every decision-relevant input: ordered event identities
+(id, task@rev, type, outcome, occurredAt) for the scoped learner plus
+the DecisionContext — two different histories can never share a
+fingerprint (the old `eventCount:capabilityCount:lastEventId` summary
+was provably collidable).
+
+**Independent validation.** `validator.js` re-checks every chosen
+decision against contracts + kernel facts recomputed *outside* the
+generator/policy pipeline (task existence, revision currency, mission
+membership, capability/task modality, purpose compatibility, pending
+demand + probe function coverage, assessment/transfer freshness,
+prerequisites, learner scope, no future evidence, no false
+relearning). Benchmark metrics are measured, never assumed:
+`hardViolationCount` counts validator violations;
+`invalidCandidateCount` counts filtered candidates;
+`supportDemandResolutionSteps` measures decisions from first
+appearance in `openDemands` until the demand leaves the pending set
+(probe consumed / cancelled / recovered), or run length if still
+open.
 
 ## 11. Explicit open calibration questions (preserved, not guessed)
 
@@ -206,4 +250,10 @@ A/B/C on the same state without mutation.
 - diagnostic budget exact value [SAFETY_PRIOR];
 - hysteresis magnitude [SAFETY_PRIOR];
 - whether `latencyMs` is a valid effort signal (unvalidated);
-- learned weights/policies — deferred until real outcome data exists.
+- learned weights/policies — deferred until real outcome data exists;
+- **correction corpus gap**: no authored capability pairs an
+  attributing (choice-contract) task with a `remediation` task — the
+  only remediation task lives on `interaction.ask_name`, whose tasks
+  are all non-attributing. Correction liveness is exercised via a
+  labeled synthetic task; authoring a real remediation surface is
+  content work for a later mission.
