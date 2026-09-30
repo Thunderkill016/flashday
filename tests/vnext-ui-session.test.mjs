@@ -43,6 +43,7 @@ const SCRIPT = {
   'task.meet.delayed.name': 'i am linh',
   'task.meet.transfer.name': 'my name is linh',
   'task.meet.transfer.street': "what's your name",
+  'task.meet.assessment.name_signup': 'my name is linh',
   'task.meet.assessment.checkpoint': "hi, i'm linh — what's your name?",
   'task.meet.input.scene': null,
   'task.meet.input.questions': null,

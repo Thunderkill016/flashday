@@ -79,6 +79,9 @@ const SCRIPT = {
   'task.meet.transfer.street': [[{ attempt: { observed: true, outcome: 'success', response: "I'm Sam — and you? … What's your name?", latencyMs: 1600, attemptId: 'tr.ask' } }]],
   // The polite-return carrier is rehearsed once the exchange exists.
   'task.meet.interaction.polite': [[{ attempt: { observed: true, outcome: 'success', response: 'Nice to meet you too', latencyMs: 900, attemptId: 'i.pol' } }]],
+  // 008E: say_own_name's own fresh assessment — the claim-bearing cap's
+  // post-transfer sample, in a context the teaching path never rehearses.
+  'task.meet.assessment.name_signup': [[{ attempt: { observed: true, outcome: 'success', response: 'My name is Linh', latencyMs: 1600, attemptId: 'ck.name' } }]],
   'task.meet.assessment.checkpoint': [[{ attempt: { observed: true, outcome: 'success', response: 'full exchange', latencyMs: 1900, attemptId: 'ck.ask' } }]]
 };
 
@@ -132,6 +135,7 @@ const row = (step) => trace[step - 1];
     'task.meet.transfer.name',
     'task.meet.transfer.street',
     'task.meet.interaction.polite',   // carrier rehearsal once the exchange exists
+    'task.meet.assessment.name_signup', // 008E: say_own_name's fresh assessment, post-transfer
     'task.meet.assessment.checkpoint'
   ], `slice should walk the declared learning loop in order:\n${trace.map((t) => `${t.step}: ${t.taskId} [${t.beforeState}→${t.afterState}] ${t.reason}`).join('\n')}`);
 
@@ -146,7 +150,8 @@ const row = (step) => trace[step - 1];
   assert.equal(row(13).afterState, 'TRANSFERRED', 'say_own_name changed-context success → TRANSFERRED');
   assert.equal(row(14).afterState, 'TRANSFERRED', 'changed-context success → TRANSFERRED');
   assert.equal(row(15).afterState, 'INDEPENDENT', 'carrier polite return rehearses opportunistically');
-  assert.equal(row(16).afterState, 'TRANSFERRED', 'fresh assessment does not change transfer state');
+  assert.equal(row(16).afterState, 'TRANSFERRED', 'say_own_name fresh assessment does not change transfer state');
+  assert.equal(row(17).afterState, 'TRANSFERRED', 'fresh assessment does not change transfer state');
   const final = stateOf(events, 'interaction.ask_name');
   assert.equal(final.milestones.fluent, false, 'FLUENT unreachable in v0');
   assert.ok(!final.transferPromptFamilies.includes(taskById('task.meet.assessment.checkpoint').promptFamily),
