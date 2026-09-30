@@ -463,10 +463,12 @@ function correctionSyntheticState({ remediationTasks = 1 } = {}) {
   const evA = seedIndependentHistory(F, { caps: 2, at: T0 - 30 * DAY });
   const evB = evA.map((e) => ({ ...e, attempt: e.attempt ? { ...e.attempt, outcome: 'fail' } : e.attempt })); /* genuinely different history */
   const log = createDecisionLog();
-  const dA = POLICIES.B(baseState(evA), {});
-  const dB = POLICIES.B(baseState(evB), {});
-  log.append(dA, { digest: stateDigest({ events: evA, learnerId: 'SIM', decisionContext: baseState(evA).decisionContext }) });
-  log.append(dB, { digest: stateDigest({ events: evB, learnerId: 'SIM', decisionContext: baseState(evB).decisionContext }) });
+  const stA = baseState(evA);
+  const stB = baseState(evB);
+  const dA = POLICIES.B(stA, {});
+  const dB = POLICIES.B(stB, {});
+  log.append(dA, stA);
+  log.append(dB, stB);
   ok(log.at(0).stateFingerprint !== log.at(1).stateFingerprint, 'H: fingerprint identical for different histories');
   /* same history + same context ⇒ identical digest (stable, not random) */
   ok(stateDigest({ events: evA, learnerId: 'SIM', decisionContext: baseState(evA).decisionContext }) ===
@@ -671,7 +673,10 @@ function correctionSyntheticState({ remediationTasks = 1 } = {}) {
   /* B with an unused fresh assessment family → serves that instead,
    * once the failed checkpoint's repair is cleared (REPAIR honestly
    * outranks EVIDENCE while a repair is pending). */
-  const altAssess = { ...tmt('assessment.checkpoint'), id: 'task.meet.assessment.second', promptFamily: 'assessment.second_family' };
+  const base = tmt('assessment.checkpoint');
+  const newSig = { ...base.contextSignature, setting: 'online', channel: 'text_chat', interlocutorRole: 'teacher' };
+  const { canonicalFamilyId } = await import('../src/vnext/contracts.js');
+  const altAssess = { ...base, id: 'task.meet.assessment.second', contextSignature: newSig, promptFamily: canonicalFamilyId(base.capabilityId, newSig) };
   const tasks2 = [...state.tasks, altAssess];
   const mission2 = { ...F.mission, taskIds: [...F.mission.taskIds, altAssess.id] };
   const repaired = [
@@ -758,7 +763,7 @@ function correctionSyntheticState({ remediationTasks = 1 } = {}) {
   const st = baseState(ev, { now: T0 });
   const d = POLICIES.B(st, {});
   const log = createDecisionLog();
-  log.append(d, { digest: stateDigest({ events: ev, learnerId: 'SIM', decisionContext: st.decisionContext, now: T0, policy: LEARNING_POLICY_V1, selection: {}, mission: F.mission, tasks: state.tasks, roles: state.roles }) });
+  log.append(d, st);
   const before = JSON.stringify(log.at(0));
   d.chosen.kind = 'MUTATED';
   d.explanation.whyExists = 'tampered';
@@ -884,24 +889,59 @@ function correctionSyntheticState({ remediationTasks = 1 } = {}) {
   }
 }
 
-/* --- Z4. Assessment FAMILY freshness --- */
+/* --- Z4. Assessment FAMILY freshness — semantic identity, not labels --- */
 {
-  const ev = [...transferredHistory(T0), attemptEvent(tmt('assessment.checkpoint'), askCap(), { at: T0 - HOUR, outcome: 'fail' }), attemptEvent(tmt('remediation.ask_name'), askCap(), { at: T0 - 30 * MIN, outcome: 'success' })];
-  /* same family + new id is NOT fresh for B/C */
-  const clone = { ...tmt('assessment.checkpoint'), id: 'task.meet.assessment.clone' };
-  const tasksC = [...state.tasks, clone];
-  const missionC = { ...F.mission, taskIds: [...F.mission.taskIds, clone.id] };
-  const dc = POLICIES.B(scopedState(ev, [askCap()], { tasks: tasksC, mission: missionC }), {});
-  const cc = dc.candidates.find((c) => c.kind === KINDS.ASSESSMENT && c.taskId === clone.id);
-  ok(cc && cc.eligible === false && cc.filterReason.includes('assessment_family_consumed'),
-    `Z4: same-family clone treated as fresh (${cc?.filterReason ?? 'absent'})`);
-  /* genuinely different family IS fresh */
-  const fresh = { ...tmt('assessment.checkpoint'), id: 'task.meet.assessment.newfam', promptFamily: 'assessment.alternate_family' };
-  const tasksF = [...state.tasks, fresh];
-  const missionF = { ...F.mission, taskIds: [...F.mission.taskIds, fresh.id] };
-  const df = POLICIES.B(scopedState(ev, [askCap()], { tasks: tasksF, mission: missionF }), {});
-  const fc = df.candidates.find((c) => c.kind === KINDS.ASSESSMENT && c.taskId === fresh.id);
-  ok(fc && fc.eligible === true, 'Z4: genuinely different assessment family not eligible');
+  const { canonicalFamilyId } = await import('../src/vnext/contracts.js');
+  const { validateDecision } = await import('../experiments/next-for-you/validator.js');
+  const base = tmt('assessment.checkpoint');
+  const ev = [...transferredHistory(T0), attemptEvent(base, askCap(), { at: T0 - HOUR, outcome: 'fail' }), attemptEvent(tmt('remediation.ask_name'), askCap(), { at: T0 - 30 * MIN, outcome: 'success' })];
+  const withTask = (extra) => scopedState(ev, [askCap()], { tasks: [...state.tasks, extra], mission: { ...F.mission, taskIds: [...F.mission.taskIds, extra.id] } });
+  const findAssess = (d, id) => d.candidates.find((c) => c.kind === KINDS.ASSESSMENT && c.taskId === id);
+
+  /* 1. same task id → consumed */
+  {
+    const d = POLICIES.B(scopedState(ev, [askCap()]), {});
+    const c = findAssess(d, base.id);
+    ok(c && c.eligible === false && c.filterReason.includes('consumed'), `Z4.1: consumed task eligible (${c?.filterReason ?? 'absent'})`);
+  }
+  /* 2. new task id + same family identity → consumed */
+  {
+    const clone = { ...base, id: 'task.meet.assessment.clone' };
+    const c = findAssess(POLICIES.B(withTask(clone), {}), clone.id);
+    ok(c && c.eligible === false && c.filterReason.includes('assessment_family_consumed'), `Z4.2: same-family clone treated as fresh (${c?.filterReason ?? 'absent'})`);
+  }
+  /* 3. renamed family label + SAME contextSignature → still consumed */
+  {
+    const relabeled = { ...base, id: 'task.meet.assessment.relabel', promptFamily: 'assessment.renamed_family' };
+    const c = findAssess(POLICIES.B(withTask(relabeled), {}), relabeled.id);
+    ok(c && c.eligible === false && c.filterReason.includes('assessment_family_consumed'), `Z4.3: label-rename bypassed semantic family freshness (${c?.filterReason ?? 'absent'})`);
+  }
+  /* 4. genuinely changed contextSignature + canonical family id → fresh */
+  {
+    const newSig = { ...base.contextSignature, setting: 'online', channel: 'text_chat', interlocutorRole: 'teacher' };
+    const fresh = { ...base, id: 'task.meet.assessment.newsig', contextSignature: newSig, promptFamily: canonicalFamilyId(base.capabilityId, newSig) };
+    const c = findAssess(POLICIES.B(withTask(fresh), {}), fresh.id);
+    ok(c && c.eligible === true, 'Z4.4: genuinely different assessment family not eligible');
+  }
+  /* 5. a malformed/stale assessment event does NOT consume the family */
+  {
+    const newSig = { ...base.contextSignature, setting: 'online', channel: 'text_chat', interlocutorRole: 'teacher' };
+    const fresh = { ...base, id: 'task.meet.assessment.newsig', contextSignature: newSig, promptFamily: canonicalFamilyId(base.capabilityId, newSig) };
+    const badEvt = { ...attemptEvent(fresh, askCap(), { at: T0 - MIN, outcome: 'success' }), taskRevision: 99 };
+    const evBad = [...ev, badEvt];
+    const stB = scopedState(evBad, [askCap()], { tasks: [...state.tasks, fresh], mission: { ...F.mission, taskIds: [...F.mission.taskIds, fresh.id] } });
+    const c = findAssess(POLICIES.B(stB, {}), fresh.id);
+    ok(c && c.eligible === true, 'Z4.5: malformed assessment event poisoned the family');
+  }
+  /* validator independently rejects a family-resold assessment (B) */
+  {
+    const relabeled = { ...base, id: 'task.meet.assessment.relabel', promptFamily: 'assessment.renamed_family' };
+    const stR = scopedState(ev, [askCap()], { tasks: [...state.tasks, relabeled], mission: { ...F.mission, taskIds: [...F.mission.taskIds, relabeled.id] } });
+    const good = POLICIES.B(stR, {});
+    const forged = { ...good, chosen: { ...good.chosen, kind: KINDS.ASSESSMENT, capabilityId: 'interaction.ask_name', taskId: relabeled.id, taskRevision: relabeled.revision } };
+    const env = { events: ev, tasks: stR.tasks, capabilities: stR.capabilities, roles: stR.roles, mission: stR.mission, learnerId: 'SIM', now: T0, policy: LEARNING_POLICY_V1, selection: {}, decisionContext: stR.decisionContext };
+    ok(validateDecision(forged, env).some((vv) => vv.includes('assessment')), 'Z4.v: validator accepted a family-resold assessment');
+  }
 }
 
 /* --- Z5. Validator independently reconstructs terminal honesty --- */
@@ -967,18 +1007,82 @@ function correctionSyntheticState({ remediationTasks = 1 } = {}) {
   }
 }
 
+/* --- Z9. policyRef is the production reference; A diverges only via safety priors --- */
+{
+  const { policyRef } = await import('../experiments/next-for-you/policies.js');
+  const { nextMissionTask } = await import('../src/vnext/mission-runner.js');
+  const ref = (st) => nextMissionTask({ learnerId: st.learnerId, mission: st.mission, tasks: st.tasks, capabilities: st.capabilities, events: st.events, now: st.now, policy: st.policy });
+  const parity = (name, st) => {
+    const prod = ref(st);
+    const pr = policyRef(st);
+    ok(pr.chosen.taskId === (prod.status === 'ready' ? prod.taskId : null) && (prod.status !== 'ready' || pr.chosen.taskRevision === prod.taskRevision),
+      `Z9.${name}: policyRef diverged from production (${pr.chosen.taskId} vs ${prod.taskId})`);
+    return prod;
+  };
+
+  /* (a) EXHAUSTED diagnostic budget: production phase-0 still serves the
+   * declared baseline probe; A's safety prior filters it. policyRef must
+   * match production EXACTLY while A intentionally differs. */
+  {
+    const targets = [...state.capabilities.filter((c) => !(state.roles?.supports ?? new Set()).has(c.id))];
+    let ctx = emptyContext('ep.z9a', 'ses.z9a');
+    for (let i = 0; i < 9; i++) ctx = recordChoice(ctx, { kind: KINDS.DIAGNOSTIC_PROBE, capabilityId: 'cap.d' + i, taskId: 'task.d' + i, timestamp: T0 - 1000 + i });
+    const st = scopedState([], targets, { ctx, selection: { diagnosticMaxPerEpisode: 2 } });
+    const prod = parity('budget_exhausted', st);
+    ok(prod.status === 'ready' && prod.purpose === 'diagnostic', `Z9.a: production did not serve a baseline diagnostic (${prod.status} ${prod.purpose})`);
+    const da = POLICIES.A(st, {});
+    ok(!(da.chosen.kind === KINDS.DIAGNOSTIC_PROBE), `Z9.a: A ignored the diagnostic budget (${da.chosen.kind}@${da.chosen.taskId})`);
+  }
+
+  /* (b) PRE-KNOWN capability + unconsumed declared diagnostic:
+   * production phase-0 runs the declared probe even when the cap was
+   * independently demonstrated elsewhere; A's candidate surface has no
+   * baseline probe for a non-NOT_SEEN cap. */
+  {
+    const targets = [...state.capabilities.filter((c) => !(state.roles?.supports ?? new Set()).has(c.id))];
+    const otherDiags = F.tasks.filter((t) => t.purpose === 'diagnostic' && t.capabilityId !== 'interaction.ask_name');
+    const ev = [
+      ...independentHistory(T0), /* ask_name independent, not due (last success at T0-2*DAY? see helper) */
+      ...otherDiags.map((t) => attemptEvent(t, capOf(t.capabilityId), { at: T0 - 5 * HOUR, outcome: 'success', support: { hint: true } }))
+    ];
+    const st = scopedState(ev, targets);
+    const prod = parity('preknown_baseline', st);
+    ok(prod.status === 'ready' && prod.taskId === 'task.meet.diagnostic.ask_name',
+      `Z9.b: production skipped the declared probe on a pre-known cap (${prod.status} ${prod.taskId})`);
+    const da = POLICIES.A(st, {});
+    ok(da.chosen.taskId !== 'task.meet.diagnostic.ask_name',
+      `Z9.b: A minted a baseline probe for an already-independent cap (${da.chosen.kind}@${da.chosen.taskId})`);
+  }
+}
+
 /* --- Z8. Log append fails closed without canonical provenance --- */
 {
-  const { createDecisionLog } = await import('../experiments/next-for-you/decision-log.js');
+  const { createDecisionLog, stateDigest } = await import('../experiments/next-for-you/decision-log.js');
   const log = createDecisionLog();
   const ev = seedIndependentHistory(F, { caps: 2, at: T0 - 30 * DAY });
-  const d = POLICIES.B(baseState(ev, { now: T0 }), {});
+  const st = baseState(ev, { now: T0 });
+  const d = POLICIES.B(st, {});
   let threw = false;
   try { log.append(d, {}); } catch { threw = true; }
   ok(threw, 'Z8: append accepted missing provenance');
   let threw2 = false;
   try { log.append(d, { eventCount: 3, capabilityCount: 2, lastEventId: 'x' }); } catch { threw2 = true; }
   ok(threw2, 'Z8: weak fingerprint fallback still accepted');
+  /* BLOCKER-1 r4: a naked precomputed digest is not provenance */
+  let threw3 = false;
+  try { log.append(d, { digest: 'sha256:fake' }); } catch { threw3 = true; }
+  ok(threw3, 'Z8: append accepted a naked digest with no canonical input');
+  /* a digest that disagrees with the recomputed input is rejected */
+  let threw4 = false;
+  try { log.append(d, { ...st, digest: 'sha256:fake' }); } catch { threw4 = true; }
+  ok(threw4, 'Z8: supplied digest mismatch not caught');
+  /* matching caller-supplied digest is accepted as a cross-check */
+  log.append(d, { ...st, digest: stateDigest(st) });
+  ok(log.size() === 1, 'Z8: valid cross-checked append rejected');
+  /* non-terminal decisions without mission/policy provenance fail closed */
+  let threw5 = false;
+  try { log.append(d, { events: ev, learnerId: 'SIM' }); } catch { threw5 = true; }
+  ok(threw5, 'Z8: non-terminal append without provenance accepted');
 }
 
 function burnCtx2(n) {

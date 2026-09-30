@@ -88,12 +88,14 @@ tiers + ordinal preferences + tie-break. `[KERNEL]`
 9. `transfer_freshness` — transfer tasks must exercise a family not
    already rehearsed; a success on a rehearsed family is not novel
    transfer [KERNEL].
-10. `assessment_freshness` — assessment only post-TRANSFERRED, not
-    already observed-success, and *revision-scoped consumed*: a
-    task@rev carrying any verified learner event is consumed forever —
-    it is never re-served as a fresh sample. When no unused valid
-    assessment remains after failure the honest state is
-    backlog/blocked, not re-sale of the same checkpoint [KERNEL].
+10. `assessment_freshness` — assessment only post-TRANSFERRED and not
+    already observed-success [KERNEL]. Re-probe of a consumed
+    task/family is a POLICY choice, not a kernel invariant: production
+    re-probes after remediation, B/C require a fresh semantic family
+    (canonical `contextSignature` identity — a renamed `promptFamily`
+    label on the same signature is still consumed) [SAFETY_PRIOR/
+    EXPERIMENTAL — see §12.5, §13.4]. When no honestly fresh sample
+    remains, B/C's honest state is assessment backlog/blocked.
 11. `curriculum_surface` — task must belong to the active mission's
     declared taskIds [KERNEL].
 12. `no_fabricated_gap` — never stamp `missingFunctions` a task's
@@ -410,3 +412,31 @@ policy/selection/context and applies the shared hard-filter envelope
 `idle` with servable work → `fabricated_idle`; a forged `blocked` →
 `blocked_while_valid_work`; `blocked` with neither work nor integrity
 violation nor prior candidates → `blocked_without_work`.
+
+## 14. Round-4 micro-hardening (PR #69 review 5913237089)
+
+### 14.1 Decision log trust boundary
+`append` ALWAYS recomputes the state digest from the full canonical
+input — a caller-supplied `digest` is a cross-check that must equal the
+recompute, never sufficient provenance. Non-terminal decisions require
+non-null mission@rev, learning-policy version, selection-policy
+version, decision-context identity (episode+session), and a non-empty
+task@rev surface; terminal decisions record available provenance.
+
+### 14.2 Semantic assessment family identity
+Family freshness derives from `canonicalFamilyId(capabilityId,
+contextSignature)` — the same helper the family-integrity rules use —
+not the `promptFamily` label. A renamed label on the same signature is
+the same revealed family; only VERIFIED events (`verifyEventTask` +
+exact revision) consume a family, so stale/malformed evidence cannot
+poison freshness. The validator independently re-checks family
+consumption for B/C (`assessment_resold_as_fresh`).
+
+### 14.3 `policyRef` is the production reference; A is not
+`policyRef` is a literal wrapper over shipped `nextMissionTask` — the
+authoritative baseline for production-parity claims. Policy A is the
+**safety-normalized cascade baseline**: production ORDER through the
+shared candidate surface plus the 008B safety envelope. Documented
+divergences (regression-locked): exhausted diagnostic budget (production
+still serves phase-0; A filters), and declared baseline probes on
+pre-known capabilities (production re-probes; A has no such candidate).

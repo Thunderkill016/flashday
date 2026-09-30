@@ -253,11 +253,12 @@ export function policyA(state, opts = {}) {
    * eligible (the runner re-probes failed checkpoints). */
   applyFilters(candidates, { ctx: state.decisionContext, selection: sel.config, pendingDemands, roles: state.roles, assessmentMode: 'production' });
 
-  /* HIGH-3 r3: A follows the production `nextMissionTask` order —
-   * phase-0 declared baseline diagnostics first (mission order, once
-   * each), then resume → due → support_demand → remediation →
-   * transfer → independent → expose/continuation → introduce →
-   * assessment-close. */
+  /* A follows the production `nextMissionTask` ORDER — phase-0 declared
+   * baseline diagnostics first (mission order, once each), then resume →
+   * due → support_demand → remediation → transfer → independent →
+   * expose/continuation → introduce → assessment-close — but filtered
+   * through the shared safety envelope (HIGH-3 r4: safety-normalized
+   * cascade baseline, not a literal production mirror). */
   const taskOrder = new Map((state.mission?.taskIds ?? []).map((id, i) => [id, i]));
   const phase0 = candidates
     .filter((c) => c.kind === KINDS.DIAGNOSTIC_PROBE && c.servableTask && taskOrder.has(c.servableTask.id))
@@ -292,7 +293,8 @@ export function policyA(state, opts = {}) {
   return makeDecision({ version: POLICY_VERSIONS.A, chosen: null, candidates, skipped, model, ctx: state.decisionContext, pendingDemands, state: s2 });
 }
 
-/* Production reference policy [KERNEL]: a literal executable wrapper
+/* PRODUCTION REFERENCE — the authoritative differential baseline
+ * [KERNEL]: a literal executable wrapper
  * around the shipped `nextMissionTask` — the same code the product
  * runs, wrapped in the decision record shape so the benchmark and
  * differential tests can compare byte-for-byte choices. It does not

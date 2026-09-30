@@ -89,34 +89,57 @@ export function stateDigest(input) {
 export function createDecisionLog() {
   const entries = [];
   return {
-    /* MEDIUM-8 r3: append FAILS CLOSED without canonical provenance —
-     * the weak eventCount:capabilityCount:lastEventId fallback is gone.
-     * Callers pass the full decision input (the snapshot/digest is
-     * computed here) or a precomputed {digest, provenance}. Each entry
-     * persists enough identity to rebuild/audit the historical state:
-     * mission@rev, learning policy version, selection policy+config,
-     * the active task@rev surface, and the decision-context identity. */
+    /* MEDIUM-8 r3 / BLOCKER-1 r4: append is the trust boundary — it
+     * ALWAYS recomputes the digest from the full canonical decision
+     * input; a caller-supplied `digest` is cross-checked against the
+     * recompute, never trusted on its own. The weak
+     * eventCount:capabilityCount:lastEventId fallback is gone, and a
+     * naked {digest:'...'} with no input cannot mint an entry.
+     * Each entry persists enough identity to rebuild/audit the
+     * historical state: mission@rev, learning policy version, selection
+     * policy+config, the active task@rev surface, and the
+     * decision-context identity. */
     append(decision, input) {
-      const snapshot = input?.digest ? null : decisionInputSnapshot(input ?? {});
-      const digest = input?.digest ?? `sha256:${sha256(snapshot)}`;
-      if (!input?.digest && (!input || typeof input !== 'object' || !('events' in input))) {
-        throw new Error('decision log append requires canonical decision-input provenance');
+      if (!input || typeof input !== 'object' || !Array.isArray(input.events)) {
+        throw new Error('decision log append requires the full canonical decision input');
       }
-      const src = input ?? {};
+      const snapshot = decisionInputSnapshot(input);
+      const digest = `sha256:${sha256(snapshot)}`;
+      if (input.digest != null && input.digest !== digest) {
+        throw new Error('decision log append rejected: supplied digest does not match recomputed canonical digest');
+      }
+      const src = input;
+      const provenance = {
+        missionId: src.mission?.id ?? decision.missionId ?? null,
+        missionRevision: src.mission?.revision ?? decision.missionRevision ?? null,
+        learningPolicyVersion: src.policy?.version ?? null,
+        selectionPolicyVersion: decision.selectionPolicyVersion ?? null,
+        selectionConfig: src.selection ?? null,
+        taskSurface: [...(src.tasks ?? [])].map((t) => `${t.id}@${t.revision ?? 1}`).sort(),
+        decisionEpisodeId: src.decisionContext?.decisionEpisodeId ?? null,
+        sessionId: src.decisionContext?.sessionId ?? null
+      };
+      /* Non-terminal decisions claim a concrete task — they are
+       * meaningless to audit without complete provenance. Terminal
+       * decisions (idle/blocked) carry no task claim, so they record
+       * whatever provenance exists rather than demanding it. */
+      const terminal = decision?.chosen?.kind === 'idle' || decision?.chosen?.kind === 'blocked';
+      if (!terminal) {
+        const missing = [];
+        if (provenance.missionId == null) missing.push('missionId');
+        if (provenance.missionRevision == null) missing.push('missionRevision');
+        if (provenance.learningPolicyVersion == null) missing.push('learningPolicyVersion');
+        if (provenance.selectionPolicyVersion == null) missing.push('selectionPolicyVersion');
+        if (provenance.decisionEpisodeId == null) missing.push('decisionEpisodeId');
+        if (provenance.sessionId == null) missing.push('sessionId');
+        if (!provenance.taskSurface.length) missing.push('taskSurface');
+        if (missing.length) throw new Error(`decision log append rejected: missing provenance [${missing.join(', ')}]`);
+      }
       const entry = deepFreezeAll(structuredClone({
         seq: entries.length,
         decision,
         stateFingerprint: digest,
-        provenance: {
-          missionId: src.mission?.id ?? decision.missionId ?? null,
-          missionRevision: src.mission?.revision ?? decision.missionRevision ?? null,
-          learningPolicyVersion: src.policy?.version ?? null,
-          selectionPolicyVersion: decision.selectionPolicyVersion ?? null,
-          selectionConfig: src.selection ?? null,
-          taskSurface: [...(src.tasks ?? [])].map((t) => `${t.id}@${t.revision ?? 1}`).sort(),
-          decisionEpisodeId: src.decisionContext?.decisionEpisodeId ?? null,
-          sessionId: src.decisionContext?.sessionId ?? null
-        }
+        provenance
       }));
       entries.push(entry);
       return entry;

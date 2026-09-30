@@ -52,7 +52,7 @@ export function runScenario({ fixture, archetype, archetypeName, policyName, ste
     metrics.hardViolationCount += violations.length;
     if (violations.length) (metrics.violations ??= []).push({ step, violations });
     metrics.invalidCandidateCount += (d.explanation?.suppressed ?? []).filter((x) => x.includes('filtered')).length;
-    log.append(d, { digest: stateDigest({ events, learnerId: 'SIM', decisionContext: ctx, now, policy: LEARNING_POLICY_V1, selection, mission, tasks, roles, capabilities }) });
+    log.append(d, { events, learnerId: 'SIM', decisionContext: ctx, now, policy: LEARNING_POLICY_V1, selection, mission, tasks, roles, capabilities });
     trace.push(d);
     recordDecisionMetrics(metrics, d, ctx, trace);
 

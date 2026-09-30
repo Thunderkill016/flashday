@@ -14,7 +14,7 @@ import { buildLearnerModel } from '../../src/vnext/learner-model.js';
 import { projectLearnerState, RETENTION_DELAY_MS } from '../../src/vnext/projection.js';
 import { deriveSupportLifecycle } from '../../src/vnext/planner.js';
 import { resolvePolicy } from '../../src/vnext/policy.js';
-import { verifyEventTask, validateTask } from '../../src/vnext/contracts.js';
+import { verifyEventTask, validateTask, canonicalFamilyId } from '../../src/vnext/contracts.js';
 import { contractAttributesFunctions } from '../../src/vnext/evaluators.js';
 import { priorById } from '../../src/vnext/risk-priors.js';
 import { KINDS, PROVENANCE } from './constants.js';
@@ -439,16 +439,21 @@ export function generateCandidates({ learnerId, events, capabilities, tasks, rol
        * B/C filter consumed tasks to a fresh alternate or honest
        * assessment backlog [SAFETY_PRIOR/EXPERIMENTAL]. */
       const consumed = verifiedEventKey.has(keyOf(t));
-      /* HIGH-4 r3: freshness is family-level, not task-level. Re-issuing
-       * a cloned item with a new id but the same promptFamily/context is
-       * NOT a fresh assessment sample — it reuses a revealed family. */
-      const fam = t.promptFamily ?? t.family ?? t.id;
-      const familyConsumed = missionTasks.some((o) =>
-        o !== t && (o.promptFamily ?? o.family ?? o.id) === fam && verifiedEventKey.has(keyOf(o))) ||
-        events.some((e) => e.learnerId === learnerId && e.attempt?.outcome != null && (() => {
-          const et = taskByRev.get(`${e.taskId}@${e.taskRevision}`);
-          return et && et.purpose === 'assessment' && (et.promptFamily ?? et.family ?? et.id) === fam;
-        })());
+      /* HIGH-4 r3 + HIGH-2 r4: freshness is SEMANTIC family-level.
+       * Family identity derives from the canonical contract —
+       * canonicalFamilyId(capabilityId, contextSignature) — so a cloned
+       * assessment with a renamed promptFamily label but the same
+       * contextSignature is still the revealed family. Tasks authored
+       * without a signature fall back to their promptFamily label (the
+       * authored corpus's labels ARE canonicalFamilyId-derived).
+       * Only VERIFIED events consume a family: a malformed/stale raw
+       * event fails verifyEventTask, never enters verifiedEventKey, and
+       * cannot poison freshness forever. */
+      const familyIdOf = (o) => o?.contextSignature
+        ? canonicalFamilyId(o.capabilityId, o.contextSignature)
+        : (o?.promptFamily ?? o?.family ?? o?.id);
+      const fam = familyIdOf(t);
+      const familyConsumed = missionTasks.some((o) => familyIdOf(o) === fam && verifiedEventKey.has(keyOf(o)));
       push({
         kind: KINDS.ASSESSMENT, capabilityId: t.capabilityId,
         facts: f,

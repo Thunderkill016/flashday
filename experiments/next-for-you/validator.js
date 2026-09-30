@@ -13,7 +13,7 @@
 import { projectLearnerState } from '../../src/vnext/projection.js';
 import { deriveSupportLifecycle } from '../../src/vnext/planner.js';
 import { resolvePolicy } from '../../src/vnext/policy.js';
-import { validateTask, verifyEventTask } from '../../src/vnext/contracts.js';
+import { validateTask, verifyEventTask, canonicalFamilyId } from '../../src/vnext/contracts.js';
 import { generateCandidates } from './candidate-generator.js';
 import { hardFilter } from './policies.js';
 import { TIER_OF } from './constants.js';
@@ -213,11 +213,29 @@ export function validateDecision(decision, { events, tasks, capabilities, roles,
     if (ch.kind === 'assessment') {
       if (!byCap.get(ch.capabilityId)?.milestones.transferred) v.push('assessment_without_transfer');
       /* Policy-dependent: production re-probes consumed items; the
-       * strict-fresh variants must never re-sell a consumed task. */
+       * strict-fresh variants must never re-sell a consumed task NOR a
+       * consumed semantic family (HIGH-2 r4). Family identity derives
+       * from canonicalFamilyId(capabilityId, contextSignature) — a
+       * renamed promptFamily on the same signature is the same revealed
+       * family. Only VERIFIED events consume: a malformed/stale event
+       * cannot poison freshness. */
       const policyAllowsReprobe = /a0/.test(decision.selectionPolicyVersion ?? '');
-      const consumed = events.some((e) => e.learnerId === learnerId && e.taskId === ch.taskId &&
-        (e.taskRevision ?? 1) === (ch.taskRevision ?? 1) &&
-        (e.attempt?.outcome != null || e.eventType === 'checkpoint'));
+      const familyIdOf = (o) => o?.contextSignature
+        ? canonicalFamilyId(o.capabilityId, o.contextSignature)
+        : (o?.promptFamily ?? o?.family ?? o?.id);
+      const chosenFamily = task ? familyIdOf(task) : null;
+      const consumed = events.some((e) => {
+        if (e.learnerId !== learnerId) return false;
+        if (!(e.attempt?.outcome != null || e.eventType === 'checkpoint')) return false;
+        if (e.taskId === ch.taskId && (e.taskRevision ?? 1) === (ch.taskRevision ?? 1)) return true;
+        /* family check: resolve the event's task and require it to
+         * verify — unverified/stale evidence cannot consume a family */
+        const et = exactByKey.get(`${e.taskId}@${e.taskRevision ?? 1}`);
+        if (!et || et.purpose !== 'assessment') return false;
+        const cap2 = capById.get(et.capabilityId);
+        if (!cap2 || !verifyEventTask(e, et, cap2)) return false;
+        return chosenFamily != null && familyIdOf(et) === chosenFamily;
+      });
       if (consumed && !policyAllowsReprobe) v.push('assessment_resold_as_fresh');
     }
     if (ch.kind === 'transfer' && byCap.get(ch.capabilityId)?.milestones.transferred) {
