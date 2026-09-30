@@ -241,6 +241,46 @@ service cloud.firestore {
         && (d.mission_run_id == null || validString(d.mission_run_id, 1, 200));
     }
 
+    // vNext decision audit records (008C): compact consumed-decision
+    // provenance — identities, versions, digest, reason codes, shadow
+    // comparison. No learner snapshots, no response text.
+    function validVnextDecision(docId) {
+      let d = request.resource.data;
+      /* Consumed-decision audit docs must carry full provenance — a
+       * null-critical audit record is audit theater (008C HIGH-5). */
+      return hasOnly(['id', 'owner_id', 'learner_id', 'mission_id',
+                      'mission_revision', 'task_id', 'task_revision',
+                      'capability_id', 'selection_policy_version',
+                      'learning_policy_version', 'decision_input_digest',
+                      'decision_episode_id', 'session_id', 'mission_run_id',
+                      'chosen_kind', 'decision_at', 'recorded_at',
+                      'schema_version', 'reason_codes', 'shadow',
+                      'context_version'])
+        && hasAll(['id', 'owner_id', 'learner_id', 'schema_version',
+                   'decision_at', 'recorded_at'])
+        && idMatchesPath(docId)
+        && d.learner_id == request.auth.uid
+        && d.schema_version == 1
+        && d.decision_at is number
+        && d.recorded_at is timestamp
+        && validString(d.mission_id, 1, 200)
+        && d.mission_revision is int && d.mission_revision >= 1
+        && validString(d.task_id, 1, 200)
+        && d.task_revision is int && d.task_revision >= 1
+        && validString(d.capability_id, 1, 200)
+        && validString(d.selection_policy_version, 1, 80)
+        && validString(d.learning_policy_version, 1, 80)
+        && validString(d.decision_input_digest, 71, 71)
+        && d.decision_input_digest.matches('^sha256:[0-9a-f]{64}$')
+        && validString(d.decision_episode_id, 1, 200)
+        && validString(d.session_id, 1, 200)
+        && validString(d.mission_run_id, 1, 200)
+        && validString(d.chosen_kind, 1, 60)
+        && validString(d.context_version, 1, 80)
+        && (d.reason_codes == null || isSmallList(d.reason_codes))
+        && (d.shadow == null || isSmallMap(d.shadow));
+    }
+
     function validProgress(docId) {
       let d = request.resource.data;
       return hasOnly(['id', 'owner_id', 'deck_id', 'payload', 'updated_at', 'created_at'])
@@ -307,6 +347,14 @@ service cloud.firestore {
       allow create: if isOwner(uid) && ownerPinned(uid) && validVnextEvent(docId);
       // Immutable evidence: a client can append but never rewrite or
       // erase history — no update, no delete, not even for the owner.
+      allow update, delete: if false;
+    }
+
+    match /users/{uid}/vnext_decisions/{docId} {
+      allow read: if isOwner(uid);
+      allow create: if isOwner(uid) && ownerPinned(uid) && validVnextDecision(docId);
+      // Append-only audit: a client can record a consumed decision but
+      // never rewrite or erase it — no update, no delete.
       allow update, delete: if false;
     }
 

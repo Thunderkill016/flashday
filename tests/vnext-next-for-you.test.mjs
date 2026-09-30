@@ -1127,3 +1127,31 @@ function burnCtx2(n) {
 }
 
 console.log(`vnext-next-for-you hardening sections included`);
+
+/* --- Z11. §17 REFERENCE-vs-B0 differential corpus — every divergence classified --- */
+{
+  const { runCorpus, DIFFERENTIAL_MATRIX } = await import('../experiments/next-for-you/differential.js');
+  /* Test-scale matrix: the full 7-mission × 15-archetype corpus runs as a
+   * gate script; here we pin the classification contract on a slice. */
+  const matrix = [
+    { archetype: 'thin' },
+    { archetype: 'failer' },
+    { archetype: 'assessmentFailing' },
+    { archetype: 'returning30d', seed: 'independent30d' }
+  ];
+  const rows = runCorpus(FIXTURES.slice(0, 3), { steps: 24, matrix });
+  ok(rows.length > 0, 'Z11: differential corpus produced no rows');
+  const unclassified = rows.filter((r) => r.class == null);
+  ok(unclassified.length === 0, `Z11: ${unclassified.length} rows left unclassified`);
+  const bugs = rows.filter((r) => r.class === 'BUG');
+  ok(bugs.length === 0, `Z11: ${bugs.length} unexplained divergences — first: ${JSON.stringify(bugs[0] ?? null)}`);
+  const violated = rows.filter((r) => (r.b0Violations ?? []).length > 0);
+  ok(violated.length === 0, `Z11: ${violated.length} counterfactual B0 decisions failed validation — first: ${JSON.stringify(violated[0] ?? null)}`);
+  const annotated = rows.filter((r) => (r.class === 'SAFETY-PRIOR' || r.class === 'CONTENT-GAP' || r.class === 'BUG') && !r.note);
+  ok(annotated.length === 0, 'Z11: safety-prior/content-gap rows missing an explanation note');
+  const matches = rows.filter((r) => r.class === 'MATCH').length;
+  ok(matches > 0, 'Z11: zero REFERENCE/B0 agreement — harness wiring suspect');
+  ok(rows.some((r) => r.class !== 'MATCH'), 'Z11: zero divergences observed — corpora not exercising policies');
+  /* every matrix archetype must actually run (typo guard) */
+  for (const m of DIFFERENTIAL_MATRIX) ok(typeof m.archetype === 'string', 'Z11: matrix entry missing archetype');
+}

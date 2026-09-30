@@ -132,3 +132,115 @@ export async function loadVnextEvents(fs, uid) {
   events.sort((a, b) => a.occurredAt - b.occurredAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   return events;
 }
+
+/* ── Decision audit records (mission 008C, spec §11–§13) ─────────────
+ *
+ * users/{uid}/vnext_decisions/{decisionId}
+ *
+ * Compact append-only provenance for consumed Next For You decisions:
+ * identities, versions, the canonical input digest, episode/session
+ * ids, the chosen kind, reason codes, and the shadow comparison when
+ * the run served REFERENCE while B0 evaluated the same state.
+ *
+ *   - doc id = record.decisionId → identical re-delivery dedupes, a
+ *     conflicting same-id write throws (audit identity is not
+ *     last-write-wins — same boundary as the event log);
+ *   - create + read only — update and delete are denied by rules;
+ *   - owner_id pins to the path uid; learner_id pins to the same uid;
+ *   - NO full canonical input snapshot (§13): the digest + version/
+ *     revision identities are the join keys back to the append-only
+ *     event log and versioned contracts.
+ */
+export const VNEXT_DECISIONS_SCHEMA = 1;
+
+export const vnextDecisionsPath = (uid) => `users/${uid}/vnext_decisions`;
+export const vnextDecisionPath = (uid, decisionId) => `${vnextDecisionsPath(uid)}/${decisionId}`;
+
+export function toDecisionDoc(record, uid, { recordedAt } = {}) {
+  return {
+    id: record.decisionId,
+    owner_id: uid,
+    learner_id: record.learnerId,
+    mission_id: record.missionId ?? null,
+    mission_revision: record.missionRevision ?? null,
+    task_id: record.taskId ?? null,
+    task_revision: record.taskRevision ?? null,
+    capability_id: record.capabilityId ?? null,
+    selection_policy_version: record.selectionPolicyVersion ?? null,
+    learning_policy_version: record.learningPolicyVersion ?? null,
+    decision_input_digest: record.decisionInputDigest ?? null,
+    decision_episode_id: record.decisionEpisodeId ?? null,
+    session_id: record.sessionId ?? null,
+    mission_run_id: record.missionRunId ?? null,
+    chosen_kind: record.chosenKind ?? null,
+    decision_at: record.timestamp ?? null,
+    recorded_at: recordedAt ?? null,
+    schema_version: VNEXT_DECISIONS_SCHEMA,
+    reason_codes: record.reasonCodes ?? null,
+    shadow: record.shadow ?? null,
+    context_version: record.contextVersion ?? null
+  };
+}
+
+export function fromDecisionDoc(d) {
+  return {
+    decisionId: d.id,
+    learnerId: d.learner_id,
+    missionId: d.mission_id ?? null,
+    missionRevision: d.mission_revision ?? null,
+    taskId: d.task_id ?? null,
+    taskRevision: d.task_revision ?? null,
+    capabilityId: d.capability_id ?? null,
+    selectionPolicyVersion: d.selection_policy_version ?? null,
+    learningPolicyVersion: d.learning_policy_version ?? null,
+    decisionInputDigest: d.decision_input_digest ?? null,
+    decisionEpisodeId: d.decision_episode_id ?? null,
+    sessionId: d.session_id ?? null,
+    missionRunId: d.mission_run_id ?? null,
+    chosenKind: d.chosen_kind ?? null,
+    timestamp: d.decision_at ?? null,
+    reasonCodes: d.reason_codes ?? null,
+    shadow: d.shadow ?? null,
+    contextVersion: d.context_version ?? null
+  };
+}
+
+const DECISION_DOC_FIELDS = [
+  'id', 'owner_id', 'learner_id', 'mission_id', 'mission_revision',
+  'task_id', 'task_revision', 'capability_id', 'selection_policy_version',
+  'learning_policy_version', 'decision_input_digest', 'decision_episode_id',
+  'session_id', 'mission_run_id', 'chosen_kind', 'decision_at',
+  'schema_version', 'reason_codes', 'shadow', 'context_version'
+];
+
+const decisionDocFingerprint = (d) =>
+  JSON.stringify(DECISION_DOC_FIELDS.map((k) => [k, d[k] ?? null]));
+
+export function decisionDocMatches(docData, expected) {
+  return decisionDocFingerprint(docData) === decisionDocFingerprint(expected);
+}
+
+/* Append one audit record idempotently: create if absent, dedupe an
+ * identical re-delivery, throw on same-id/different-content. */
+export async function appendVnextDecision(fs, uid, record, opts = {}) {
+  const data = toDecisionDoc(record, uid, { ...opts, recordedAt: fs.serverTimestamp() });
+  const ref = fs.doc(fs.db, vnextDecisionPath(uid, record.decisionId));
+  return fs.runTransaction(fs.db, async (tx) => {
+    const snap = await tx.get(ref);
+    if (snap.exists()) {
+      if (!decisionDocMatches(snap.data(), data)) {
+        throw new Error(`vnext decision conflict '${record.decisionId}' — same id, different content; refusing to overwrite audit`);
+      }
+      return { appended: 0, deduped: 1 };
+    }
+    tx.set(ref, data);
+    return { appended: 1, deduped: 0 };
+  });
+}
+
+export async function loadVnextDecisions(fs, uid) {
+  const snap = await fs.getDocs(fs.collection(fs.db, vnextDecisionsPath(uid)));
+  return snap.docs
+    .map((d) => fromDecisionDoc(d.data()))
+    .sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0) || (a.decisionId < b.decisionId ? -1 : 1));
+}

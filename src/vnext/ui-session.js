@@ -39,7 +39,15 @@ import { bindAttempt, bindObservation } from './bind.js';
 import { emittedEventType, verifyEventTask } from './contracts.js';
 import { evaluateAttempt, EVALUATOR_VERSION } from './evaluators.js';
 import { answerBearing, conditionsViolated } from './evidence.js';
-import { createMemoryEventStore, createMemoryRunStore } from './store-memory.js';
+import {
+  createMemoryEventStore, createMemoryRunStore, createMemoryDecisionStore, eventFingerprint
+} from './store-memory.js';
+import {
+  SELECTION_MODES, selectNextTask, decisionAuditRecord
+} from './next-for-you/selector.js';
+import { emptyContext, normalizeContext, consumeDecision } from './next-for-you/decision-context.js';
+import { createDecisionLog } from './next-for-you/decision-log.js';
+import { POLICY_VERSIONS } from './next-for-you/constants.js';
 
 /* Purposes that may offer pre-commit support in v0. A used control
  * always leaves a support_use event plus a stamped snapshot — the offer
@@ -78,26 +86,66 @@ export function createMissionSession({
   now = () => Date.now(),
   eventStore = createMemoryEventStore(),
   runStore = createMemoryRunStore(),
-  idGen = defaultIdGen
+  idGen = defaultIdGen,
+  /* 008C §3/§19: 'reference' (default — the shipped runner, unchanged),
+   * 'b0' (hardened Next For You engine), 'shadow_b0' (serve reference,
+   * evaluate B0 on the same pre-decision state, log the comparison). */
+  selectionMode = SELECTION_MODES.REFERENCE,
+  /* Selection-config tunables for B0 (starvationGuard, budgets…). */
+  selectionConfig = {},
+  /* Optional sinks: shadowSink(comparison) per SHADOW_B0 selection;
+   * decisionStore.append(record) for consumed-decision audit (§11). */
+  shadowSink = null,
+  decisionStore = null,
+  /* §21: B0 decisions run through the independent validator; a hard
+   * violation fails closed instead of serving the task. */
+  validateDecisions = true
 }) {
   const events = [];
   let run = null;
   let started = false;
+  const mode = Object.values(SELECTION_MODES).includes(selectionMode) ? selectionMode : SELECTION_MODES.REFERENCE;
   // Session-local UI state — never evidence. liveTask is the task the
   // learner is looking at; committed remembers the just-committed task
   // so the feedback phase renders IT even though the selector has
   // already consumed it. A reload drops this state harmlessly: anything
   // uncommitted simply did not happen.
-  let liveTask = null;          // { key, task, cap }
+  let liveTask = null;          // { key, task, cap, decision, decisionInput }
   let committed = null;         // { task, cap, evalResult }
   let phase = 'prompt';         // 'prompt' | 'feedback'
+  let selectionCalls = 0;       // BLOCKER-1 regression seam: real selector evaluations
   let supportSnapshot = freshSupport();
   let supportCounts = new Map();
   let playCount = 0;
   let promptShownAt = null;
 
+  /* Decision bookkeeping (008C §5): persisted on the run record, never
+   * evidence. decisionContext is session-local working state synced
+   * from run.selection; the log + shadow trail are append-only. */
+  let decisionContext = null;
+  const decisionLog = createDecisionLog();
+  const shadowLog = [];
+
+  /* Audit-store boundary (final-review invariant): a B0/SHADOW session
+   * must never consume a decision with no audit trail at all — the
+   * record at least lands in a session-scoped memory store. REFERENCE
+   * is allowed audit-free (its decisions are production bookkeeping,
+   * not engine commitments). Callers wanting durable/external audit
+   * pass an explicit decisionStore. */
+  const auditStore = decisionStore
+    ?? (mode === SELECTION_MODES.REFERENCE ? null : createMemoryDecisionStore());
+
   const taskByKey = new Map(tasks.map((t) => [keyOf(t), t]));
   const capById = new Map(capabilities.map((c) => [c.id, c]));
+
+  /* Episode identity: ONE persisted decision episode per mission run —
+   * episode budgets are tied to an explicit run/session boundary, never
+   * to wall-clock (BLOCKER-3: a render crossing UTC midnight must not
+   * silently reset diagnostic/repair counters). The episode id is
+   * minted at run creation and stored on run.selection, so reloads,
+   * clock jumps and repeated renders all observe the same episode. */
+  const episodeIdFor = () => `ep:${run?.id ?? 'run'}`;
+  const sessionIdFor = () => `ses:${run?.id ?? 'run'}`;
 
   const attemptCountFor = (taskKey) =>
     events.filter(
@@ -120,14 +168,134 @@ export function createMissionSession({
   };
 
   const select = () => {
-    const sel = nextMissionTask({
+    selectionCalls += 1;
+    if (mode === SELECTION_MODES.REFERENCE) {
+      const sel = nextMissionTask({
+        learnerId, mission, tasks, capabilities,
+        events, riskPriors, now: now(), policy
+      });
+      if (sel.status !== 'ready') return { sel, task: null, cap: null };
+      const task = taskByKey.get(`${sel.taskId}@${sel.taskRevision}`);
+      const cap = task ? capById.get(task.capabilityId) : null;
+      return { sel, task, cap };
+    }
+    /* B0 / SHADOW_B0: one immutable pre-decision state feeds the engine,
+     * its validation, and the audit digest (selector.engineState). The
+     * episode is pinned to the persisted run — a render that never
+     * consumes changes nothing (§6), and the wall clock alone can never
+     * roll it. `decisionNow` is resolved exactly once per selection so
+     * context, policy state and audit timestamps share one instant. */
+    const decisionNow = now();
+    if (!decisionContext) {
+      decisionContext = emptyContext(
+        run?.selection?.decisionEpisodeId ?? episodeIdFor(),
+        sessionIdFor()
+      );
+    }
+    const input = {
       learnerId, mission, tasks, capabilities,
-      events, riskPriors, now: now(), policy
+      events, riskPriors, policy,
+      selection: run?.selection?.config ?? selectionConfig,
+      decisionContext, now: decisionNow
+    };
+    const sel = selectNextTask({
+      mode, ...input, shadowSink,
+      validate: validateDecisions
     });
-    if (sel.status !== 'ready') return { sel, task: null, cap: null };
+    if (sel.shadow) {
+      /* A render re-selects without consuming — an identical back-to-back
+       * comparison carries no new information; keep the log signal-only
+       * (bounded, deduped consecutive duplicates). */
+      const last = shadowLog.at(-1);
+      const same = last
+        && last.sameTask === sel.shadow.sameTask
+        && last.reference?.task === sel.shadow.reference?.task
+        && last.b0?.task === sel.shadow.b0?.task
+        && last.b0?.kind === sel.shadow.b0?.kind;
+      if (!same) {
+        shadowLog.push(sel.shadow);
+        if (shadowLog.length > 64) shadowLog.shift();
+      }
+    }
+    /* decisionInput is the ENGINE state (mission-scoped caps + derived
+     * roles + the pre-consume context) — the exact object the decision,
+     * its validation, and its digest all saw. Never the raw input:
+     * the audit digest must equal the state bound into decisionId. */
+    const decisionInput = sel.engineInput ?? null;
+    if (sel.status !== 'ready') return { sel, task: null, cap: null, input: decisionInput, digest: sel.inputDigest ?? null };
     const task = taskByKey.get(`${sel.taskId}@${sel.taskRevision}`);
     const cap = task ? capById.get(task.capabilityId) : null;
-    return { sel, task, cap };
+    return { sel, task, cap, input: decisionInput, digest: sel.inputDigest ?? null };
+  };
+
+  /* §8 + BLOCKER-2: the displayed decision is consumed exactly once —
+   * when the learner ACTS — and the consumption is a crash-consistent
+   * two-phase commit:
+   *
+   *   1. journal  — run.selection.pendingConsumption (decision id,
+   *      decide-time digest, deterministic expected event ids, the
+   *      audit payload, the derived next context) persists BEFORE any
+   *      evidence lands;
+   *   2. evidence — appendAll() idempotent evidence append;
+   *   3. audit    — decisionStore.append() idempotent audit append;
+   *   4. commit   — advance DecisionContext, clear the marker, saveRun.
+   *
+   * A crash between steps replays through init()'s reconcile: full
+   * evidence → finish audit + apply journaled context; no evidence →
+   * roll the marker back and leave the decision unconsumed; partial →
+   * fail closed. Nothing here fabricates learner evidence. */
+  const consumeLiveDecision = async (bound) => {
+    const d = liveTask?.decision;
+    const input = liveTask?.decisionInput;
+    if (!d || !decisionContext) {
+      if (bound?.length) await appendAll(bound);
+      return;
+    }
+    const consumedAt = now();
+    const { context: next, consumed } = consumeDecision(decisionContext, d, consumedAt);
+    if (!consumed) {
+      if (bound?.length) await appendAll(bound);
+      return;
+    }
+    /* Fail-closed audit boundary (008B decision-log semantics): append
+     * recomputes the digest from the recorded decide-time input and
+     * throws on missing provenance — an unverifiable record never lands. */
+    decisionLog.append(d, input);
+    const record = decisionAuditRecord(d, {
+      learnerId,
+      missionId: mission.id,
+      missionRevision: mission.revision ?? null,
+      missionRunId: run?.id ?? null,
+      sessionId: input?.decisionContext?.sessionId ?? sessionIdFor(),
+      timestamp: consumedAt,
+      shadow: d.shadow ?? null,
+      digest: liveTask?.decisionDigest ?? null,
+      input
+    });
+    if (run?.selection) {
+      /* The journal pins the CONTENT it expects, not just ids (HIGH-3):
+       * an id-only marker would bless any bytes that happen to share
+       * the id. The fingerprint is over the stamped event (missionRunId
+       * included) — exactly what appendAll will persist. */
+      const stamped = (bound ?? []).map((e) => ({ ...e, missionRunId: run?.id ?? null }));
+      run.selection.pendingConsumption = {
+        decisionId: d.decisionId,
+        decisionDigest: liveTask?.decisionDigest ?? null,
+        expectedEvents: stamped.map((e) => ({ id: e.id, fingerprint: eventFingerprint(e) })),
+        auditRecord: record,
+        nextContext: next,
+        consumedAt
+      };
+      await runStore.saveRun(run);
+    }
+    if (bound?.length) await appendAll(bound);
+    await auditStore?.append?.(record);
+    decisionContext = next;
+    if (run?.selection) {
+      run.selection.decisionContext = decisionContext;
+      run.selection.pendingConsumption = null;
+    }
+    await runStore.saveRun(run);
   };
 
   const resetAttemptState = () => {
@@ -143,9 +311,9 @@ export function createMissionSession({
   const actingTask = () => {
     if (phase === 'feedback' && committed) return committed;
     if (liveTask) return liveTask;
-    const { sel, task, cap } = select();
+    const { sel, task, cap, input, digest } = select();
     if (sel.status !== 'ready' || !task || !cap) return null;
-    liveTask = { key: keyOf(task), task, cap };
+    liveTask = { key: keyOf(task), task, cap, decision: sel.decision ?? null, decisionInput: input ?? null, decisionDigest: digest ?? null };
     return liveTask;
   };
 
@@ -268,6 +436,119 @@ export function createMissionSession({
           startedAt: now(),
           endedAt: null
         };
+        /* Selection bookkeeping mints WITH the run (BLOCKER-1): an open
+         * run carrying no selection block predates this code and ran
+         * the shipped reference planner by definition — the absence of
+         * `selection` is itself the legacy signal. */
+        run.selection = {
+          version: 'vnext.run-selection.v1',
+          mode,
+          selectionPolicyVersion: mode === SELECTION_MODES.REFERENCE ? 'production.nextMissionTask' : POLICY_VERSIONS.B,
+          decisionEpisodeId: episodeIdFor(),
+          config: { ...selectionConfig },
+          decisionContext: null,
+          pendingConsumption: null
+        };
+        await runStore.saveRun(run);
+      }
+      /* HIGH-6 — selection mode + policy version pin to the run at
+       * creation. Reopening an open run under another ?mode= must never
+       * silently switch policy inside one trajectory (a B0 run reopened
+       * as reference contaminates the pilot/control record). A mode
+       * change requires an explicit new run. */
+      const pinnedMode = run.selection?.mode ?? null;
+      const expectedPolicyVersion = mode === SELECTION_MODES.REFERENCE
+        ? 'production.nextMissionTask'
+        : POLICY_VERSIONS.B;
+      if (pinnedMode == null) {
+        /* Legacy open run — created before selection bookkeeping
+         * existed, so its trajectory is historical REFERENCE by
+         * definition. Reference may continue it (and pins the record);
+         * anything else must mint an explicit new run. */
+        if (mode !== SELECTION_MODES.REFERENCE) {
+          throw new Error(
+            `selection_mode_legacy: open run '${run.id}' predates selection bookkeeping and ran under 'reference' — requested '${mode}' refuses to reinterpret an open trajectory; abandon/supersede mints a new run`
+          );
+        }
+      } else if (pinnedMode !== mode) {
+        throw new Error(
+          `selection_mode_pinned: run '${run.id}' was created under '${pinnedMode}' but requested '${mode}' — refusing to switch policy inside an open run; restart mints a new run`
+        );
+      }
+      const pinnedVersion = run.selection?.selectionPolicyVersion ?? null;
+      if (pinnedVersion != null && pinnedVersion !== expectedPolicyVersion) {
+        throw new Error(
+          `selection_policy_version_pinned: run '${run.id}' is pinned to selection policy '${pinnedVersion}' but '${mode}' implies '${expectedPolicyVersion}' — refusing to change policy semantics inside an open run`
+        );
+      }
+
+      /* BLOCKER-2 — recoverable consumption journal. A pending marker
+       * means the process died between pending-write and the final
+       * context save. Reconcile against the durable evidence log before
+       * any new selection — id PRESENCE is not the trust boundary, the
+       * landed event must match the journaled fingerprint (HIGH-3):
+       *   all expected evidence present AND content-identical → finish
+       *     audit + apply the journaled next context (idempotent —
+       *     audit append dedupes);
+       *   no evidence landed → the consumption never happened; clear
+       *     the marker and leave the decision unconsumed;
+       *   partial evidence, empty journal, or same-id/different-content
+       *     → ambiguous boundary, fail closed. */
+      const pending = run.selection?.pendingConsumption;
+      let reconciledCtx = null;
+      if (pending) {
+        const byId = new Map(events.filter((e) => e.learnerId === learnerId).map((e) => [e.id, e]));
+        const expected = pending.expectedEvents ?? [];
+        const reconcileConflict = (why) => {
+          throw new Error(`consumption_reconcile_conflict: ${why} — refusing to guess the consumption outcome`);
+        };
+        if (expected.length === 0) {
+          reconcileConflict(`journal '${pending.decisionId}' carries no expected evidence`);
+        }
+        const missing = [];
+        const mismatched = [];
+        for (const x of expected) {
+          const landed = byId.get(x.id);
+          if (!landed) missing.push(x.id);
+          else if (x.fingerprint == null || eventFingerprint(landed) !== x.fingerprint) mismatched.push(x.id);
+        }
+        if (mismatched.length > 0) {
+          reconcileConflict(
+            `journal '${pending.decisionId}' found ${mismatched.length} expected event(s) with altered content (${mismatched.join(', ')})`
+          );
+        }
+        if (missing.length === 0) {
+          await auditStore?.append?.(pending.auditRecord);
+          reconciledCtx = normalizeContext(pending.nextContext);
+        } else if (missing.length === expected.length) {
+          reconciledCtx = null;
+        } else {
+          reconcileConflict(
+            `journal '${pending.decisionId}' landed ${expected.length - missing.length}/${expected.length} expected events — ambiguous partial boundary`
+          );
+        }
+      }
+
+      /* §5/§32: the run carries versioned selection bookkeeping. A run
+       * minted before this schema (or under another store) gets an
+       * empty versioned context — starvation/diagnostic counters prior
+       * to migration are honestly unknown; nothing reconstructs fake
+       * past decisions. Episode id pins to the run, never the clock
+       * (BLOCKER-3). */
+      const storedCtx = reconciledCtx ?? normalizeContext(run.selection?.decisionContext);
+      const episodeId = run.selection?.decisionEpisodeId ?? episodeIdFor();
+      decisionContext = storedCtx ?? emptyContext(episodeId, sessionIdFor());
+      const selBlock = {
+        version: 'vnext.run-selection.v1',
+        mode,
+        selectionPolicyVersion: mode === SELECTION_MODES.REFERENCE ? 'production.nextMissionTask' : POLICY_VERSIONS.B,
+        decisionEpisodeId: episodeId,
+        config: run.selection?.config ?? { ...selectionConfig },
+        decisionContext,
+        pendingConsumption: null
+      };
+      if (JSON.stringify(run.selection) !== JSON.stringify(selBlock)) {
+        run.selection = selBlock;
         await runStore.saveRun(run);
       }
       started = run.learnerName != null || !session.needsName();
@@ -288,11 +569,40 @@ export function createMissionSession({
     },
 
     runInfo() {
-      return run ? { ...run } : null;
+      return run ? { ...run, selection: run.selection ? structuredClone(run.selection) : undefined } : null;
     },
 
     log() {
       return [...events];
+    },
+
+    /* 008C introspection (bookkeeping, never evidence): consumed-decision
+     * audit entries, the bounded shadow trail, and a snapshot of the
+     * active DecisionContext for tests/dev tooling. */
+    decisions() {
+      return [...decisionLog.entries];
+    },
+
+    /* The persisted audit trail as the audit store sees it (async —
+     * store contract). B0/SHADOW always have one (memory fallback);
+     * REFERENCE legitimately reports none. */
+    async auditTrail() {
+      return auditStore ? auditStore.list(learnerId) : [];
+    },
+
+    shadowTrail() {
+      return [...shadowLog];
+    },
+
+    selectionContext() {
+      return decisionContext ? structuredClone(decisionContext) : null;
+    },
+
+    /* §7 introspection: how many real selector evaluations ran. One
+     * live task on screen must amortize to zero new evaluations —
+     * render is not scheduling. */
+    selectionStats() {
+      return { selectCalls: selectionCalls };
     },
 
     projection() {
@@ -313,13 +623,37 @@ export function createMissionSession({
       if (phase === 'feedback' && committed) {
         return taskScreen(committed.task, committed.evalResult);
       }
-      const { sel, task, cap } = select();
+      /* §7 live-decision lock (BLOCKER-1): while a live task is on
+       * screen, render IT — the selector never re-runs underneath an
+       * open interaction no matter which events landed since the
+       * decision (support_use, play). Rendering is not scheduling:
+       * 100 renders of one live task cost zero selection evaluations.
+       * Only view()/commit() consumption clears the lock and re-arms
+       * the selector. */
+      if (liveTask && phase === 'prompt') {
+        const locked = liveTask.task;
+        if (EXPOSURE_PURPOSES.has(locked.purpose)) {
+          return {
+            type: 'input',
+            taskId: locked.id,
+            taskRevision: locked.revision ?? 1,
+            capabilityId: locked.capabilityId,
+            purpose: locked.purpose,
+            prompt: promptSpec(locked),
+            supportOffered: supportOffered(locked)
+          };
+        }
+        return taskScreen(locked);
+      }
+      const { sel, task, cap, input, digest } = select();
       if (sel.status === 'ready' && task && cap) {
         const key = keyOf(task);
         if (liveTask?.key !== key) {
           // New task on screen → fresh attempt state. Same task → keep
-          // the support already used on this attempt.
-          liveTask = { key, task, cap };
+          // the support already used on this attempt. The decision the
+          // selector produced rides on the live task (§7 lock): support,
+          // play, view and commit all act against that exact decision.
+          liveTask = { key, task, cap, decision: sel.decision ?? null, decisionInput: input ?? null, decisionDigest: digest ?? null };
           phase = 'prompt';
           committed = null;
           resetAttemptState();
@@ -362,10 +696,13 @@ export function createMissionSession({
     },
 
     /* Input/notice screens mint an exposure on explicit confirm —
-     * viewing is honest data, but nothing about it is an attempt. */
+     * viewing is honest data, but nothing about it is an attempt.
+     * §7 lock: acts on the live task the learner actually saw — never
+     * re-selects underneath an open interaction. */
     async view() {
-      const { sel, task, cap } = select();
-      if (sel.status !== 'ready' || !task || !cap) return session.screen();
+      const active = actingTask();
+      if (!active || phase !== 'prompt') return session.screen();
+      const { task, cap } = active;
       if (!EXPOSURE_PURPOSES.has(task.purpose)) return session.screen();
       const bound = bindObservation(task, cap, {
         id: evtId(run?.id, task.id, `r${task.revision ?? 1}`, 'exp'),
@@ -374,7 +711,10 @@ export function createMissionSession({
         eventType: 'exposure',
         attempt: { attemptId: null }
       });
-      await appendAll([bound]);
+      /* The exposure commit IS the consumption act (§6/§8): journal →
+       * evidence → audit → context persist before the next selection is
+       * exposed (BLOCKER-2 ordering). */
+      await consumeLiveDecision([bound]);
       liveTask = null;
       return session.screen();
     },
@@ -482,7 +822,11 @@ export function createMissionSession({
         attempt: { attemptId },
         feedback: { given: true, target: missed }
       });
-      await appendAll([attemptEvent, feedbackEvent]);
+      /* The committed attempt IS the consumption act (§6/§8): journal →
+       * evidence → audit → context in one crash-consistent unit before
+       * the feedback screen renders — a render can never be the thing
+       * that counted (BLOCKER-2 ordering). */
+      await consumeLiveDecision([attemptEvent, feedbackEvent]);
       committed = { task, cap, evalResult, attemptId };
       phase = 'feedback';
       return session.screen();

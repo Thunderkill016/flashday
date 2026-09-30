@@ -21,6 +21,7 @@ import { projectLearnerState } from "../src/vnext/projection.js";
 import { evaluateClaim } from "../src/vnext/pilot-harness.js";
 import { bindAttempt, bindObservation } from "../src/vnext/bind.js";
 import { appendVnextEvents, loadVnextEvents, toEventDoc, vnextEventPath } from "../src/vnext/persist.js";
+import { appendVnextDecision, loadVnextDecisions, toDecisionDoc, vnextDecisionPath } from "../src/vnext/persist.js";
 import { TASKS_MEET_PERSON } from "../src/vnext/fixtures.js";
 
 if (!process.env.FIRESTORE_EMULATOR_HOST)
@@ -112,7 +113,71 @@ try {
   const claimB = evaluateClaim(UID, loaded, CAPABILITIES, TASKS, ASK);
   assert.deepEqual(claimB, claimA, "claim must survive persist → reload → replay");
 
-  console.log("Firestore vNext emulator PASS: immutable evidence, owner+learner pinning, idempotent append, replay parity");
+  /* ── vnext_decisions audit trail (008C §12/§13): append-only
+   * provenance docs under the same owner/learner pinning — a client
+   * can record a consumed decision but never rewrite or erase it. ── */
+  const auditRecord = {
+    decisionId: "dec.emu.1", learnerId: UID, missionId: "mission.meet_new_person",
+    missionRevision: 1, taskId: "task.meet.diagnostic.ask_name", taskRevision: 1,
+    capabilityId: ASK, selectionPolicyVersion: "vnext.next-for-you.b0.v1",
+    learningPolicyVersion: "vnext.policy.v1", decisionInputDigest: "sha256:" + "ab".repeat(32),
+    decisionEpisodeId: "ep.emu", sessionId: "ses.emu", missionRunId: "run.emu",
+    chosenKind: "diagnostic_probe", timestamp: T0 + 2000,
+    reasonCodes: ["baseline_probe"], shadow: null, contextVersion: "vnext.decision-context.v2"
+  };
+  const decDoc = { ...toDecisionDoc(auditRecord, UID), recorded_at: sdk.serverTimestamp() };
+  await assertSucceeds(sdk.setDoc(sdk.doc(alice.db, vnextDecisionPath(UID, "dec.emu.1")), decDoc));
+  await assertSucceeds(sdk.getDoc(sdk.doc(alice.db, vnextDecisionPath(UID, "dec.emu.1"))));
+
+  /* immutable audit: update, re-set and delete all denied — even for the owner */
+  await assertFails(sdk.updateDoc(sdk.doc(alice.db, vnextDecisionPath(UID, "dec.emu.1")), { chosen_kind: "refresh" }));
+  await assertFails(sdk.setDoc(sdk.doc(alice.db, vnextDecisionPath(UID, "dec.emu.1")), decDoc));
+  await assertFails(sdk.deleteDoc(sdk.doc(alice.db, vnextDecisionPath(UID, "dec.emu.1"))));
+
+  /* cross-owner, anonymous and learner_id forgery denied */
+  await assertFails(sdk.getDoc(sdk.doc(bob.db, vnextDecisionPath(UID, "dec.emu.1"))));
+  await assertFails(sdk.setDoc(sdk.doc(bob.db, `users/bob/vnext_decisions/dec.bob`), { ...decDoc, id: "dec.bob" }));
+  await assertFails(sdk.getDoc(sdk.doc(anon.db, vnextDecisionPath(UID, "dec.emu.1"))));
+  await assertFails(sdk.setDoc(sdk.doc(alice.db, vnextDecisionPath(UID, "dec.emu.2")), { ...decDoc, id: "dec.emu.2", learner_id: "mallory" }));
+
+  /* malformed audit docs denied: schema bump, smuggled field, bad types */
+  await assertFails(sdk.setDoc(sdk.doc(alice.db, vnextDecisionPath(UID, "dec.emu.3")), { ...decDoc, id: "dec.emu.3", schema_version: 2 }));
+  await assertFails(sdk.setDoc(sdk.doc(alice.db, vnextDecisionPath(UID, "dec.emu.4")), { ...decDoc, id: "dec.emu.4", smuggled: true }));
+  await assertFails(sdk.setDoc(sdk.doc(alice.db, vnextDecisionPath(UID, "dec.emu.5")), { ...decDoc, id: "dec.emu.5", decision_at: "not-a-number" }));
+
+  /* HIGH-5: a consumed-decision audit missing critical provenance is
+   * denied — nulls and absent fields alike. */
+  for (const [i, field] of ['mission_id', 'task_id', 'capability_id',
+    'selection_policy_version', 'learning_policy_version', 'decision_input_digest',
+    'decision_episode_id', 'session_id', 'mission_run_id', 'chosen_kind',
+    'context_version', 'mission_revision', 'task_revision'].entries()) {
+    await assertFails(sdk.setDoc(sdk.doc(alice.db, vnextDecisionPath(UID, `dec.null.${i}`)), { ...decDoc, id: `dec.null.${i}`, [field]: null }));
+    const { [field]: _drop, ...rest } = decDoc;
+    await assertFails(sdk.setDoc(sdk.doc(alice.db, vnextDecisionPath(UID, `dec.absent.${i}`)), { ...rest, id: `dec.absent.${i}` }));
+  }
+  /* digest must be a real sha256 — wrong length or characters denied */
+  await assertFails(sdk.setDoc(sdk.doc(alice.db, vnextDecisionPath(UID, "dec.emu.7")), { ...decDoc, id: "dec.emu.7", decision_input_digest: "sha256:nothex" }));
+  await assertFails(sdk.setDoc(sdk.doc(alice.db, vnextDecisionPath(UID, "dec.emu.8")), { ...decDoc, id: "dec.emu.8", decision_input_digest: "sha256:" + "ab".repeat(31) }));
+
+  /* real adapter: idempotent append dedupes, a conflicting same-id
+   * write throws rather than overwriting the audit. */
+  const decAppend = await appendVnextDecision(alice, UID, { ...auditRecord, decisionId: "dec.emu.6" });
+  assert.equal(decAppend.appended, 1);
+  const decRetry = await appendVnextDecision(alice, UID, { ...auditRecord, decisionId: "dec.emu.6" });
+  assert.equal(decRetry.appended, 0, "retried decision append must dedupe");
+  assert.equal(decRetry.deduped, 1);
+  let conflictThrew = false;
+  try {
+    await appendVnextDecision(alice, UID, { ...auditRecord, decisionId: "dec.emu.6", chosenKind: "refresh" });
+  } catch { conflictThrew = true; }
+  assert.ok(conflictThrew, "same decisionId with different content must throw, not overwrite");
+
+  const decLoaded = await loadVnextDecisions(alice, UID);
+  assert.equal(decLoaded.length, 2, "dec.emu.1 + dec.emu.6 loaded");
+  assert.equal(decLoaded.find((r) => r.decisionId === "dec.emu.6")?.decisionInputDigest, auditRecord.decisionInputDigest,
+    "decide-time digest must survive the persist → reload round-trip");
+
+  console.log("Firestore vNext emulator PASS: immutable evidence, owner+learner pinning, idempotent append, replay parity, decision audit");
 } finally {
   await environment.cleanup();
 }
