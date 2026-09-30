@@ -264,8 +264,8 @@ Post-review round 2 (revision pinning + frozen snapshot): PASS at
 
 ### EXACT-HEAD CI
 PR #71 heads: `f5cdf15` GREEN (push + pull_request); `ff779ec273f8`
-GREEN (both triggers). Post-review round-2 head: re-verified below —
-CI pending at push time — see checkpoint 003 and PR checks.
+GREEN (both triggers); review round-2 head `9e949e1` GREEN (both
+triggers — verify runs 36766949754 push + 36766954507 pull_request).
 
 ### KNOWN LIMITATIONS
 - Five required findings remain as named authoring debt (2 correction
