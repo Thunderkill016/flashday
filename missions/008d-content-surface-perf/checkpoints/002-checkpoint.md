@@ -27,9 +27,11 @@ trust-boundary recompute unchanged).
 2. HIGH — slice proof upgraded: runtime SLICE section drives
    createMissionSession with the injected test clock and consumes REAL
    B0 selections through the reachable chain — baseline → +25h → lagged
-   delayed retest MISSED (the retest is the attributed failure) →
-   authored remediation served under refresh (support_demand minted
-   alongside; B0's frozen ranking picks the repair surface) → fresh
+   delayed retest MISSED (the retest is the attributed failure;
+   task.time.delayed.hear declares only understand_clock_time, so this
+   miss mints NO support_demand — that path is proven separately by the
+   engine-level Z12 retrieval-hear miss) → authored remediation served
+   under refresh (B0's frozen ranking picks the repair surface) → fresh
    transfer → fresh assessment → mission close. Audit trail asserted:
    repair-kind decision for task.time.remediation.hear + assessment
    decision for task.time.assessment.hear, all with sha256 digests.
