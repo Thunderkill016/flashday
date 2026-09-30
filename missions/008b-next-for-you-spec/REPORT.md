@@ -181,3 +181,28 @@ counterfactual differences are descriptive, not causal.
 
 ## Final result
 Completed; required verification green on ending SHA.
+
+---
+
+## Round-2 hardening (post-review 5911702205, head 557bca4)
+
+13 findings → reproduced red-first → fixed → green. New/updated
+semantics in `docs/specs/next-for-you-v0.md` §12. Suite: 907 checks
+(sections K–Y added). `verify:full` PASS; GitHub CI green on 557bca4.
+Production planner: zero diff vs main.
+
+| Finding | Fix |
+|---------|-----|
+| replay clock leak | `replayAt` pins `now=T` (replay.js) |
+| no revision stamps | `chosen.taskRevision` + `missionId@rev`; validator exact-match |
+| weak digest | SHA-256 canonical input snapshot (decision-log.js) |
+| registry fail-open | pre-model integrity → `blocked` (generator) |
+| demand provenance | `chosen.demandProvenance` exact identity |
+| blocked≡idle | distinct terminal kinds + `fabricated_idle` violation |
+| A skips filters | shared `hardFilter`, `assessmentMode` split |
+| freshness mislabeled | A=production re-probe, B/C=fresh `[SAFETY_PRIOR]` |
+| infinite alternation | `repairMaxPerEpisodePerCap` bound |
+| validator thin | real policy/ctx; budget/ceiling/bound/demand checks |
+| `observed!==false` | strict `===true` generator+validator |
+| shallow log | clone+deep-freeze on append |
+| thin trace | per-loser `lostTo`/`lostBecause` + tieBreak |
