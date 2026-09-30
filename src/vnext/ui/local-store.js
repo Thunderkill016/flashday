@@ -12,12 +12,23 @@ import { eventFingerprint, decisionFingerprint } from '../store-memory.js';
 const eventsKey = (learnerId) => `fd.vnext.${learnerId}.events`;
 const runsKey = (learnerId) => `fd.vnext.${learnerId}.runs`;
 
+/* HIGH-2 — reads fail closed just like writes. "Key absent" is the
+ * ONLY empty answer; a storage-access failure or corrupt JSON must
+ * surface instead of masquerading as a blank learner history (zero
+ * evidence → no open run → a fresh run/decision minted against an
+ * apparently-new learner). */
 const readJson = (key, fallback) => {
+  let raw;
   try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : fallback;
-  } catch {
-    return fallback;
+    raw = localStorage.getItem(key);
+  } catch (err) {
+    throw new Error(`localStore read failed for '${key}': ${err?.message ?? err} — refusing to treat inaccessible storage as empty history`);
+  }
+  if (raw == null) return fallback;
+  try {
+    return JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`localStore found corrupt JSON for '${key}': ${err?.message ?? err} — refusing to treat corrupt storage as empty history`);
   }
 };
 

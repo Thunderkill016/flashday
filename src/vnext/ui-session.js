@@ -39,7 +39,9 @@ import { bindAttempt, bindObservation } from './bind.js';
 import { emittedEventType, verifyEventTask } from './contracts.js';
 import { evaluateAttempt, EVALUATOR_VERSION } from './evaluators.js';
 import { answerBearing, conditionsViolated } from './evidence.js';
-import { createMemoryEventStore, createMemoryRunStore } from './store-memory.js';
+import {
+  createMemoryEventStore, createMemoryRunStore, createMemoryDecisionStore, eventFingerprint
+} from './store-memory.js';
 import {
   SELECTION_MODES, selectNextTask, decisionAuditRecord
 } from './next-for-you/selector.js';
@@ -123,6 +125,15 @@ export function createMissionSession({
   let decisionContext = null;
   const decisionLog = createDecisionLog();
   const shadowLog = [];
+
+  /* Audit-store boundary (final-review invariant): a B0/SHADOW session
+   * must never consume a decision with no audit trail at all — the
+   * record at least lands in a session-scoped memory store. REFERENCE
+   * is allowed audit-free (its decisions are production bookkeeping,
+   * not engine commitments). Callers wanting durable/external audit
+   * pass an explicit decisionStore. */
+  const auditStore = decisionStore
+    ?? (mode === SELECTION_MODES.REFERENCE ? null : createMemoryDecisionStore());
 
   const taskByKey = new Map(tasks.map((t) => [keyOf(t), t]));
   const capById = new Map(capabilities.map((c) => [c.id, c]));
@@ -262,10 +273,15 @@ export function createMissionSession({
       input
     });
     if (run?.selection) {
+      /* The journal pins the CONTENT it expects, not just ids (HIGH-3):
+       * an id-only marker would bless any bytes that happen to share
+       * the id. The fingerprint is over the stamped event (missionRunId
+       * included) — exactly what appendAll will persist. */
+      const stamped = (bound ?? []).map((e) => ({ ...e, missionRunId: run?.id ?? null }));
       run.selection.pendingConsumption = {
         decisionId: d.decisionId,
         decisionDigest: liveTask?.decisionDigest ?? null,
-        expectedEventIds: (bound ?? []).map((e) => e.id),
+        expectedEvents: stamped.map((e) => ({ id: e.id, fingerprint: eventFingerprint(e) })),
         auditRecord: record,
         nextContext: next,
         consumedAt
@@ -273,7 +289,7 @@ export function createMissionSession({
       await runStore.saveRun(run);
     }
     if (bound?.length) await appendAll(bound);
-    await decisionStore?.append?.(record);
+    await auditStore?.append?.(record);
     decisionContext = next;
     if (run?.selection) {
       run.selection.decisionContext = decisionContext;
@@ -420,6 +436,19 @@ export function createMissionSession({
           startedAt: now(),
           endedAt: null
         };
+        /* Selection bookkeeping mints WITH the run (BLOCKER-1): an open
+         * run carrying no selection block predates this code and ran
+         * the shipped reference planner by definition — the absence of
+         * `selection` is itself the legacy signal. */
+        run.selection = {
+          version: 'vnext.run-selection.v1',
+          mode,
+          selectionPolicyVersion: mode === SELECTION_MODES.REFERENCE ? 'production.nextMissionTask' : POLICY_VERSIONS.B,
+          decisionEpisodeId: episodeIdFor(),
+          config: { ...selectionConfig },
+          decisionContext: null,
+          pendingConsumption: null
+        };
         await runStore.saveRun(run);
       }
       /* HIGH-6 — selection mode + policy version pin to the run at
@@ -427,36 +456,75 @@ export function createMissionSession({
        * silently switch policy inside one trajectory (a B0 run reopened
        * as reference contaminates the pilot/control record). A mode
        * change requires an explicit new run. */
-      const pinnedMode = run.selection?.mode;
-      if (pinnedMode != null && pinnedMode !== mode) {
+      const pinnedMode = run.selection?.mode ?? null;
+      const expectedPolicyVersion = mode === SELECTION_MODES.REFERENCE
+        ? 'production.nextMissionTask'
+        : POLICY_VERSIONS.B;
+      if (pinnedMode == null) {
+        /* Legacy open run — created before selection bookkeeping
+         * existed, so its trajectory is historical REFERENCE by
+         * definition. Reference may continue it (and pins the record);
+         * anything else must mint an explicit new run. */
+        if (mode !== SELECTION_MODES.REFERENCE) {
+          throw new Error(
+            `selection_mode_legacy: open run '${run.id}' predates selection bookkeeping and ran under 'reference' — requested '${mode}' refuses to reinterpret an open trajectory; abandon/supersede mints a new run`
+          );
+        }
+      } else if (pinnedMode !== mode) {
         throw new Error(
           `selection_mode_pinned: run '${run.id}' was created under '${pinnedMode}' but requested '${mode}' — refusing to switch policy inside an open run; restart mints a new run`
+        );
+      }
+      const pinnedVersion = run.selection?.selectionPolicyVersion ?? null;
+      if (pinnedVersion != null && pinnedVersion !== expectedPolicyVersion) {
+        throw new Error(
+          `selection_policy_version_pinned: run '${run.id}' is pinned to selection policy '${pinnedVersion}' but '${mode}' implies '${expectedPolicyVersion}' — refusing to change policy semantics inside an open run`
         );
       }
 
       /* BLOCKER-2 — recoverable consumption journal. A pending marker
        * means the process died between pending-write and the final
        * context save. Reconcile against the durable evidence log before
-       * any new selection:
-       *   all expected evidence present → finish audit + apply the
-       *     journaled next context (idempotent — audit append dedupes);
+       * any new selection — id PRESENCE is not the trust boundary, the
+       * landed event must match the journaled fingerprint (HIGH-3):
+       *   all expected evidence present AND content-identical → finish
+       *     audit + apply the journaled next context (idempotent —
+       *     audit append dedupes);
        *   no evidence landed → the consumption never happened; clear
        *     the marker and leave the decision unconsumed;
-       *   partial evidence → ambiguous boundary, fail closed. */
+       *   partial evidence, empty journal, or same-id/different-content
+       *     → ambiguous boundary, fail closed. */
       const pending = run.selection?.pendingConsumption;
       let reconciledCtx = null;
       if (pending) {
-        const have = new Set(events.filter((e) => e.learnerId === learnerId).map((e) => e.id));
-        const expected = pending.expectedEventIds ?? [];
-        const landed = expected.filter((id) => have.has(id));
-        if (expected.length > 0 && landed.length === expected.length) {
-          await decisionStore?.append?.(pending.auditRecord);
+        const byId = new Map(events.filter((e) => e.learnerId === learnerId).map((e) => [e.id, e]));
+        const expected = pending.expectedEvents ?? [];
+        const reconcileConflict = (why) => {
+          throw new Error(`consumption_reconcile_conflict: ${why} — refusing to guess the consumption outcome`);
+        };
+        if (expected.length === 0) {
+          reconcileConflict(`journal '${pending.decisionId}' carries no expected evidence`);
+        }
+        const missing = [];
+        const mismatched = [];
+        for (const x of expected) {
+          const landed = byId.get(x.id);
+          if (!landed) missing.push(x.id);
+          else if (x.fingerprint == null || eventFingerprint(landed) !== x.fingerprint) mismatched.push(x.id);
+        }
+        if (mismatched.length > 0) {
+          reconcileConflict(
+            `journal '${pending.decisionId}' found ${mismatched.length} expected event(s) with altered content (${mismatched.join(', ')})`
+          );
+        }
+        if (missing.length === 0) {
+          await auditStore?.append?.(pending.auditRecord);
           reconciledCtx = normalizeContext(pending.nextContext);
-        } else if (landed.length === 0) {
+        } else if (missing.length === expected.length) {
           reconciledCtx = null;
         } else {
-          throw new Error(
-            `consumption_reconcile_conflict: pending '${pending.decisionId}' has ${landed.length}/${expected.length} expected events — ambiguous boundary, refusing to guess`
+          reconcileConflict(
+            `journal '${pending.decisionId}' landed ${expected.length - missing.length}/${expected.length} expected events — ambiguous partial boundary`
           );
         }
       }
@@ -513,6 +581,13 @@ export function createMissionSession({
      * active DecisionContext for tests/dev tooling. */
     decisions() {
       return [...decisionLog.entries];
+    },
+
+    /* The persisted audit trail as the audit store sees it (async —
+     * store contract). B0/SHADOW always have one (memory fallback);
+     * REFERENCE legitimately reports none. */
+    async auditTrail() {
+      return auditStore ? auditStore.list(learnerId) : [];
     },
 
     shadowTrail() {

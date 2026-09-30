@@ -908,4 +908,191 @@ const consumedKinds = (session) => (session.selectionContext()?.actionsChosen ??
   say('COVERAGE: static intent×capability gap audit runs (HIGH-7)');
 }
 
+/* LEGACY-PIN (BLOCKER-1 re-review): an open run predating selection
+ * bookkeeping is historical REFERENCE by definition. B0/SHADOW must
+ * refuse to reinterpret it; reference may continue and pin the record.
+ * Policy VERSION is pinned too — a semantic bump cannot slide into an
+ * open run. */
+{
+  /* Legacy open run + B0 → fail closed; + REFERENCE → continues pinned */
+  const mkLegacyStores = () => ({
+    es: createMemoryEventStore(),
+    rs: createMemoryRunStore([{
+      id: 'run.legacy',
+      learnerId: 'RT.learner',
+      missionId: MEET.mission.id,
+      status: 'open',
+      learnerName: 'A',
+      startedAt: 1,
+      endedAt: null
+      /* no selection — a pre-008C run */
+    }]),
+    ds: createMemoryDecisionStore()
+  });
+  {
+    const { es, rs, ds } = mkLegacyStores();
+    const s = makeSession({ eventStore: es, runStore: rs, decisionStore: ds, mode: 'b0' });
+    await assert.rejects(() => s.init(), /selection_mode_legacy/, 'B0 silently reinterpreted a legacy open run');
+    const sh = makeSession({ eventStore: es, runStore: rs, decisionStore: ds, mode: 'shadow_b0' });
+    await assert.rejects(() => sh.init(), /selection_mode_legacy/, 'SHADOW silently reinterpreted a legacy open run');
+    const legacyRun = (await rs.list()).find((r) => r.id === 'run.legacy');
+    assert.equal(legacyRun.selection ?? null, null, 'refused reopen still stamped selection bookkeeping');
+    ok(true, 'LEGACY-PIN: B0/SHADOW reopen of a pre-bookkeeping run fails closed');
+  }
+  {
+    const { es, rs, ds } = mkLegacyStores();
+    const s = makeSession({ eventStore: es, runStore: rs, decisionStore: ds, mode: 'reference' });
+    await s.init();
+    const run = (await rs.list()).find((r) => r.id === 'run.legacy');
+    assert.equal(run.selection?.mode, 'reference', 'legacy run not pinned to its historical mode');
+    assert.equal(run.selection?.selectionPolicyVersion, 'production.nextMissionTask', 'legacy run not pinned to production policy version');
+    ok(true, 'LEGACY-PIN: reference continues a legacy run and pins it honestly');
+  }
+  /* Policy-version drift inside one mode also fails closed */
+  {
+    const es = createMemoryEventStore();
+    const rs = createMemoryRunStore();
+    const s = makeSession({ eventStore: es, runStore: rs, mode: 'b0' });
+    await s.init();
+    /* simulate a run pinned to an older B0 semantics version */
+    const run = (await rs.list())[0];
+    run.selection.selectionPolicyVersion = 'vnext.policy-b.v0-ancient';
+    await rs.saveRun(run);
+    const stale = makeSession({ eventStore: es, runStore: rs, mode: 'b0' });
+    await assert.rejects(() => stale.init(), /selection_policy_version_pinned/, 'policy version drift inside an open run was not refused');
+    ok(true, 'LEGACY-PIN: selection policy version drift fails closed');
+  }
+  say('LEGACY-PIN: legacy runs stay reference; mode+version pinned (BLOCKER-1 re-review)');
+}
+
+/* READ-FAIL (HIGH-2): absent key → fallback; inaccessible/corrupt
+ * storage → throw. A silently-swallowed read would fabricate a blank
+ * learner (fresh run minted against "no evidence"). */
+{
+  const realLS = globalThis.localStorage;
+  const { createLocalEventStore, createLocalRunStore, createLocalDecisionStore } = await import('../src/vnext/ui/local-store.js');
+  try {
+    /* getItem throwing (SecurityError / storage blocked) must surface */
+    globalThis.localStorage = {
+      getItem: () => { throw new Error('SecurityError: access denied'); },
+      setItem: () => {},
+      removeItem: () => {}
+    };
+    for (const [name, store] of [
+      ['events', createLocalEventStore('rf.l')],
+      ['runs', createLocalRunStore('rf.l')],
+      ['decisions', createLocalDecisionStore('rf.l')]
+    ]) {
+      let threw = false;
+      try { await store.list(); } catch (e) { threw = /localStore read failed/.test(String(e)); }
+      ok(threw, `${name}: inaccessible storage silently returned empty history`);
+    }
+    /* corrupt JSON must surface, not parse-as-empty */
+    globalThis.localStorage = {
+      getItem: (k) => (k.endsWith('.events') ? '{corrupt!!' : null),
+      setItem: () => {},
+      removeItem: () => {}
+    };
+    let threw = false;
+    try { await createLocalEventStore('rf.l').list(); } catch (e) { threw = /corrupt JSON/.test(String(e)); }
+    ok(threw, 'corrupt events JSON silently became an empty log');
+    /* absent key still returns the fallback */
+    const evts = await createLocalRunStore('rf.absent').list();
+    assert.deepEqual(evts, [], 'absent key did not fall back cleanly');
+    ok(true, 'READ-FAIL: absent=fallback, inaccessible/corrupt=throw');
+  } finally {
+    globalThis.localStorage = realLS;
+  }
+  say('READ-FAIL: storage read failures fail closed (HIGH-2)');
+}
+
+/* JOURNAL-CONTENT (HIGH-3): reconcile must verify the CONTENT of
+ * expected events, not id presence. Same id + altered bytes →
+ * consumption_reconcile_conflict, never a blessed consumption. */
+{
+  const es = createMemoryEventStore();
+  const rs = createMemoryRunStore();
+  const ds = createMemoryDecisionStore();
+  /* leave a real pending journal: inject failure on the commit-save
+   * (the save that clears pendingConsumption) */
+  let sawPending = false;
+  let armed = true;
+  const flaky = {
+    ...rs,
+    async saveRun(r) {
+      const carries = r?.selection?.pendingConsumption != null;
+      if (armed && sawPending && !carries) { armed = false; throw new Error('injected commit-save failure'); }
+      if (carries) sawPending = true;
+      return rs.saveRun(r);
+    }
+  };
+  const s = makeSession({ eventStore: es, runStore: flaky, decisionStore: ds });
+  await s.init();
+  await drive(s, (x) => x.type === 'task' && x.phase === 'prompt', { steps: 10 });
+  await assert.rejects(() => s.commit({ text: 'x' }), /injected commit-save/);
+  const pendingRun = (await rs.list())[0];
+  assert.ok(pendingRun.selection?.pendingConsumption, 'journal marker missing');
+  /* tamper: same event id, altered outcome — the journal fingerprint
+   * must catch it even though the id is present. Memory store returns
+   * live references, so mutating the listed event edits the log. */
+  const stored = await es.list();
+  const victim = stored.find((e) => e.attempt?.outcome != null);
+  assert.ok(victim, 'no landed attempt to tamper with');
+  victim.attempt.outcome = victim.attempt.outcome === 'success' ? 'fail' : 'success';
+  const s2 = makeSession({ eventStore: es, runStore: rs, decisionStore: ds });
+  await assert.rejects(() => s2.init(), /consumption_reconcile_conflict/, 'same-id/altered-content evidence was blessed');
+  /* and a clean baseline still converges */
+  const es3 = createMemoryEventStore();
+  const rs3 = createMemoryRunStore();
+  const ds3 = createMemoryDecisionStore();
+  const s3 = makeSession({ eventStore: es3, runStore: rs3, decisionStore: ds3 });
+  await s3.init();
+  await drive(s3, (x) => x.type === 'task' && x.phase === 'prompt', { steps: 10 });
+  await s3.commit({ text: 'x' });
+  const s4 = makeSession({ eventStore: es3, runStore: rs3, decisionStore: ds3 });
+  await s4.init();
+  ok(true, 'JOURNAL-CONTENT: tampered evidence fails closed; clean path converges');
+  say('JOURNAL-CONTENT: reconcile verifies event content, not id presence (HIGH-3)');
+}
+
+/* AUDIT-REQUIRED (final-review invariant): B0/SHADOW may not consume a
+ * decision with no audit trail — a memory store substitutes when no
+ * decisionStore is supplied. REFERENCE stays legitimately audit-free. */
+{
+  const s = createMissionSession({
+    learnerId: 'RT.noaudit',
+    mission: MEET.mission,
+    tasks: TASK_REGISTRY,
+    capabilities: CAPABILITIES,
+    riskPriors: RISK_PRIORS,
+    policy: LEARNING_POLICY_V1,
+    now,
+    selectionMode: 'b0',
+    idGen: () => 'run.noaudit'
+    /* no decisionStore on purpose */
+  });
+  await s.init();
+  await s.start({ learnerName: 'A' });
+  await drive(s, (x) => x.type === 'task' && x.phase === 'prompt', { steps: 10 });
+  await s.commit({ text: 'x' });
+  const audits = await s.auditTrail();
+  assert.ok(audits.length >= 1, 'B0 consumed a decision with no audit record anywhere');
+  assert.ok(audits.every((a) => a.decisionId && a.decisionInputDigest), 'audit records incomplete');
+  const ref = createMissionSession({
+    learnerId: 'RT.noaudit.ref',
+    mission: MEET.mission,
+    tasks: TASK_REGISTRY,
+    capabilities: CAPABILITIES,
+    riskPriors: RISK_PRIORS,
+    policy: LEARNING_POLICY_V1,
+    now,
+    selectionMode: 'reference',
+    idGen: () => 'run.noaudit.ref'
+  });
+  await ref.init();
+  assert.equal((await ref.auditTrail()).length, 0, 'reference unexpectedly carries an audit store');
+  ok(true, 'AUDIT-REQUIRED: B0 never consumes audit-free; reference stays free of it');
+  say('AUDIT-REQUIRED: B0/SHADOW default to a memory audit store (final invariant)');
+}
+
 console.log(`vnext-next-for-you-runtime: ${check} checks — PASS`);
