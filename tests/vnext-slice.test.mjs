@@ -46,6 +46,10 @@ const SCRIPT = {
   'task.meet.diagnostic.identity_q': [[{ attempt: { observed: true, outcome: 'success', response: 'name question', latencyMs: 1100, attemptId: 'd.iq' } }]],
   'task.meet.diagnostic.own_name': [[{ attempt: { observed: true, outcome: 'success', response: "I'm Linh", latencyMs: 1300, attemptId: 'd.name' } }]],
   'task.meet.diagnostic.ask_name': [[{ attempt: { observed: true, outcome: 'fail', response: '…', latencyMs: 5000, attemptId: 'd.ask' } }]],
+  // Support-capability baselines — the learner already has both, so no
+  // teaching should ever be routed to them (pre-existing, not learned).
+  'task.meet.diagnostic.repair': [[{ attempt: { observed: true, outcome: 'success', response: 'Sorry?', latencyMs: 800, attemptId: 'd.rep' } }]],
+  'task.meet.diagnostic.polite': [[{ attempt: { observed: true, outcome: 'success', response: 'Nice to meet you too', latencyMs: 800, attemptId: 'd.pol' } }]],
   'task.meet.input.ask_name': [[{ observe: 'exposure' }]],
   // Retrieval succeeds but only with a hint — supported, not independent.
   'task.meet.retrieval.ask_name': [[{
@@ -68,10 +72,14 @@ const SCRIPT = {
 
 // In-session work happens at T0+seconds; the delayed check and beyond
 // land after the 24h retention window measured from first INDEPENDENT.
+// Steps 1–12 are the baseline + teaching + remediation phase; the jump
+// begins at the delayed step so the remediation success stays anchored
+// at T0 — otherwise its occurredAt lands after the jump and the
+// capability is never due during the trace.
 const STEP_TIME = (step) => {
-  if (step <= 10) return T0 + step * 1000;
-  if (step === 11) return T0 + 10_000 + RETENTION_DELAY_MS + HOUR;
-  if (step === 12) return T0 + 10_000 + RETENTION_DELAY_MS + 2 * HOUR;
+  if (step <= 12) return T0 + step * 1000;
+  if (step === 13) return T0 + 10_000 + RETENTION_DELAY_MS + HOUR;
+  if (step === 14) return T0 + 10_000 + RETENTION_DELAY_MS + 2 * HOUR;
   return T0 + 10_000 + RETENTION_DELAY_MS + 3 * HOUR;
 };
 
@@ -104,6 +112,8 @@ const row = (step) => trace[step - 1];
     'task.meet.diagnostic.identity_q',
     'task.meet.diagnostic.own_name',
     'task.meet.diagnostic.ask_name',
+    'task.meet.diagnostic.repair',
+    'task.meet.diagnostic.polite',
     'task.meet.input.ask_name',
     'task.meet.retrieval.ask_name',
     'task.meet.interaction.guided',
@@ -116,12 +126,12 @@ const row = (step) => trace[step - 1];
 
   // State checkpoints (spec §6).
   assert.equal(row(5).afterState, 'EXPOSED', 'baseline fail → EXPOSED');
-  assert.equal(row(7).afterState, 'SUPPORTED', 'hinted retrieval → SUPPORTED');
-  assert.equal(row(8).afterState, 'SUPPORTED', 'model-aided partial → SUPPORTED');
-  assert.equal(row(10).afterState, 'INDEPENDENT', 'clean unaided retry → INDEPENDENT');
-  assert.equal(row(11).afterState, 'RETAINED', '24h+ delayed success → RETAINED');
-  assert.equal(row(12).afterState, 'TRANSFERRED', 'changed-context success → TRANSFERRED');
-  assert.equal(row(13).afterState, 'TRANSFERRED', 'fresh assessment does not change transfer state');
+  assert.equal(row(9).afterState, 'SUPPORTED', 'hinted retrieval → SUPPORTED');
+  assert.equal(row(10).afterState, 'SUPPORTED', 'model-aided partial → SUPPORTED');
+  assert.equal(row(12).afterState, 'INDEPENDENT', 'clean unaided retry → INDEPENDENT');
+  assert.equal(row(13).afterState, 'RETAINED', '24h+ delayed success → RETAINED');
+  assert.equal(row(14).afterState, 'TRANSFERRED', 'changed-context success → TRANSFERRED');
+  assert.equal(row(15).afterState, 'TRANSFERRED', 'fresh assessment does not change transfer state');
   const final = stateOf(events, 'interact.ask_name');
   assert.equal(final.milestones.fluent, false, 'FLUENT unreachable in v0');
   assert.ok(!final.transferPromptFamilies.includes('assess.meet.exchange.v1'),
@@ -155,9 +165,9 @@ const row = (step) => trace[step - 1];
   console.log('✓ baseline pass skips teaching — passed capabilities only ever see their diagnostic');
 
   // Prefix of the slice where ask_name just reached INDEPENDENT.
-  const throughIndependent = events.slice(0, row(10).eventCount);
+  const throughIndependent = events.slice(0, row(12).eventCount);
   // …and where it just reached RETAINED.
-  const throughRetained = events.slice(0, row(11).eventCount);
+  const throughRetained = events.slice(0, row(13).eventCount);
   const cap = capabilityById('interact.ask_name');
 
   // 2. Support-aided retry inside the same attempt boundary cannot
@@ -286,7 +296,7 @@ const row = (step) => trace[step - 1];
     capabilityId: 'interact.greet', modality: 'spoken_interaction',
     attempt: { observed: true, outcome: 'success', response: 'x', latencyMs: 100, attemptId: 'fg.1' },
     context: { missionId: 'mission.meet_new_person', promptFamily: 'meet.opening.baseline.v1', practicedOrTransfer: 'practiced' },
-    evaluation: { authority: 'deterministic', contractId: 'eval.task.meet.diagnostic.opening.v1' },
+    evaluation: { authority: 'deterministic', contractId: 'eval.required_functions.v1' },
     binding: { purpose: 'diagnostic', familyClass: 'practiced', freshnessRequired: false, effectiveSupportAllowed: [] }
   });
   const sel10 = nextMissionTask({

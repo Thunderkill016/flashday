@@ -267,7 +267,7 @@ const PILOT = { learners: COHORT, mission: MISSION_MEET_PERSON, tasks: TASKS, ca
     occurredAt: T0 + 99 * HOUR,
     context: { missionId: 'mission.meet_new_person', practicedOrTransfer: 'transfer', promptFamily: 'meet.ask_name.street.v1' },
     attempt: { observed: true, outcome: 'success', latencyMs: 100, attemptId: 'f.1' },
-    evaluation: { authority: 'deterministic', contractId: 'eval.task.meet.transfer.street.v1' },
+    evaluation: { authority: 'deterministic', contractId: 'eval.required_functions.v1' },
     binding: { purpose: 'transfer', familyClass: 'fresh_transfer', freshnessRequired: true, effectiveSupportAllowed: [] }
   }];
   // Wrong-revision event is unverifiable — it is neither proof nor contradiction.

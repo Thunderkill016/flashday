@@ -14,6 +14,7 @@ export default defineConfig(({ mode }) => {
           app: resolve(import.meta.dirname, 'app/index.html'),
           login: resolve(import.meta.dirname, 'login/index.html'),
           auth: resolve(import.meta.dirname, 'auth/index.html'),
+          vnext: resolve(import.meta.dirname, 'vnext/index.html'),
         },
       },
     },

@@ -12,8 +12,19 @@
 import { capabilityById } from './capabilities.js';
 import { makeMission, makeTask } from './contracts.js';
 
+/* evaluation.contractId names a scoring SPEC (evaluators.js), not a
+ * task: choice tasks score the picked option; free-response tasks score
+ * their declared requiredFunctions by structured match. Exposure-only
+ * tasks declare no evaluator — there is nothing to score. */
 const task = (fields) => makeTask({
-  evaluation: { authority: 'deterministic', contractId: `eval.${fields.id}.v1` },
+  evaluation: {
+    authority: 'deterministic',
+    contractId: fields.purpose === 'input' || fields.purpose === 'notice'
+      ? null
+      : fields.response?.type === 'choice'
+        ? 'eval.choice.correct.v1'
+        : 'eval.required_functions.v1'
+  },
   ...fields
 });
 
@@ -32,7 +43,10 @@ export const MISSION_MEET_PERSON = makeMission({
     'interact.ask_name',
     'interact.respond_to_introduction'
   ],
-  supportCapabilities: ['interact.ask_repeat', 'interact.signal_nonunderstanding'],
+  // signal_nonunderstanding is intentionally NOT declared: no task in
+  // this mission can probe or teach it, so listing it would leave the
+  // planner demanding a diagnostic the mission can never serve.
+  supportCapabilities: ['interact.ask_repeat'],
   language: {
     assumedKnown: { chunks: [], vocabulary: [], constructions: [] },
     introduced: {
@@ -50,6 +64,8 @@ export const MISSION_MEET_PERSON = makeMission({
     'task.meet.diagnostic.identity_q',
     'task.meet.diagnostic.own_name',
     'task.meet.diagnostic.ask_name',
+    'task.meet.diagnostic.repair',
+    'task.meet.diagnostic.polite',
     'task.meet.input.scene',
     'task.meet.input.questions',
     'task.meet.input.ask_name',
@@ -89,7 +105,15 @@ export const TASKS_MEET_PERSON = [
     purpose: 'diagnostic',
     promptFamily: 'meet.listen.baseline.v1',
     stimulus: { type: 'audio_line', languageComponents: ['Hello'] },
-    response: { type: 'choice', requiredFunctions: ['recognize_greeting'] },
+    response: {
+      type: 'choice',
+      requiredFunctions: ['recognize_greeting'],
+      options: [
+        { id: 'greeting', text: 'Họ chào bạn.', correct: true },
+        { id: 'ask_name', text: 'Họ hỏi tên bạn.' },
+        { id: 'farewell', text: 'Họ tạm biệt bạn.' }
+      ]
+    },
     language: { requiredChunks: ['Hello'], requiredVocabulary: ['hello'], requiredConstructions: [] }
   }),
   task({
@@ -100,7 +124,15 @@ export const TASKS_MEET_PERSON = [
     purpose: 'diagnostic',
     promptFamily: 'meet.identity_q.baseline.v1',
     stimulus: { type: 'audio_line', languageComponents: ["What's your name?"] },
-    response: { type: 'choice', requiredFunctions: ['understand_identity_question'] },
+    response: {
+      type: 'choice',
+      requiredFunctions: ['understand_identity_question'],
+      options: [
+        { id: 'ask_name', text: 'Họ hỏi tên bạn.', correct: true },
+        { id: 'greeting', text: 'Họ chào hỏi bạn.' },
+        { id: 'ask_health', text: 'Họ hỏi bạn có khỏe không.' }
+      ]
+    },
     language: { requiredChunks: ["What's your name?"], requiredVocabulary: ['name'], requiredConstructions: ['wh_question_name'] }
   }),
   task({
@@ -124,6 +156,28 @@ export const TASKS_MEET_PERSON = [
     stimulus: { type: 'partner_turn', languageComponents: ['Hi'] },
     response: { type: 'spoken_turn', requiredFunctions: ['ask_name'] },
     language: { requiredChunks: ["What's your name?"], requiredVocabulary: ['name'], requiredConstructions: ['wh_question_name'] }
+  }),
+  task({
+    id: 'task.meet.diagnostic.repair',
+    missionId: 'mission.meet_new_person',
+    capabilityId: 'interact.ask_repeat',
+    modality: 'spoken_interaction',
+    purpose: 'diagnostic',
+    promptFamily: 'meet.repair.baseline.v1',
+    stimulus: { type: 'partner_turn', languageComponents: ['(mumbled) … Sam'] },
+    response: { type: 'spoken_turn', requiredFunctions: ['ask_repeat'] },
+    language: { requiredChunks: ['Sorry?', 'Can you repeat that?'], requiredVocabulary: ['sorry', 'repeat'], requiredConstructions: [] }
+  }),
+  task({
+    id: 'task.meet.diagnostic.polite',
+    missionId: 'mission.meet_new_person',
+    capabilityId: 'interact.respond_to_introduction',
+    modality: 'spoken_interaction',
+    purpose: 'diagnostic',
+    promptFamily: 'meet.polite.baseline.v1',
+    stimulus: { type: 'partner_turn', languageComponents: ['Nice to meet you'] },
+    response: { type: 'spoken_turn', requiredFunctions: ['respond_to_introduction'] },
+    language: { requiredChunks: ['Nice to meet you too'], requiredVocabulary: ['nice', 'meet'], requiredConstructions: [] }
   }),
   task({
     id: 'task.meet.input.scene',
@@ -166,7 +220,15 @@ export const TASKS_MEET_PERSON = [
     purpose: 'retrieval',
     promptFamily: 'meet.questions.practice.v1',
     stimulus: { type: 'audio_line', languageComponents: ["What's your name?"] },
-    response: { type: 'choice', requiredFunctions: ['understand_identity_question'] },
+    response: {
+      type: 'choice',
+      requiredFunctions: ['understand_identity_question'],
+      options: [
+        { id: 'ask_name', text: 'Họ đang hỏi tên của bạn.', correct: true },
+        { id: 'greeting', text: 'Họ đang chào hỏi bạn.' },
+        { id: 'ask_age', text: 'Họ đang hỏi tuổi của bạn.' }
+      ]
+    },
     language: { requiredChunks: ["What's your name?"], requiredVocabulary: ['name'], requiredConstructions: ['wh_question_name'] }
   }),
   task({
@@ -300,7 +362,10 @@ export const MISSION_ORDER_DRINK = makeMission({
   learnerGoal: 'Understand the offer question and order a drink.',
   targetCapabilities: ['listen.drink_order_question_basic', 'interact.order_drink'],
   prerequisiteCapabilities: [],
-  supportCapabilities: ['interact.ask_repeat', 'interact.signal_nonunderstanding'],
+  // No support capabilities declared — no task in this mission can
+  // probe or teach them, and an unservable surface only produces
+  // planner intents the mission must block on.
+  supportCapabilities: [],
   language: {
     assumedKnown: { chunks: [], vocabulary: [], constructions: [] },
     introduced: {
@@ -311,6 +376,7 @@ export const MISSION_ORDER_DRINK = makeMission({
   },
   taskIds: [
     'task.drink.diagnostic.offer',
+    'task.drink.diagnostic.order',
     'task.drink.input.counter',
     'task.drink.retrieval.order',
     'task.drink.interaction.guided',
@@ -332,8 +398,27 @@ export const TASKS_ORDER_DRINK = [
     purpose: 'diagnostic',
     promptFamily: 'drink.offer.baseline.v1',
     stimulus: { type: 'partner_turn', languageComponents: ['What would you like?'] },
-    response: { type: 'choice', requiredFunctions: ['understand_offer_or_order_question'] },
+    response: {
+      type: 'choice',
+      requiredFunctions: ['understand_offer_or_order_question'],
+      options: [
+        { id: 'offer', text: 'Họ hỏi bạn muốn gọi gì.', correct: true },
+        { id: 'greeting', text: 'Họ chào hỏi bạn.' },
+        { id: 'bill', text: 'Họ đưa bạn hóa đơn.' }
+      ]
+    },
     language: { requiredChunks: ['What would you like?'], requiredVocabulary: ['like'], requiredConstructions: [] }
+  }),
+  task({
+    id: 'task.drink.diagnostic.order',
+    missionId: 'mission.order_drink',
+    capabilityId: 'interact.order_drink',
+    modality: 'spoken_interaction',
+    purpose: 'diagnostic',
+    promptFamily: 'drink.order.baseline.v1',
+    stimulus: { type: 'partner_turn', languageComponents: ['What would you like?'] },
+    response: { type: 'spoken_turn', requiredFunctions: ['order_item'] },
+    language: { requiredChunks: ['Can I have …?', 'A coffee, please'], requiredVocabulary: ['coffee', 'tea', 'please'], requiredConstructions: [] }
   }),
   task({
     id: 'task.drink.input.counter',
