@@ -226,3 +226,17 @@ diff vs main.
 | validator recomputes work | independent candidate regen + shared hard-filter; `fabricated_idle` / `blocked_while_valid_work` / `blocked_without_work` |
 | starvation never escapes MANDATORY | tier-0 and pending-demand tiers are protected from the guard (Z7, all variants) |
 | strict observed everywhere | repair bounds, verified-failure views, and validator all key on `observed===true` + `verifyEventTask` |
+
+## Round-4 micro-hardening (post-review 5913237089, head 27bd854)
+
+4 findings closed. Spec §4.10 contradiction removed; §14 documents the
+round-4 contract. Suite: 907 checks + Z4 five-case family matrix + Z8
+digest-bypass regressions + Z9 production-divergence differentials.
+`verify` + `verify:full` PASS at this head.
+
+| Finding | Fix |
+|---------|-----|
+| append accepts naked digest | `append` always recomputes from full input; supplied digest is verified against the recompute; non-terminal decisions require complete provenance |
+| family = label string | family identity = `canonicalFamilyId(cap, contextSignature)`; verified events only consume; validator re-checks |
+| A mislabeled as production mirror | `policyRef` = authoritative reference; A = safety-normalized cascade baseline; Z9 locks both intentional divergences |
+| §4.10 stale "consumed forever" | rewritten to policy-choice semantics |
