@@ -187,8 +187,16 @@ export function nextMissionTask({ learnerId, mission, tasks, capabilities, event
    * bounding lives in the planner's per-pair cycle cap — the selector
    * just stays honest about consumption. */
   const REPEATABLE = new Set(['retrieval', 'production', 'interaction', 'remediation', 'delayed_retrieval', 'transfer', 'support']);
-  const pick = (capId, purposes, { unattemptedOnly = false } = {}) => {
-    const candidates = missionTasks.filter((t) => t.capabilityId === capId && purposes.includes(t.purpose));
+  /* `requiresFunction` scopes a pick to tasks that actually exercise
+   * the demanded function — a support_demand must be served by a probe
+   * that TESTS the missing function, not merely any task sharing the
+   * provider capability (#61 audit: capability-scoped picks serve the
+   * wrong evidence and can never consume the demand). */
+  const pick = (capId, purposes, { unattemptedOnly = false, requiresFunction = null } = {}) => {
+    const candidates = missionTasks.filter((t) =>
+      t.capabilityId === capId &&
+      purposes.includes(t.purpose) &&
+      (requiresFunction == null || (t.response?.requiredFunctions ?? []).includes(requiresFunction)));
     const fresh = candidates.filter((t) => !verifiedAttempt.has(keyOf(t)) && !verifiedEvent.has(keyOf(t)));
     if (fresh[0]) return fresh[0];
     if (unattemptedOnly || purposes.every((p) => !REPEATABLE.has(p))) return null;
@@ -225,7 +233,7 @@ export function nextMissionTask({ learnerId, mission, tasks, capabilities, event
     if (plan.kind === 'idle') break;
     const task = (plan.kind === 'expose' || plan.kind === 'resume')
       ? pickPendingPhase(plan.capabilityId)
-      : pick(plan.capabilityId, INTENT_PURPOSES[plan.kind] ?? []);
+      : pick(plan.capabilityId, INTENT_PURPOSES[plan.kind] ?? [], { requiresFunction: plan.demand?.missingFunction });
     if (task) {
       return ready(task, `${plan.kind} on ${plan.capabilityId}: ${plan.reason}`);
     }

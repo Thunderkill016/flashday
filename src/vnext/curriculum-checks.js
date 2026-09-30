@@ -181,11 +181,32 @@ export function checkCurriculum({ capabilities = [], missions = [], tasks = [], 
         problems.push(`${tag}: support '${capId}' provides no function any mission task requires — a dead paper support declaration`);
       }
       const capTasks = missionTasks.filter((t) => t.capabilityId === capId);
-      if (!capTasks.some((t) => t.purpose === 'support')) {
+      const probes = capTasks.filter((t) => t.purpose === 'support');
+      if (!probes.length) {
         problems.push(`${tag}: support '${capId}' owns no support-purpose probe task — a demand could be issued but never served`);
       }
       if (capTasks.some((t) => t.purpose !== 'support')) {
         problems.push(`${tag}: support '${capId}' owns a non-support task — remediation substrate cannot carry claim-bearing purposes`);
+      }
+      /* Function-scoped routing needs per-function servability: every
+       * mission-relevant provided function must be exercised by at
+       * least one probe (else its demand issues but is never correctly
+       * served), and a probe may only test functions the cap actually
+       * provides — otherwise its evidence is misprovenanced and could
+       * consume demands it never addressed. */
+      const covered = new Set();
+      for (const t of probes) {
+        for (const fn of t.response?.requiredFunctions ?? []) {
+          covered.add(fn);
+          if (!(cap.providesFunctions ?? []).includes(fn)) {
+            problems.push(`${tag}: support probe '${t.id}' tests '${fn}', which '${capId}' does not provide — misprovenanced substrate evidence`);
+          }
+        }
+      }
+      for (const fn of provided) {
+        if (!covered.has(fn)) {
+          problems.push(`${tag}: support '${capId}' provides '${fn}' but no probe on it tests that function — a demand for '${fn}' can issue but is unservable`);
+        }
       }
     }
     for (const t of missionTasks) {

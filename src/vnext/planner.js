@@ -32,11 +32,18 @@ import { contractAttributesFunctions } from './evaluators.js';
  * Resolution state machine per (targetCapability, function) pair:
  *   issued    — the failure attributed the function
  *   consumed  — a later VERIFIED support_attempt on the provider cap
- *               (success or fail — one probe cycle per demand)
- *   cancelled — a later verified attempt success on the TARGET
- *               capability (the miss resolved itself; rehearsing the
- *               substrate would be stale demand)
- *   re-issue  — bounded by policy supportDemand.maxCyclesPerPair
+ *               whose task actually requires that function (success or
+ *               fail — one probe cycle per demand; a probe cannot
+ *               resolve evidence it never tested)
+ *   cancelled — a later verified success on a TARGET task that itself
+ *               requires the function: demonstrated recovery is the
+ *               only evidence that retires a demand, and it also
+ *               re-arms the pair's cycle budget (the episode closed).
+ *               A success that never exercised the function proves
+ *               nothing about it.
+ *   re-issue  — bounded per unresolved episode by
+ *               policy supportDemand.maxCyclesPerPair; the budget is
+ *               lifetime-safe because demonstrated recovery resets it.
  *
  * Returns pending demands in canonical issue order. Everything is
  * re-derived from events every call — replay is deterministic and a
@@ -77,8 +84,11 @@ function deriveSupportDemands(learnerId, events, { capabilities, tasks, roles, p
     .sort((a, b) => a.occurredAt - b.occurredAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
   const pending = new Map(); // `${targetCap}|${fn}` → demand record
-  const cycles = new Map();  // pair key → consumed demand count
+  const cycles = new Map();  // pair key → consumed count in the OPEN episode
+  const seenIds = new Set(); // resynced duplicates replay idempotently
   for (const e of mine) {
+    if (seenIds.has(e.id)) continue;
+    seenIds.add(e.id);
     const t = taskByRev.get(`${e.taskId}@${e.taskRevision}`);
     const cap = t ? capById.get(t.capabilityId) : null;
     if (!t || !cap || !scoped.has(cap.id) || !verifyEventTask(e, t, cap)) continue;
@@ -89,10 +99,13 @@ function deriveSupportDemands(learnerId, events, { capabilities, tasks, roles, p
     if (e.attempt?.observed !== true) continue;
 
     if (e.eventType === 'support_attempt') {
-      // A verified support probe consumed every pending demand routed
-      // to its capability — pass or fail, the cycle is spent.
+      /* A verified probe consumes only the demands it actually TESTED:
+       * coverage proof is the probe task's requiredFunctions. A probe
+       * for fn_a can never resolve a pending fn_b demand — one probe
+       * must not stand in for evidence it did not collect. */
+      const covered = new Set(t.response?.requiredFunctions ?? []);
       for (const [key, d] of pending) {
-        if (d.supportCapabilityId === e.capabilityId) {
+        if (d.supportCapabilityId === e.capabilityId && covered.has(d.missingFunction)) {
           pending.delete(key);
           cycles.set(key, (cycles.get(key) ?? 0) + 1);
         }
@@ -103,9 +116,16 @@ function deriveSupportDemands(learnerId, events, { capabilities, tasks, roles, p
     if (e.attempt?.outcome == null) continue;
 
     if (e.attempt.outcome === 'success') {
-      // The target recovered on its own — a stale demand must not fire.
-      for (const [key, d] of pending) {
-        if (d.targetCapabilityId === e.capabilityId) pending.delete(key);
+      /* Demonstrated recovery is the ONLY evidence that retires a
+       * demand: a verified success on a task requiring the function
+       * cancels the pending demand for it AND resets the pair's cycle
+       * budget — the episode closed, so a substrate gap re-evidenced
+       * weeks later routes a fresh probe (the bound is per unresolved
+       * episode, never a lifetime ban). */
+      for (const fn of t.response?.requiredFunctions ?? []) {
+        const key = `${e.capabilityId}|${fn}`;
+        pending.delete(key);
+        cycles.delete(key);
       }
       continue;
     }
