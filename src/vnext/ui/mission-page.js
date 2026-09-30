@@ -69,6 +69,15 @@ export async function bootMissionPage(root) {
       ? modeParam
       : SELECTION_MODES.REFERENCE;
 
+  /* Test/debug seam: ?clockOffset=<ms> shifts the session clock so
+   * retention-lagged paths (due_retrieval, post-lag correction) are
+   * reachable in a single browsing session. Never used by the page
+   * itself; malformed values fail closed to no offset. */
+  const clockOffset = Number(params.get('clockOffset'));
+  const now = Number.isFinite(clockOffset) && clockOffset !== 0
+    ? () => Date.now() + clockOffset
+    : undefined;
+
   const session = createMissionSession({
     learnerId,
     mission: spec.mission,
@@ -79,7 +88,8 @@ export async function bootMissionPage(root) {
     eventStore: createLocalEventStore(learnerId),
     runStore: createLocalRunStore(learnerId),
     decisionStore: createLocalDecisionStore(learnerId),
-    selectionMode
+    selectionMode,
+    now
   });
 
   // Test/debug seam — never used by the page itself.

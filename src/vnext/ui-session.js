@@ -48,6 +48,7 @@ import {
 import { emptyContext, normalizeContext, consumeDecision } from './next-for-you/decision-context.js';
 import { createDecisionLog } from './next-for-you/decision-log.js';
 import { POLICY_VERSIONS } from './next-for-you/constants.js';
+import { sha256 } from './next-for-you/canonical.js';
 
 /* Purposes that may offer pre-commit support in v0. A used control
  * always leaves a support_use event plus a stamped snapshot — the offer
@@ -275,13 +276,16 @@ export function createMissionSession({
     if (run?.selection) {
       /* The journal pins the CONTENT it expects, not just ids (HIGH-3):
        * an id-only marker would bless any bytes that happen to share
-       * the id. The fingerprint is over the stamped event (missionRunId
-       * included) — exactly what appendAll will persist. */
+       * the id. The expectation is a sha256 digest over the stamped
+       * event's canonical fingerprint (missionRunId included) — the
+       * journal holds an opaque hash, never the learner's response
+       * text (008D data minimization: response lives only in the
+       * append-only evidence log). */
       const stamped = (bound ?? []).map((e) => ({ ...e, missionRunId: run?.id ?? null }));
       run.selection.pendingConsumption = {
         decisionId: d.decisionId,
         decisionDigest: liveTask?.decisionDigest ?? null,
-        expectedEvents: stamped.map((e) => ({ id: e.id, fingerprint: eventFingerprint(e) })),
+        expectedEvents: stamped.map((e) => ({ id: e.id, digest: `sha256:${sha256(eventFingerprint(e))}` })),
         auditRecord: record,
         nextContext: next,
         consumedAt
@@ -510,7 +514,7 @@ export function createMissionSession({
         for (const x of expected) {
           const landed = byId.get(x.id);
           if (!landed) missing.push(x.id);
-          else if (x.fingerprint == null || eventFingerprint(landed) !== x.fingerprint) mismatched.push(x.id);
+          else if (x.digest == null || `sha256:${sha256(eventFingerprint(landed))}` !== x.digest) mismatched.push(x.id);
         }
         if (mismatched.length > 0) {
           reconcileConflict(

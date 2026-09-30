@@ -102,8 +102,12 @@ function makeDecision({ policy, version, chosen, candidates, skipped, model, ctx
 
   /* Deterministic id: episode + ordinal + policy + input digest — the
    * digest makes same-ordinal decisions on different input states
-   * distinguishable (review MEDIUM-15). */
-  const inputDigest = state ? sha256(decisionInputSnapshot({ ...state })).slice(0, 16) : 'no-state';
+   * distinguishable (review MEDIUM-15). The selector passes the digest
+   * it already computed (state.inputDigestHex — same canonical input,
+   * identical value); standalone callers fall back to computing it. */
+  const inputDigest = state
+    ? (state.inputDigestHex ?? sha256(decisionInputSnapshot({ ...state }))).slice(0, 16)
+    : 'no-state';
   const chosenStub = chosen
     ? `${chosen.kind}@${chosen.capabilityId}:${chosen.servableTask?.id ?? 'none'}@${chosen.servableTask?.revision ?? 1}`
     : terminalKind;

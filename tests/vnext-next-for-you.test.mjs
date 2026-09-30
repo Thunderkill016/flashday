@@ -280,21 +280,22 @@ const scopedState = (events, caps, opts = {}) => ({
   mission: opts.mission ?? F.mission, decisionContext: opts.ctx ?? emptyContext('ep.l', 'ses.l'), selection: opts.selection ?? {}
 });
 
-/* Synthetic correction surface (labeled): the authored corpus has no
- * cap that both attributes failures AND owns a remediation task — a
- * real coverage gap reported to the control room. This builds one
- * remediation task on understand_clock_time (which can attribute via
- * its choice tasks) so the correction mechanic itself is testable. */
+/* Correction surface (008D vertical slice): the authored corpus now
+ * owns task.time.remediation.hear on understand_clock_time — a cap
+ * whose choice tasks attribute failures (eval.choice.correct.v1), so
+ * correction mints and is servable on REAL content. `extraRemediation`
+ * injects labeled synthetic siblings only for the repair-bound test,
+ * which needs more than one authored task. */
 import { makeTask } from '../src/vnext/contracts.js';
-function correctionSyntheticState({ remediationTasks = 1 } = {}) {
+function correctionState({ extraRemediation = 0 } = {}) {
   const mat = ALL_MISSIONS.find((f) => f.id === 'mission.meet_at_a_time');
   const ms = missionState(mat);
   const hearTask = mat.tasks.find((t) => t.id === 'task.time.retrieval.hear');
   const clockCap = capOf('reception.listen.understand_clock_time');
   const remTasks = [];
-  for (let i = 0; i < remediationTasks; i++) {
+  for (let i = 0; i < extraRemediation; i++) {
     remTasks.push(makeTask({
-      id: `task.time.remediation.hear${i ? `.${i}` : ''}`, missionId: 'mission.meet_at_a_time',
+      id: `task.time.remediation.hear.synthetic${i}`, missionId: 'mission.meet_at_a_time',
       capabilityId: clockCap.id, modality: clockCap.modality,
       purpose: 'remediation', promptFamily: hearTask.promptFamily,
       contextSignature: hearTask.contextSignature,
@@ -340,7 +341,7 @@ function correctionSyntheticState({ remediationTasks = 1 } = {}) {
     ['independent_attempt', consumeBaseline([observeEvent(tmt('input.ask_name'), askCap(), { at: T0 - DAY }), attemptEvent(tmt('interaction.guided'), askCap(), { at: T0 - 2 * HOUR, support: { hint: true } })]), [askCap()], { burnDiagnostics: 2 }],
     ['due_retrieval', consumeBaseline([...independentHistory(T0 - DAY)]), [askCap()]],
     ['assessment', consumeBaseline(transferredHistory()), [askCap()]],
-    ['correction', null, null, { synthetic: 'remediation_on_clock' }], /* correction unreachable in the authored corpus — the only remediation task lives on a cap with no attributing evaluator; synthetic labeled task below */
+    ['correction', null, null, { synthetic: 'remediation_on_clock' }], /* authored remediation task on the attributing clock-time cap — the 008D vertical slice */
     ['diagnostic_probe', [], [askCap()]], /* never-seen target owes a baseline probe */
     ['mission_continuation', [attemptEvent(tmt('diagnostic.ask_name'), askCap(), { at: T0 - 5 * DAY, outcome: 'fail' }), observeEvent(tmt('input.ask_name'), askCap(), { at: T0 - DAY }), attemptEvent(tmt('retrieval.ask_name'), askCap(), { at: T0 - HOUR, outcome: 'fail' })], [askCap()], { burnDiagnostics: 2 }], /* untaught cap (baseline fail doesn't mint supported) with unattributed misses — keep drilling the thread */
     ['new_input', [], [capOf('reception.listen.greeting_basic')]]
@@ -350,7 +351,7 @@ function correctionSyntheticState({ remediationTasks = 1 } = {}) {
     for (const p of ['A', 'B', 'C']) {
       let st;
       if (opts.synthetic === 'remediation_on_clock') {
-        st = correctionSyntheticState();
+        st = correctionState();
       } else {
         st = scopedState(events, caps, opts.burnDiagnostics ? { ctx: burnCtx(opts.burnDiagnostics) } : {});
       }
@@ -693,7 +694,7 @@ function correctionSyntheticState({ remediationTasks = 1 } = {}) {
 {
   /* Two remediation tasks on one cap; the per-cap episode repair bound
    * must stop A→B→A→B alternation from monopolizing the episode. */
-  const st = correctionSyntheticState({ remediationTasks: 2 });
+  const st = correctionState({ extraRemediation: 1 });
   let ctx = emptyContext('ep.s', 'ses.s');
   let repairs = 0, escapes = 0;
   for (let i = 0; i < 10; i++) {
@@ -1154,4 +1155,76 @@ console.log(`vnext-next-for-you hardening sections included`);
   ok(rows.some((r) => r.class !== 'MATCH'), 'Z11: zero divergences observed — corpora not exercising policies');
   /* every matrix archetype must actually run (typo guard) */
   for (const m of DIFFERENTIAL_MATRIX) ok(typeof m.archetype === 'string', 'Z11: matrix entry missing archetype');
+}
+
+/* --- Z12. 008D vertical slice — REAL authored chain on
+ * understand_clock_time @ meet_at_a_time: attributing choice failure
+ * → support demand + correction → authored remediation → delayed
+ * retest → fresh transfer → fresh assessment family. Every link must
+ * mint AND be servable under B0 on authored tasks only. */
+{
+  const mat = ALL_MISSIONS.find((f) => f.id === 'mission.meet_at_a_time');
+  const ms = missionState(mat);
+  const clock = capOf('reception.listen.understand_clock_time');
+  const t_ = (id) => mat.tasks.find((t) => t.id === id);
+  const sliceState = (events, now) => ({
+    learnerId: 'SIM', events, capabilities: ms.capabilities, tasks: mat.tasks,
+    roles: ms.roles, policy: LEARNING_POLICY_V1, now, mission: mat.mission,
+    decisionContext: emptyContext('ep.z12', 'ses.z12'), selection: {}
+  });
+  const cands = (events, now = T0) => generateCandidates(sliceState(events, now)).candidates;
+
+  const ev = [
+    /* Burn the OTHER target's declared diagnostics so candidate sets
+     * read the clock-time thread, not the baseline queue. */
+    attemptEvent(t_('task.time.diagnostic.say'), capOf('production.speak.state_clock_time'), { at: T0 - 6 * HOUR, outcome: 'success', support: { hint: true } }),
+    /* 1. Baseline: unaided observed success → taught+independent */
+    attemptEvent(t_('task.time.diagnostic.hear'), clock, { at: T0 - 4 * HOUR, outcome: 'success' }),
+    /* 2. Attributing miss — the choice contract justifies the declared
+     * substrate functions, so the number-catch demand routes (#61). */
+    attemptEvent(t_('task.time.retrieval.hear'), clock, { at: T0 - 2 * HOUR, outcome: 'fail', missing: ['understand_clock_time', 'identify_spoken_number'] })
+  ];
+
+  /* Link 1: correction mints and is servable on the AUTHORED
+   * remediation task — no synthetic content anywhere in the state. */
+  const afterMiss = cands(ev);
+  const corr = afterMiss.find((c) => c.kind === KINDS.CORRECTION && c.capabilityId === clock.id);
+  ok(corr != null, 'Z12: attributed miss did not mint correction');
+  ok(corr.servableTask?.id === 'task.time.remediation.hear', `Z12: correction not servable on authored remediation — got ${corr.servableTask?.id}`);
+  /* The substrate demand routes to the authored support probe. */
+  const demand = afterMiss.find((c) => c.kind === KINDS.SUPPORT_DEMAND);
+  ok(demand != null && demand.demand?.missingFunction === 'identify_spoken_number' && demand.servableTask?.id === 'task.time.support.number_probe',
+    `Z12: attributed substrate miss did not route to the number probe — got ${JSON.stringify(demand?.demand ?? null)}`);
+  /* Policy B picks a repair face — substrate probe or correction. */
+  const pick = POLICIES.B(sliceState(ev, T0), {});
+  ok(pick.chosen.kind === KINDS.CORRECTION || pick.chosen.kind === KINDS.SUPPORT_DEMAND,
+    `Z12: B0 picked ${pick.chosen.kind}@${pick.chosen.capabilityId} instead of a repair — expected correction/support_demand`);
+
+  /* 3. Remediation served and repaired (observed success). */
+  ev.push(attemptEvent(t_('task.time.remediation.hear'), clock, { at: T0 - HOUR, outcome: 'success' }));
+  const afterRepair = cands(ev);
+  ok(!afterRepair.some((c) => c.kind === KINDS.CORRECTION && c.capabilityId === clock.id), 'Z12: correction still minted after repair success');
+  ok(!afterRepair.some((c) => c.kind === KINDS.REFRESH && c.capabilityId === clock.id), 'Z12: refresh still minted after repair success');
+
+  /* 4. Delayed retest: past the retention lag, due_retrieval serves
+   * the authored delayed task on the rehearsed family. */
+  const nowDue = T0 + 25 * HOUR;
+  const due = cands(ev, nowDue).find((c) => c.kind === KINDS.DUE_RETRIEVAL && c.capabilityId === clock.id);
+  ok(due != null && due.servableTask?.id === 'task.time.delayed.hear', `Z12: due_retrieval missing/unservable after lag — got ${due?.servableTask?.id ?? 'none'}`);
+  ev.push(attemptEvent(t_('task.time.delayed.hear'), clock, { at: nowDue, outcome: 'success' }));
+
+  /* 5. Retained → transfer mints on the held-out clinic family. */
+  const tr = cands(ev, nowDue + MIN).find((c) => c.kind === KINDS.TRANSFER && c.capabilityId === clock.id);
+  ok(tr != null && tr.servableTask?.id === 'task.time.transfer.clinic', `Z12: transfer missing/unservable post-retention — got ${tr?.servableTask?.id ?? 'none'}`);
+  ev.push(attemptEvent(t_('task.time.transfer.clinic'), clock, { at: nowDue + 2 * MIN, outcome: 'success' }));
+
+  /* 6. Transferred → assessment mints on the FRESH announcement
+   * family — never consumed by the teaching surface. */
+  const as = cands(ev, nowDue + 3 * MIN).find((c) => c.kind === KINDS.ASSESSMENT && c.capabilityId === clock.id);
+  ok(as != null && as.servableTask?.id === 'task.time.assessment.hear', `Z12: assessment missing/unservable post-transfer — got ${as?.servableTask?.id ?? 'none'}`);
+  ok(as.familyConsumed !== true, 'Z12: fresh assessment family reported consumed');
+  ev.push(attemptEvent(t_('task.time.assessment.hear'), clock, { at: nowDue + 4 * MIN, outcome: 'success' }));
+
+  /* 7. Assessment success consumes the claim — no re-offer. */
+  ok(!cands(ev, nowDue + 5 * MIN).some((c) => c.kind === KINDS.ASSESSMENT && c.capabilityId === clock.id), 'Z12: assessment re-offered after success');
 }

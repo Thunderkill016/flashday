@@ -847,6 +847,10 @@ export const MISSION_MEET_AT_TIME = makeMission({
     'task.time.input.scene',
     'task.time.input.clock',
     'task.time.retrieval.greeting',
+    /* Remediation precedes the re-drill it repairs: when refresh or
+     * correction mints after an attributed miss, the first unconsumed
+     * repair surface must be the remediation task, not the drill. */
+    'task.time.remediation.hear',
     'task.time.retrieval.hear',
     'task.time.retrieval.say',
     'task.time.retrieval.greet',
@@ -967,6 +971,32 @@ export const TASKS_MEET_AT_TIME = [
       ]
     },
     language: { requiredChunks: ['half past …'], requiredVocabulary: ['four', 'half'], requiredConstructions: [] }
+  }),
+  /* Remediation for the clock-time comprehension claim (008D vertical
+   * slice): a supported re-encounter on the REHEARSED choice family —
+   * repair, not fresh evidence. The attributing choice contract keeps
+   * the failure demand-routable (identify_spoken_number substrate), and
+   * the slowed single-clause stimulus isolates the number-catch the
+   * attributed failure names. */
+  task({
+    id: 'task.time.remediation.hear',
+    missionId: 'mission.meet_at_a_time',
+    capabilityId: 'reception.listen.understand_clock_time',
+    modality: 'listening',
+    purpose: 'remediation',
+    promptFamily: pf('reception.listen.understand_clock_time', TF.timeQAudio),
+    contextSignature: TF.timeQAudio,
+    stimulus: { type: 'audio_line', languageComponents: ['The meeting is at eight o\u2019clock.'] },
+    response: {
+      type: 'choice',
+      requiredFunctions: ['understand_clock_time', 'identify_spoken_number'],
+      options: [
+        { id: 'eight', text: 'Lúc 8 giờ.', correct: true },
+        { id: 'nine', text: 'Lúc 9 giờ.' },
+        { id: 'two', text: 'Lúc 2 giờ.' }
+      ]
+    },
+    language: { requiredChunks: ["It's … o'clock"], requiredVocabulary: ['eight'], requiredConstructions: [] }
   }),
   task({
     id: 'task.time.retrieval.say',

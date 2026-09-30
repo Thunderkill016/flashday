@@ -888,24 +888,38 @@ const consumedKinds = (session) => (session.selectionContext()?.actionsChosen ??
   say('JOURNAL: crash-injection at every boundary converges honestly (BLOCKER-2)');
 }
 
-/* COVERAGE (HIGH-7): the static audit enumerates every mintable intent
- * × capability gap independent of any trajectory — the differential
- * corpus is reference-driven and cannot see B0-only states. */
+/* COVERAGE (HIGH-7 + 008D): the static audit enumerates every
+ * mintable intent × capability pair independent of any trajectory —
+ * the differential corpus is reference-driven and cannot see B0-only
+ * states. Rows are SEMANTICALLY classified against the generator's
+ * real mint conditions: required = claim/repair-bearing role with a
+ * mintable intent and nothing servable; optional = carrier recovery
+ * degradation; not_mintable = structurally unreachable surface. */
 {
   const { runCoverageAudit } = await import('../experiments/next-for-you/differential.js');
   const cov = runCoverageAudit(FIXTURES);
   ok(cov.missions.length === FIXTURES.length, 'coverage audit skipped missions');
-  ok(cov.gaps.length > 0, 'coverage audit reported zero gaps — suspicious for the authored surface');
-  /* The known correction authoring gap survives as named findings —
-   * remediation content does not exist for every attributing cap. */
+  ok(cov.gaps.length > 0, 'coverage audit reported zero required gaps — suspicious for the authored surface');
+  ok(cov.gaps.every((g) => g.class === 'required' && g.mintable && !g.servable), 'required rows must be mintable-but-unservable');
+  /* Carrier rows can never be 'required' — carriers own no claim. */
+  ok(!cov.findings.some((f) => f.role === 'carrier' && f.class === 'required'), 'carrier row classified required');
+  /* The known semantic results: carrier diagnostic_probe is never
+   * mintable (self-suppressing paths), and correction gaps only exist
+   * where a choice contract can attribute the miss. */
+  ok(cov.findings.some((f) => f.kind === 'diagnostic_probe' && f.role === 'carrier' && f.class === 'not_mintable'),
+    'carrier diagnostic_probe should be classified not_mintable');
   const correctionGaps = cov.gaps.filter((g) => g.kind === 'correction');
   ok(correctionGaps.length > 0, 'correction remediation gaps vanished — audit not seeing the known gap');
+  /* The 008D vertical slice closed clock-time's correction gap — the
+   * remaining required correction rows are named findings on the other
+   * attributing listening targets. */
+  ok(!correctionGaps.some((g) => g.capabilityId === 'reception.listen.understand_clock_time' && g.mission === 'mission.meet_at_a_time'),
+    'authored remediation task did not close the clock-time correction gap');
   /* Assessment backlog is enumerated per-claim-target, not inferred
    * from whichever trajectory happened to reach it. */
   const backlog = cov.gaps.filter((g) => g.kind === 'assessment');
   ok(backlog.some((g) => g.backlog === 'no_assessment_task'), 'assessment-family backlog not enumerated');
-  ok(cov.gaps.every((g) => g.neededPurposes?.length > 0), 'gap rows missing needed purposes');
-  say('COVERAGE: static intent×capability gap audit runs (HIGH-7)');
+  say('COVERAGE: semantic intent×capability gap audit runs (HIGH-7/008D)');
 }
 
 /* LEGACY-PIN (BLOCKER-1 re-review): an open run predating selection
@@ -1029,9 +1043,19 @@ const consumedKinds = (session) => (session.selectionContext()?.actionsChosen ??
   const s = makeSession({ eventStore: es, runStore: flaky, decisionStore: ds });
   await s.init();
   await drive(s, (x) => x.type === 'task' && x.phase === 'prompt', { steps: 10 });
-  await assert.rejects(() => s.commit({ text: 'x' }), /injected commit-save/);
+  await assert.rejects(() => s.commit({ text: 's3cr3t-resp0nse' }), /injected commit-save/);
   const pendingRun = (await rs.list())[0];
   assert.ok(pendingRun.selection?.pendingConsumption, 'journal marker missing');
+  /* 008D minimization: the journal stores opaque digests, never the
+   * learner's response text — the evidence log alone holds it. */
+  assert.ok(
+    !JSON.stringify(pendingRun.selection.pendingConsumption).includes('s3cr3t-resp0nse'),
+    'journal leaked the learner response text'
+  );
+  assert.ok(
+    (pendingRun.selection.pendingConsumption.expectedEvents ?? []).every((x) => /^sha256:[0-9a-f]{64}$/.test(x.digest ?? '')),
+    'journal expectation is not a sha256 digest'
+  );
   /* tamper: same event id, altered outcome — the journal fingerprint
    * must catch it even though the id is present. Memory store returns
    * live references, so mutating the listed event edits the log. */

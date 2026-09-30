@@ -61,12 +61,18 @@ async function drive(page, maxScreens = 24, opts = {}) {
         continue;
       }
       const options = page.locator('[data-role="option"]');
-      if ((await options.count()) > 0) {
-        await options.first().click();
+      const nOptions = await options.count();
+      if (nOptions > 0) {
+        /* opts.wrong(taskId) → deliberately pick the SECOND option —
+         * the authored correct option is always first in the fixture
+         * data, so nth(1) lands an observed attributing miss. */
+        const idx = opts.wrong?.(taskId) && nOptions > 1 ? 1 : 0;
+        await options.nth(idx).click();
       } else {
         await page.locator('[data-role="answer"]').fill('hello');
         await page.locator('[data-role="commit"]').click();
       }
+      if (opts.until?.(taskId)) return { served, done: false, untilHit: true };
       continue;
     }
     throw new Error(`unknown screen '${screen}'`);
@@ -149,6 +155,59 @@ try {
     const withDigest = records.filter((r) => typeof r.decisionInputDigest === 'string' && r.decisionInputDigest.startsWith('sha256:'));
     assert.ok(withDigest.length > 0, `no audit records with sha256 digest found (keys: ${audit.map((a) => a.k)})`);
     check(`decision audit persisted (${withDigest.length} records carry decide-time sha256 digests)`);
+    await context.close();
+  }
+
+  // ── 008D vertical slice: post-lag attributing miss → real remediation ──
+  {
+    /* B0-native reachability note: correction mints only on a POST-taught
+     * attributed miss. The clock cap's tasks allow no support, so a first
+     * success goes straight to INDEPENDENT and the only later serve is
+     * the lagged due_retrieval — the ?clockOffset seam compresses the
+     * 24h retention lag. Phase A teaches the cap; phase B reloads the
+     * same persisted run with the clock shifted, fails the delayed
+     * retest, and expects the authored remediation task to be served. */
+    const { context, page, errors } = await mk('sim-slice');
+    const url = (extra = '') => `${origin}vnext/?mission=mission.meet_at_a_time&learner=sim-slice&mode=b0${extra}`;
+    const is = (prefix) => (id) => typeof id === 'string' && id.startsWith(prefix);
+    await page.goto(url());
+    const a = await drive(page, 30);
+    /* The run may legitimately reach summary — lagged intents (due,
+     * transfer, assessment) need real elapsed time. What matters here:
+     * the clock baseline was served and succeeded → INDEPENDENT. */
+    assert.ok(a.served.some(is('task.time.diagnostic.hear')), `clock-time baseline never served: ${a.served}`);
+    /* Reload the same persisted learner with the clock shifted +25h —
+     * a new run resumes and the lagged delayed retest is servable. */
+    await page.goto(url('&clockOffset=90000000'));
+    const b = await drive(page, 40, {
+      wrong: is('task.time.delayed.hear'),
+      until: is('task.time.remediation.hear')
+    });
+    assert.equal(errors.length, 0, `pageerrors: ${errors.join(' | ')}`);
+    assert.ok(b.served.some(is('task.time.delayed.hear')), `due retest never served post-lag: ${b.served}`);
+    assert.ok(b.untilHit, `attributing miss never routed to authored remediation: ${b.served}`);
+    /* The serving decision must carry correction kind in the audit. */
+    const corrAudit = await page.evaluate(() => {
+      const out = [];
+      for (let i = 0; i < localStorage.length; i += 1) {
+        const k = localStorage.key(i);
+        if (!k.includes('decision')) continue;
+        try {
+          const v = JSON.parse(localStorage.getItem(k));
+          for (const r of Array.isArray(v) ? v : (v?.decisions ?? v?.records ?? [])) {
+            if (r && typeof r === 'object') out.push(r);
+          }
+        } catch { /* non-json */ }
+      }
+      return out;
+    });
+    /* Both refresh and correction mint on an attributed miss on a
+     * taught cap — B0's frozen ranking decides which serves; the
+     * slice's requirement is that the AUTHORED remediation task is the
+     * repair surface actually served, audited under a repair kind. */
+    const repair = corrAudit.find((r) => (r.chosenKind === 'correction' || r.chosenKind === 'refresh') && r.taskId === 'task.time.remediation.hear');
+    assert.ok(repair != null, `no repair-kind audit record for the authored remediation task (kinds seen: ${corrAudit.map((r) => r.chosenKind)})`);
+    check(`008D slice: attributing miss → authored remediation served as ${repair.chosenKind} (task.time.remediation.hear)`);
     await context.close();
   }
 } finally {
