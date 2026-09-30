@@ -408,8 +408,12 @@ const cmdFinish = (id, args) => {
   const commits = commitsSince(s.startSha);
   const files = filesChangedSince(s.startSha);
   const section = (name) => {
-    const m = mission.body.match(new RegExp(`^##\\s+${name.replace(/ /g, '\\s+')}\\s*\\n([\\s\\S]*?)(?=^##\\s|\\s*$)`, 'mi'));
-    return m ? m[1].trim() : '(not declared)';
+    const re = new RegExp(`^##\\s+${name.replace(/ /g, '\\s+')}\\s*$`, 'mi');
+    const m = mission.body.match(re);
+    if (!m) return '(not declared)';
+    const rest = mission.body.slice(m.index + m[0].length);
+    const next = rest.search(/^##\s/m);
+    return (next === -1 ? rest : rest.slice(0, next)).trim() || '(not declared)';
   };
   const report = `# Mission report: ${id}
 
