@@ -4,7 +4,7 @@
 - mission: `missions/008e-required-surface-closure/mission.md`
 - branch: devin/m008e-required-surface-closure
 - starting sha: `765a5d86e2500ed16010315f0164ef9aee05715d`
-- ending sha: `cdc7d7d` (implementation) + report commit
+- ending sha: `37d50a4` (R1 content patch; verify:full PASS) + report commits
 
 ## Objective
 
@@ -17,13 +17,17 @@ trajectories — with zero Policy-B semantic change.
 ## Commits
 
 - `cdc7d7d 008E: close all five required content-surface findings`
+- `804d925 008E: mission report + implementation checkpoint`
+- `33d17ad 008E: record exact-head CI green on 804d925`
+- `37d50a4 008E R1: construct-valid assessment cues + cue-alignment
+  regressions` (PR comment 5919831496)
 
 ## Files changed vs start (5)
 
 - `M src/vnext/fixtures.js` — 3 new context signatures, 5 authored
   tasks, 5 revision bumps, taskIds ordering
 - `M tests/vnext-next-for-you-runtime.test.mjs` — 008E-WITNESS / FAM /
-  REVPIN / TRAJ sections (+92 checks → 180 total)
+  CUE / REVPIN / TRAJ sections (+108 checks → 196 total)
 - `M tests/vnext-slice.test.mjs` — scripted act + pinned sequence for
   `task.meet.assessment.name_signup`
 - `M tests/vnext-ui-session.test.mjs` — scripted answer for
@@ -61,16 +65,21 @@ trajectories — with zero Policy-B semantic change.
 
 ## FIVE ORIGINAL WITNESSES (replayed on base 765a5d8)
 
-All five confirmed failing with `servableTask: null` — the candidate
-mints, but no authored task exists to serve:
+Two distinct failure modes, stated exactly:
 
-| mission | capability | kind | before |
-| --- | --- | --- | --- |
-| buy_small_item | understand_spoken_price | correction | no remediation task |
-| find_a_place | follow_short_direction | correction | no remediation task |
-| meet_new_person | say_own_name | assessment | no own assessment task |
-| complete_small_order | request_item | assessment | no own assessment task |
-| talk_about_self_family | state_basic_self_detail | assessment | no own assessment task |
+- **Correction gaps (2):** the correction intent mints a candidate but
+  no remediation task exists to bind — `servableTask: null`.
+  - buy_small_item | `reception.listen.understand_spoken_price`
+  - find_a_place | `reception.listen.follow_short_direction`
+- **Assessment gaps (3):** the transferred precondition is reachable,
+  but with ZERO authored assessment tasks for the capability, ZERO
+  assessment candidates can mint at all.
+  - meet_new_person | `production.speak.say_own_name`
+  - complete_small_order | `interaction.request_item`
+  - talk_about_self_family | `production.speak.state_basic_self_detail`
+
+(Corrected per review R1 — the earlier draft wrongly claimed all five
+were `servableTask: null` mints.)
 
 ## PRICE REMEDIATION — `task.price.remediation.hear`
 
@@ -83,7 +92,7 @@ mints, but no authored task exists to serve:
   catching the number word — while `requiredFunctions` still names the
   attributed pair (`understand_spoken_price` + `identify_spoken_number`),
   bounding failure attribution to the declared substrate. Distractors
-  are the confusable teen/ty pair (three/thirteen) plus a far digit.
+  are a confusable same-onset digit (three/thirteen) plus a far digit.
 - taskIds: inserted before `task.price.retrieval.hear` so the
   correction/refresh pick lands on repair before re-drill.
 
@@ -103,13 +112,17 @@ mints, but no authored task exists to serve:
 
 - Mission `meet_new_person`, cap `production.speak.say_own_name`,
   spoken_production, `assessment`, `fresh_assessment`, zero support.
-- New signature `F.ownNameSignup`: organizer asks for the learner's
-  name for a sign-up sheet — cueTopology `signup_name_request`,
-  setting `community`, register `neutral`, interlocutor `organizer`,
-  first_meeting. The practiced exchange rehearses the peer cue
-  "What's your name?" and the transfer used a different context; an
-  organizer's formulaic request is a genuinely new comprehension→
-  production channel.
+- Signature `F.ownNameSignup` (unchanged): organizer name-request
+  context — cueTopology `signup_name_request`, setting `community`,
+  register `neutral`, interlocutor `organizer`, first_meeting.
+- **R1 cue fix:** stimulus is now `Hi — tell me your name.` — every
+  token is already inside this mission's practiced stimulus surface;
+  the original "For the sign-up sheet —" cue loaded the learner with
+  uncomprehended vocabulary ("sign-up sheet"), making comprehension —
+  not `state_own_name` — the thing measured. Freshness now comes
+  entirely from the context signature, not lexical novelty. Bare
+  "Linh", "I am Linh", "My name is Linh" all score success under the
+  deterministic matcher (asserted in 008E-CUE).
 - `capabilitySample: ['production.speak.say_own_name']` — direct sample;
   previously the capability was only covered transitively inside the
   multi-capability checkpoint.
@@ -118,21 +131,33 @@ mints, but no authored task exists to serve:
 
 - Mission `complete_small_order`, cap `interaction.request_item`,
   spoken_interaction, `assessment`, `fresh_assessment`, zero support.
-- New signature `OF.requestCart`: a drink-cart vendor calling the queue
-  forward ("Cold drinks! Who is next?") — the learner must produce the
-  request from the situation; there is no "what can I get you" cue to
-  echo. Distinct cue topology, setting, register, partner from both the
-  practiced stall order and the takeaway transfer.
+- Signature `OF.requestCart` (unchanged): drink-cart vendor context —
+  cueTopology `cart_order_call`, setting `drink_cart`, interlocutor
+  `vendor`.
+- **R1 cue fix:** stimulus is now `Yes? What can I get you?` — a
+  service invitation whose immediate pragmatic response IS the request.
+  The original "Cold drinks! Who is next?" invited the correct but
+  non-evidential reply "I'm next", measuring discourse inference, not
+  `request_item`. Every token is already inside this mission's
+  practiced cues ("Yes?", "What can I get you?"). Pinned regressions:
+  `a tea please` / `can i have a tea` / `tea please` succeed;
+  `i am next` stays non-evidence.
 
 ## SELF-DETAIL ASSESSMENT — `task.self.assessment.detail`
 
 - Mission `talk_about_self_family`, cap
   `production.speak.state_basic_self_detail`, spoken_production,
   `assessment`, `fresh_assessment`, zero support.
-- New signature `MF.selfHost`: a homestay host's arrival question
-  ("Do you work, or are you a student?") — distinct from the peer
-  small-talk teaching context and the office-registration transfer
-  context (different cue topology, setting, partner).
+- Signature `MF.selfHost` (unchanged): homestay-host context —
+  cueTopology `host_arrival_detail`, setting `homestay`, interlocutor
+  `host`.
+- **R1 cue fix:** stimulus is now `And where are you from?` — the
+  mission's already-practiced personal-detail question frame. The
+  original "Do you work, or are you a student?" invited the valid
+  answer "I work." which the deterministic matcher cannot accept (it
+  requires `I work in/at/as…` or `I am a …`) — an evaluator
+  false-negative on a natural response. The where-from cue invites
+  `I'm from Vietnam` / `I come from Vietnam` — all accepted forms.
 
 ## MISSION REVISION BUMPS
 
@@ -189,18 +214,15 @@ change; digest remains the single dominant stage (112ms), unchanged.
 
 ## VERIFY:FULL
 
-- `npm run verify` (typecheck 137 files + 26 node suites + build): PASS
-- `npm run test:browser`: 26 app groups + 8 vnext checks PASS
-- `npm run test:firestore`: emulator PASS (evidence immutability,
-  owner/learner pinning, idempotent append, replay parity, decision
-  audit rules)
-- Combined verify:full legs all green at head `cdc7d7d` (firestore leg
-  run separately after a local `java` PATH fix; identical content).
+- `npm run verify:full` at `37d50a4`: PASS — verify (typecheck 137
+  files + all node suites + build), browser 26+8, Firestore emulator
+  (evidence immutability, owner/learner pinning, idempotent append,
+  replay parity, decision-audit rules).
 
 ## CI
 
-GREEN on exact head `804d925` — push `36777075743`, pull_request
-`36777114226` (both `success`, ~2m35s).
+Exact-head green on `804d925` (push `36777075743`, pull_request
+`36777114226`). R1 patch head pending — updated after push.
 
 ## OPEN OPTIONAL GAPS
 
@@ -222,4 +244,4 @@ claim-bearing dead ends.
 
 ---
 
-`PR NOT MERGED — AWAITING CHATGPT CONTENT REVIEW`
+`PR #72 NOT MERGED — AWAITING FINAL CHATGPT CLEARANCE`
