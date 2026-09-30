@@ -619,4 +619,293 @@ const consumedKinds = (session) => (session.selectionContext()?.actionsChosen ??
   say('AUDIT: §11 fields present, no response text, conflict-safe');
 }
 
+/* ═══ HARDENING — 008C integration review round ════════════════ */
+
+/* LOCK (BLOCKER-1): while a live task is on screen the selector never
+ * re-runs — support_use landing mid-interaction cannot rebind the
+ * decision, and 100 renders cost zero new evaluations. */
+{
+  const es = createMemoryEventStore();
+  const s = makeSession({ eventStore: es });
+  await s.init();
+  await drive(s, (x) => x.type === 'task' && x.phase === 'prompt', { steps: 8 });
+  const scr = s.screen();
+  const before = s.selectionStats().selectCalls;
+  const lockedId = scr.taskId;
+  /* support() lands a real event mid-interaction — under the bug this
+   * re-ran B0 on the mutated log and could swap the displayed task. */
+  if ((scr.supportOffered ?? []).length) await s.support(scr.supportOffered[0]);
+  for (let i = 0; i < 100; i += 1) s.screen();
+  const after = s.screen();
+  assert.equal(after.taskId, lockedId, 'locked task was swapped under render');
+  assert.equal(s.selectionStats().selectCalls, before, 'screen() re-ran the selector on a live task');
+  ok(true, 'LOCK: live task + decision survive 100 renders and a mid-interaction event');
+  say('LOCK: live-task render lock, zero re-selection (BLOCKER-1)');
+}
+
+/* MIDNIGHT (BLOCKER-3): wall-clock crossing UTC midnight inside an open
+ * run can never roll the decision episode or reset budgets. */
+{
+  const es = createMemoryEventStore();
+  const rs = createMemoryRunStore();
+  /* Park now() at 23:59:59 UTC — the next minutes cross the boundary. */
+  tick = Date.parse('2026-02-01T23:59:30Z');
+  const s = makeSession({ eventStore: es, runStore: rs });
+  await s.init();
+  await drive(s, (x) => x.type === 'task' && x.phase === 'prompt', { steps: 8 });
+  const ep0 = s.selectionContext().decisionEpisodeId;
+  const acts0 = (s.selectionContext().actionsChosen ?? []).length;
+  tick += 2 * DAY; // two whole days pass with the run still open
+  for (let i = 0; i < 20; i += 1) s.screen();
+  assert.equal(s.selectionContext().decisionEpisodeId, ep0, 'episode rolled on wall clock');
+  /* Reload across midnight: the persisted episode survives. */
+  const s2 = makeSession({ eventStore: es, runStore: rs });
+  await s2.init();
+  await drive(s2, (x) => x.type === 'task' && x.phase === 'prompt', { steps: 6 });
+  assert.equal(s2.selectionContext().decisionEpisodeId, ep0, 'reload rolled the episode');
+  assert.ok((s2.selectionContext().actionsChosen ?? []).length >= acts0, 'episode budgets regressed on reload');
+  ok(true, 'MIDNIGHT: episode/budgets survive clock + reload boundaries');
+  say('MIDNIGHT: episode is run-pinned, not clock-derived (BLOCKER-3)');
+}
+
+/* STORE (HIGH-4): local stores throw on failed writes; the memory run
+ * store never aliases caller objects. */
+{
+  /* localStorage.setItem failure must surface, not masquerade as durable */
+  const realLS = globalThis.localStorage;
+  globalThis.localStorage = {
+    getItem: () => null,
+    setItem: () => { throw new Error('quota'); },
+    removeItem: () => {}
+  };
+  try {
+    const { createLocalEventStore, createLocalRunStore, createLocalDecisionStore } = await import('../src/vnext/ui/local-store.js');
+    const ev = createLocalEventStore('fail.l');
+    let threw = false;
+    try { await ev.append([{ id: 'e1', learnerId: 'fail.l', occurredAt: 1 }]); } catch { threw = true; }
+    ok(threw, 'local event store swallowed a failed write');
+    const rn = createLocalRunStore('fail.l');
+    threw = false;
+    try { await rn.saveRun({ id: 'r1', learnerId: 'fail.l', missionId: 'm', status: 'open', startedAt: 1 }); } catch { threw = true; }
+    ok(threw, 'local run store swallowed a failed write');
+    const dc = createLocalDecisionStore('fail.l');
+    threw = false;
+    try { await dc.append({ decisionId: 'd1', learnerId: 'fail.l', timestamp: 1 }); } catch { threw = true; }
+    ok(threw, 'local decision store swallowed a failed write');
+  } finally {
+    globalThis.localStorage = realLS;
+  }
+  /* memory run store: a returned object must not alias stored state */
+  const rs = createMemoryRunStore();
+  await rs.saveRun({ id: 'r.x', learnerId: 'L', missionId: 'm', status: 'open', startedAt: 1, selection: { decisionContext: { actionsChosen: [] } } });
+  const grabbed = await rs.getRun('r.x');
+  grabbed.selection.decisionContext.actionsChosen.push({ kind: 'forged' });
+  const again = await rs.getRun('r.x');
+  assert.equal(again.selection.decisionContext.actionsChosen.length, 0, 'memory run store aliases caller mutation');
+  ok(true, 'STORE: local write failures throw; memory store is non-aliasing');
+  say('STORE: write failures surface + memory store deep-clones (HIGH-4)');
+}
+
+/* MODE-PIN (HIGH-6): an open run's selection policy cannot switch on
+ * reload — a different requested mode fails closed, both directions. */
+{
+  const es = createMemoryEventStore();
+  const rs = createMemoryRunStore();
+  const b0 = makeSession({ eventStore: es, runStore: rs, mode: 'b0' });
+  await b0.init();
+  const asRef = makeSession({ eventStore: es, runStore: rs, mode: 'reference' });
+  await assert.rejects(() => asRef.init(), /selection_mode_pinned/);
+  /* and the other direction */
+  const es2 = createMemoryEventStore();
+  const rs2 = createMemoryRunStore();
+  const ref = makeSession({ eventStore: es2, runStore: rs2, mode: 'reference' });
+  await ref.init();
+  const asB0 = makeSession({ eventStore: es2, runStore: rs2, mode: 'b0' });
+  await assert.rejects(() => asB0.init(), /selection_mode_pinned/);
+  /* same-mode reload still resumes fine */
+  const sameMode = makeSession({ eventStore: es, runStore: rs, mode: 'b0' });
+  await sameMode.init();
+  ok(true, 'MODE-PIN: cross-mode reopen refused, same-mode resumes');
+  say('MODE-PIN: open-run policy is immutable (HIGH-6)');
+}
+
+/* JOURNAL (BLOCKER-2): crash-injection at every boundary of the
+ * consumption commit. Wrappers fail exactly one named call. */
+{
+  /* Boundary-semantics injection: `failPending` throws on the save that
+   * CARRIES pendingConsumption (journal write); `failCommit` throws on
+   * the save that CLEARS a previously-persisted pending marker (final
+   * context commit). Call-count injection cannot name these boundaries
+   * — init/start saveRun calls vary with learnerName. */
+  const flakyRunStore = (inner, which) => {
+    let sawPending = false;
+    let armed = true;
+    return {
+      ...inner,
+      async saveRun(r) {
+        const carries = r?.selection?.pendingConsumption != null;
+        if (armed && which === 'pending' && carries) {
+          armed = false;
+          throw new Error('injected pending-write failure');
+        }
+        if (armed && which === 'commit' && sawPending && !carries) {
+          armed = false;
+          throw new Error('injected commit-save failure');
+        }
+        if (carries) sawPending = true;
+        return inner.saveRun(r);
+      }
+    };
+  };
+  const flakyEventStore = (inner, fail) => ({
+    ...inner,
+    async append(evts) {
+      if (fail === 1) { fail = 0; throw new Error('injected append failure'); }
+      return inner.append(evts);
+    }
+  });
+  const flakyDecisionStore = (inner, fail) => ({
+    ...inner,
+    async append(rec) {
+      if (fail === 1) { fail = 0; throw new Error('injected decision-append failure'); }
+      return inner.append(rec);
+    }
+  });
+  const firstTask = async (s) => drive(s, (x) => x.type === 'task' && x.phase === 'prompt', { steps: 10 });
+  const firstDecisionId = (s) => s.decisions().at(-1)?.decisionId ?? null;
+
+  /* (a) pending-save failure → nothing durable may land */
+  {
+    const es = createMemoryEventStore();
+    const base = createMemoryRunStore();
+    const ds = createMemoryDecisionStore();
+    const rs = flakyRunStore(base, 'pending');
+    const s = makeSession({ eventStore: es, runStore: rs, decisionStore: ds });
+    await s.init();
+    await firstTask(s);
+    await assert.rejects(() => s.commit({ text: 'x' }), /injected pending-write/);
+    const evts = await es.list();
+    assert.equal(evts.filter((e) => e.attempt?.outcome != null).length, 0, 'evidence landed despite pending-save failure');
+    assert.equal((await ds.list()).length, 0, 'audit landed despite pending-save failure');
+    const run = (await rs.list())[0];
+    assert.equal(run.selection?.pendingConsumption ?? null, null, 'phantom pending marker persisted');
+    ok(true, 'JOURNAL(a): pending-save failure → zero evidence, zero audit');
+  }
+
+  /* (b) evidence-append failure → pending exists, no evidence →
+   * reconcile clears the marker, decision stays unconsumed and replays */
+  {
+    const es = flakyEventStore(createMemoryEventStore(), 1);
+    const rs = createMemoryRunStore();
+    const ds = createMemoryDecisionStore();
+    const s = makeSession({ eventStore: es, runStore: rs, decisionStore: ds });
+    await s.init();
+    await firstTask(s);
+    await assert.rejects(() => s.commit({ text: 'x' }), /injected append/);
+    const run = await rs.list().then((rs) => rs[0]);
+    assert.ok(run.selection?.pendingConsumption, 'pending marker missing after evidence failure');
+    const s2 = makeSession({ eventStore: es, runStore: rs, decisionStore: ds });
+    await s2.init(); // reconcile
+    const run2 = await rs.list().then((rs) => rs[0]);
+    assert.equal(run2.selection?.pendingConsumption ?? null, null, 'pending marker survived empty-evidence reconcile');
+    const dsList = await ds.list();
+    assert.equal(dsList.length, 0, 'audit written for an unconsumed decision');
+    ok(true, 'JOURNAL(b): evidence failure → marker rolled back, decision unconsumed');
+  }
+
+  /* (c) crash after evidence, before audit → reload finishes audit +
+   * context idempotently */
+  {
+    const es = createMemoryEventStore();
+    const rs = createMemoryRunStore();
+    const ds = flakyDecisionStore(createMemoryDecisionStore(), 1);
+    const s = makeSession({ eventStore: es, runStore: rs, decisionStore: ds });
+    await s.init();
+    await firstTask(s);
+    await assert.rejects(() => s.commit({ text: 'x' }), /injected decision-append/);
+    const evts = await es.list();
+    assert.ok(evts.some((e) => e.attempt?.outcome != null), 'evidence missing after landed append');
+    assert.equal((await ds.list()).length, 0, 'audit unexpectedly present');
+    const s2 = makeSession({ eventStore: es, runStore: rs, decisionStore: ds });
+    await s2.init(); // reconcile: evidence present → finish audit + context
+    const dsList = await ds.list();
+    assert.equal(dsList.length, 1, 'reconcile did not finish the audit append');
+    const run2 = await rs.list().then((r) => r[0]);
+    assert.equal(run2.selection?.pendingConsumption ?? null, null, 'marker not cleared after reconcile');
+    assert.ok((run2.selection?.decisionContext?.consumedDecisionIds ?? []).length >= 1, 'context not advanced after reconcile');
+    /* same evidence set, one audit record, one consumed decision */
+    const s3 = makeSession({ eventStore: es, runStore: rs, decisionStore: ds });
+    await s3.init();
+    assert.equal((await ds.list()).length, 1, 'second reload duplicated the audit');
+    ok(true, 'JOURNAL(c): evidence-only crash → reconcile finishes audit+context once');
+  }
+
+  /* (d) crash after audit before final save → pending remains →
+   * reconcile applies journaled context (audit already present) */
+  {
+    const es = createMemoryEventStore();
+    const base = createMemoryRunStore();
+    const ds = createMemoryDecisionStore();
+    /* save#1 run mint, #2 pendingConsumption, #3 final context save */
+    const rs = flakyRunStore(base, 'commit');
+    const s = makeSession({ eventStore: es, runStore: rs, decisionStore: ds });
+    await s.init();
+    await firstTask(s);
+    await assert.rejects(() => s.commit({ text: 'x' }), /injected commit-save/);
+    assert.equal((await ds.list()).length, 1, 'audit missing after crash');
+    const run = await rs.list().then((r) => r[0]);
+    assert.ok(run.selection?.pendingConsumption, 'pending marker lost');
+    const s2 = makeSession({ eventStore: es, runStore: rs, decisionStore: ds });
+    await s2.init();
+    const run2 = await rs.list().then((r) => r[0]);
+    assert.equal(run2.selection?.pendingConsumption ?? null, null, 'marker not cleared');
+    assert.equal((await ds.list()).length, 1, 'audit duplicated on reconcile');
+    assert.ok((run2.selection?.decisionContext?.consumedDecisionIds ?? []).length >= 1, 'journaled context not applied');
+    ok(true, 'JOURNAL(d): post-audit crash → reconcile applies journaled context');
+  }
+
+  /* (e) full convergence: crash at each boundary converges to one
+   * evidence set + one audit + one consumed decision */
+  {
+    const es = createMemoryEventStore();
+    const rs = createMemoryRunStore();
+    const ds = createMemoryDecisionStore();
+    const s = makeSession({ eventStore: es, runStore: rs, decisionStore: ds });
+    await s.init();
+    await firstTask(s);
+    await s.commit({ text: 'x' });
+    const ev1 = await es.list();
+    const ds1 = await ds.list();
+    /* reload → reconcile → drive the next selection; stores stay clean */
+    const s2 = makeSession({ eventStore: es, runStore: rs, decisionStore: ds });
+    await s2.init();
+    await firstTask(s2);
+    assert.equal((await ds.list()).length, ds1.length, 'audit count drifted across clean reload');
+    const evIds = new Set((await es.list()).map((x) => x.id));
+    assert.ok(ev1.every((e) => evIds.has(e.id)), 'evidence drifted');
+    ok(true, 'JOURNAL(e): clean commit converges — one evidence set, one audit');
+  }
+  say('JOURNAL: crash-injection at every boundary converges honestly (BLOCKER-2)');
+}
+
+/* COVERAGE (HIGH-7): the static audit enumerates every mintable intent
+ * × capability gap independent of any trajectory — the differential
+ * corpus is reference-driven and cannot see B0-only states. */
+{
+  const { runCoverageAudit } = await import('../experiments/next-for-you/differential.js');
+  const cov = runCoverageAudit(FIXTURES);
+  ok(cov.missions.length === FIXTURES.length, 'coverage audit skipped missions');
+  ok(cov.gaps.length > 0, 'coverage audit reported zero gaps — suspicious for the authored surface');
+  /* The known correction authoring gap survives as named findings —
+   * remediation content does not exist for every attributing cap. */
+  const correctionGaps = cov.gaps.filter((g) => g.kind === 'correction');
+  ok(correctionGaps.length > 0, 'correction remediation gaps vanished — audit not seeing the known gap');
+  /* Assessment backlog is enumerated per-claim-target, not inferred
+   * from whichever trajectory happened to reach it. */
+  const backlog = cov.gaps.filter((g) => g.kind === 'assessment');
+  ok(backlog.some((g) => g.backlog === 'no_assessment_task'), 'assessment-family backlog not enumerated');
+  ok(cov.gaps.every((g) => g.neededPurposes?.length > 0), 'gap rows missing needed purposes');
+  say('COVERAGE: static intent×capability gap audit runs (HIGH-7)');
+}
+
 console.log(`vnext-next-for-you-runtime: ${check} checks — PASS`);

@@ -26,6 +26,7 @@ import { LEARNING_POLICY_V1 } from '../../src/vnext/policy.js';
 import { RISK_PRIORS } from '../../src/vnext/risk-priors.js';
 import { engineState } from '../../src/vnext/next-for-you/selector.js';
 import { policyB, PURPOSE_TO_KIND } from '../../src/vnext/next-for-you/policies.js';
+import { INTENT_PURPOSES } from '../../src/vnext/next-for-you/candidate-generator.js';
 import { validateDecision } from '../../src/vnext/next-for-you/validator.js';
 import { emptyContext, recordChoice } from '../../src/vnext/next-for-you/decision-context.js';
 import { KINDS } from '../../src/vnext/next-for-you/constants.js';
@@ -292,6 +293,82 @@ export function runCorpus(fixtures, { steps = 40, matrix = DIFFERENTIAL_MATRIX }
   return all;
 }
 
+/* ── HIGH-7: trajectory-independent B0 content coverage audit ──────
+ * The differential corpus is REFERENCE-driven — B0-only states are
+ * unreachable inside it, so "0 CONTENT-GAP rows" can never prove "no
+ * content gaps". This audit instead enumerates every intent kind B0
+ * can mint for each mission-surface capability and asks the static
+ * question: does the authored task surface contain at least one task
+ * whose purpose can serve it? Plus the assessment-family backlog:
+ * claim-bearing caps whose only assessment tasks reuse a family the
+ * teaching surface already consumed. */
+const MINTABLE_BY_ROLE = {
+  target: [
+    'diagnostic_probe', 'correction', 'refresh', 'independent_attempt',
+    'due_retrieval', 'transfer', 'assessment', 'mission_continuation',
+    'new_input', 'resume_in_flight'
+  ],
+  carrier: [
+    'diagnostic_probe', 'correction', 'refresh', 'independent_attempt',
+    'mission_continuation', 'new_input', 'resume_in_flight'
+  ],
+  prereq: ['mission_continuation', 'new_input', 'resume_in_flight'],
+  support: ['support_demand']
+};
+const TEACHING_PURPOSES = new Set(['diagnostic', 'input', 'notice', 'retrieval', 'production', 'interaction', 'remediation', 'delayed_retrieval', 'transfer']);
+
+export function contentCoverageAudit(fixture) {
+  const mission = fixture.mission;
+  const surface = new Set([
+    ...(mission.targetCapabilities ?? []),
+    ...(mission.carrierCapabilities ?? []),
+    ...(mission.supportCapabilities ?? []),
+    ...(mission.prerequisiteCapabilities ?? [])
+  ]);
+  const scopedTasks = fixture.tasks.filter((t) => surface.has(t.capabilityId));
+  const roleOf = (capId) =>
+    (mission.targetCapabilities ?? []).includes(capId) ? 'target'
+    : (mission.supportCapabilities ?? []).includes(capId) ? 'support'
+    : (mission.prerequisiteCapabilities ?? []).includes(capId) ? 'prereq'
+    : 'carrier';
+  const gaps = [];
+  const rows = [];
+  for (const capId of surface) {
+    const tasks = scopedTasks.filter((t) => t.capabilityId === capId);
+    const authored = new Set(tasks.map((t) => t.purpose));
+    const role = roleOf(capId);
+    for (const kind of MINTABLE_BY_ROLE[role] ?? []) {
+      const serves = INTENT_PURPOSES[kind] ?? [];
+      const covered = serves.some((p) => authored.has(p));
+      rows.push({ capabilityId: capId, role, kind, covered });
+      if (!covered) gaps.push({ capabilityId: capId, role, kind, neededPurposes: serves });
+    }
+    /* Assessment-family backlog: the checkpoint must come from a
+     * family the teaching surface never consumed. */
+    if (role === 'target' && mission.assessmentPlan?.required) {
+      const teachingFams = new Set(
+        tasks.filter((t) => TEACHING_PURPOSES.has(t.purpose)).map((t) => t.promptFamily).filter(Boolean)
+      );
+      const assessTasks = tasks.filter((t) => t.purpose === 'assessment');
+      const fresh = assessTasks.filter((t) => t.promptFamily && !teachingFams.has(t.promptFamily));
+      if (assessTasks.length === 0) {
+        gaps.push({ capabilityId: capId, role, kind: 'assessment', neededPurposes: ['assessment'], backlog: 'no_assessment_task' });
+      } else if (fresh.length === 0) {
+        gaps.push({ capabilityId: capId, role, kind: 'assessment', neededPurposes: ['assessment'], backlog: 'no_fresh_family', families: [...teachingFams] });
+      }
+    }
+  }
+  return { mission: mission.id, rows, gaps };
+}
+
+export function runCoverageAudit(fixtures) {
+  const perMission = fixtures.map(contentCoverageAudit);
+  return {
+    missions: perMission,
+    gaps: perMission.flatMap((m) => m.gaps.map((g) => ({ mission: m.mission, ...g })))
+  };
+}
+
 /* Direct run: `node experiments/next-for-you/differential.js` prints the
  * per-class histogram and every non-EXPECTED divergence for §17 review. */
 if (import.meta.url === `file://${process.argv[1]}`) {
@@ -307,4 +384,11 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.log(`${r.class} | ${r.mission} ${r.archetype} step ${r.step} | ref:${r.ref.purpose ?? r.ref.status} -> b0:${r.b0.kind ?? 'none'} | ${r.note ?? ''}`);
   }
   if (rows.some((r) => r.class === 'BUG') || violations > 0) process.exitCode = 1;
+
+  /* HIGH-7 content coverage — trajectory-independent gaps. */
+  const coverage = runCoverageAudit(FIXTURES);
+  console.log(`\ncontent coverage: ${coverage.gaps.length} gaps across ${FIXTURES.length} missions`);
+  for (const g of coverage.gaps) {
+    console.log(`  ${g.mission} ${g.capabilityId} [${g.role}] ${g.kind}${g.backlog ? ' (' + g.backlog + ')' : ''} needs ${g.neededPurposes.join('|')}`);
+  }
 }

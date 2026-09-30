@@ -62,23 +62,31 @@ export function createMemoryEventStore(seed = []) {
 
 export function createMemoryRunStore(seed = []) {
   const byId = new Map();
-  for (const r of seed) byId.set(r.id, r);
+  /* HIGH-4: every boundary deep-clones — mutating a returned run must
+   * never silently edit "persisted" state without a saveRun call. A
+   * shared `run.selection` reference would let tests pass while real
+   * persistence was broken. */
+  for (const r of seed) byId.set(r.id, structuredClone(r));
   return {
     async getOpenRun(learnerId, missionId) {
       const open = [...byId.values()]
         .filter((r) => r.learnerId === learnerId && r.missionId === missionId && r.status === 'open')
         .sort((a, b) => a.startedAt - b.startedAt || (a.id < b.id ? -1 : 1));
-      return open[open.length - 1] ?? null;
+      const r = open[open.length - 1] ?? null;
+      return r ? structuredClone(r) : null;
     },
     async getRun(runId) {
-      return byId.get(runId) ?? null;
+      const r = byId.get(runId);
+      return r ? structuredClone(r) : null;
     },
     async saveRun(run) {
-      byId.set(run.id, { ...run });
-      return byId.get(run.id);
+      byId.set(run.id, structuredClone(run));
+      return structuredClone(byId.get(run.id));
     },
     async list(learnerId) {
-      return [...byId.values()].filter((r) => !learnerId || r.learnerId === learnerId);
+      return [...byId.values()]
+        .filter((r) => !learnerId || r.learnerId === learnerId)
+        .map((r) => structuredClone(r));
     }
   };
 }

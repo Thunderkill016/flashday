@@ -246,6 +246,8 @@ service cloud.firestore {
     // comparison. No learner snapshots, no response text.
     function validVnextDecision(docId) {
       let d = request.resource.data;
+      /* Consumed-decision audit docs must carry full provenance — a
+       * null-critical audit record is audit theater (008C HIGH-5). */
       return hasOnly(['id', 'owner_id', 'learner_id', 'mission_id',
                       'mission_revision', 'task_id', 'task_revision',
                       'capability_id', 'selection_policy_version',
@@ -261,16 +263,20 @@ service cloud.firestore {
         && d.schema_version == 1
         && d.decision_at is number
         && d.recorded_at is timestamp
-        && (d.mission_id == null || validString(d.mission_id, 1, 200))
-        && (d.task_id == null || validString(d.task_id, 1, 200))
-        && (d.capability_id == null || validString(d.capability_id, 1, 200))
-        && (d.selection_policy_version == null || validString(d.selection_policy_version, 1, 80))
-        && (d.decision_input_digest == null || validString(d.decision_input_digest, 1, 128))
-        && (d.decision_episode_id == null || validString(d.decision_episode_id, 1, 200))
-        && (d.session_id == null || validString(d.session_id, 1, 200))
-        && (d.mission_run_id == null || validString(d.mission_run_id, 1, 200))
-        && (d.chosen_kind == null || validString(d.chosen_kind, 1, 60))
-        && (d.context_version == null || validString(d.context_version, 1, 80))
+        && validString(d.mission_id, 1, 200)
+        && d.mission_revision is int && d.mission_revision >= 1
+        && validString(d.task_id, 1, 200)
+        && d.task_revision is int && d.task_revision >= 1
+        && validString(d.capability_id, 1, 200)
+        && validString(d.selection_policy_version, 1, 80)
+        && validString(d.learning_policy_version, 1, 80)
+        && validString(d.decision_input_digest, 71, 71)
+        && d.decision_input_digest.matches('^sha256:[0-9a-f]{64}$')
+        && validString(d.decision_episode_id, 1, 200)
+        && validString(d.session_id, 1, 200)
+        && validString(d.mission_run_id, 1, 200)
+        && validString(d.chosen_kind, 1, 60)
+        && validString(d.context_version, 1, 80)
         && (d.reason_codes == null || isSmallList(d.reason_codes))
         && (d.shadow == null || isSmallMap(d.shadow));
     }

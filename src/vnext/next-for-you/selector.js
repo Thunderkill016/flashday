@@ -244,25 +244,31 @@ export function selectNextTask(input) {
 /* §11 — compact append-only audit provenance for a consumed decision.
  * Deliberately small: identities, versions, digests, reason codes — the
  * learner's response text lives in evidence events, never here. */
-export function decisionAuditRecord(decision, { learnerId, missionId, missionRevision, sessionId, timestamp, shadow = null, input = null, digest = null }) {
+export function decisionAuditRecord(decision, { learnerId, missionId, missionRevision, missionRunId = null, sessionId, timestamp, shadow = null, input = null, digest = null }) {
   /* The digest identifies the input AS OF DECISION TIME — the same
    * state bound into decisionId. Callers pass it explicitly; the
    * fallback recompute over `input` is only correct when the stored
    * decide-time state is still current. */
   const inputDigest = digest ?? (input ? stateDigest(input) : null);
+  /* HIGH-5: episode/session provenance comes from the EXACT decide-time
+   * context carried in the input snapshot — a shadow-wrapped reference
+   * decision has no decisionContextSummary, so the summary field alone
+   * cannot be trusted as the only source. */
+  const decideCtx = input?.decisionContext ?? null;
   return deepFreezeAll({
     decisionId: decision.decisionId,
     learnerId,
     missionId: missionId ?? decision.missionId ?? null,
     missionRevision: missionRevision ?? decision.missionRevision ?? null,
+    missionRunId,
     taskId: decision.chosen?.taskId ?? null,
     taskRevision: decision.chosen?.taskRevision ?? null,
     capabilityId: decision.chosen?.capabilityId ?? null,
     selectionPolicyVersion: decision.selectionPolicyVersion ?? null,
     learningPolicyVersion: input?.policy?.version ?? decision.learningPolicyVersion ?? null,
     decisionInputDigest: inputDigest,
-    decisionEpisodeId: decision.decisionContextSummary?.episode ?? null,
-    sessionId: sessionId ?? null,
+    decisionEpisodeId: decision.decisionContextSummary?.episode ?? decideCtx?.decisionEpisodeId ?? null,
+    sessionId: sessionId ?? decideCtx?.sessionId ?? null,
     chosenKind: decision.chosen?.kind ?? null,
     timestamp,
     reasonCodes: [

@@ -30,6 +30,16 @@ const writeJson = (key, value) => {
   }
 };
 
+/* HIGH-4: a failed write must surface — stores report persistence
+ * success only when the bytes actually landed. Silently returning
+ * false would let a quota/security/storage failure masquerade as a
+ * durable append (evidence "saved" that a reload never sees). */
+const mustWrite = (key, value) => {
+  if (!writeJson(key, value)) {
+    throw new Error(`localStore write failed for '${key}' — refusing to report an unpersisted write as durable`);
+  }
+};
+
 export function createLocalEventStore(learnerId) {
   const key = eventsKey(learnerId);
   return {
@@ -49,7 +59,7 @@ export function createLocalEventStore(learnerId) {
         byId.set(event.id, event);
         appended++;
       }
-      writeJson(key, [...byId.values()]);
+      mustWrite(key, [...byId.values()]);
       return { appended, deduped };
     },
     async list() {
@@ -79,7 +89,7 @@ export function createLocalRunStore(learnerId) {
     async saveRun(run) {
       const runs = all().filter((r) => r.id !== run.id);
       runs.push({ ...run });
-      writeJson(key, runs);
+      mustWrite(key, runs);
       return run;
     },
     async list() {
@@ -104,7 +114,7 @@ export function createLocalDecisionStore(learnerId) {
         return { appended: 0, deduped: 1 };
       }
       byId.set(record.decisionId, record);
-      writeJson(key, [...byId.values()]);
+      mustWrite(key, [...byId.values()]);
       return { appended: 1, deduped: 0 };
     },
     async list() {

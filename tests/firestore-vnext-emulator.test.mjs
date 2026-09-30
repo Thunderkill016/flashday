@@ -145,6 +145,20 @@ try {
   await assertFails(sdk.setDoc(sdk.doc(alice.db, vnextDecisionPath(UID, "dec.emu.4")), { ...decDoc, id: "dec.emu.4", smuggled: true }));
   await assertFails(sdk.setDoc(sdk.doc(alice.db, vnextDecisionPath(UID, "dec.emu.5")), { ...decDoc, id: "dec.emu.5", decision_at: "not-a-number" }));
 
+  /* HIGH-5: a consumed-decision audit missing critical provenance is
+   * denied — nulls and absent fields alike. */
+  for (const [i, field] of ['mission_id', 'task_id', 'capability_id',
+    'selection_policy_version', 'learning_policy_version', 'decision_input_digest',
+    'decision_episode_id', 'session_id', 'mission_run_id', 'chosen_kind',
+    'context_version', 'mission_revision', 'task_revision'].entries()) {
+    await assertFails(sdk.setDoc(sdk.doc(alice.db, vnextDecisionPath(UID, `dec.null.${i}`)), { ...decDoc, id: `dec.null.${i}`, [field]: null }));
+    const { [field]: _drop, ...rest } = decDoc;
+    await assertFails(sdk.setDoc(sdk.doc(alice.db, vnextDecisionPath(UID, `dec.absent.${i}`)), { ...rest, id: `dec.absent.${i}` }));
+  }
+  /* digest must be a real sha256 — wrong length or characters denied */
+  await assertFails(sdk.setDoc(sdk.doc(alice.db, vnextDecisionPath(UID, "dec.emu.7")), { ...decDoc, id: "dec.emu.7", decision_input_digest: "sha256:nothex" }));
+  await assertFails(sdk.setDoc(sdk.doc(alice.db, vnextDecisionPath(UID, "dec.emu.8")), { ...decDoc, id: "dec.emu.8", decision_input_digest: "sha256:" + "ab".repeat(31) }));
+
   /* real adapter: idempotent append dedupes, a conflicting same-id
    * write throws rather than overwriting the audit. */
   const decAppend = await appendVnextDecision(alice, UID, { ...auditRecord, decisionId: "dec.emu.6" });
