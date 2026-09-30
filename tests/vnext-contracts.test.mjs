@@ -691,3 +691,47 @@ const stateOf = (log, id) => projectLearnerState(LEARNER, log, CAPABILITIES, REG
   assert.equal(sBad.state, 'SUPPORTED');
   console.log('✓ registry: revisions coexist, duplicate id@revision rejected, invalid tasks mint nothing');
 }
+
+// ── 15. Response type × purpose compatibility (Finding B, review of #64) ──
+// A task whose response shape emits an event type its purpose may never
+// produce is a wedge: it passes naive validation, then bindAttempt throws
+// on every commit. The shape must be unrepresentable at authoring time.
+{
+  const cap = capabilityById('production.speak.say_own_name');
+  const sig = { cueTopology: 'pc', setting: 'ps', register: 'pr', channel: 'pch' };
+  const mk = (purpose, responseType) => makeTask({
+    id: `t.compat.${purpose}.${responseType}`, missionId: 'm.compat', capabilityId: cap.id,
+    modality: cap.modality, purpose, promptFamily: `p.compat.${purpose}.${responseType}`,
+    contextSignature: sig,
+    response: { type: responseType, options: responseType === 'choice' ? [{ id: 'a', text: 'x', correct: true }] : undefined, requiredFunctions: ['state_own_name'] },
+    evaluation: { authority: 'deterministic', contractId: responseType === 'choice' ? 'eval.choice.correct.v1' : 'eval.required_functions.v1' }
+  });
+
+  // a. production + choice → emits recognition_attempt, forbidden for
+  //    production → invalid contract.
+  assert.throws(() => mk('production', 'choice'), /response\.type/, 'production+choice must be rejected');
+  assert.ok(validateTask(mk('production', 'spoken_turn')).length === 0, 'production+spoken_turn stays valid');
+
+  // b. diagnostic + choice → recognition_attempt is legal → valid.
+  assert.ok(validateTask(mk('diagnostic', 'choice')).length === 0, 'diagnostic+choice stays valid');
+
+  // c. retrieval + choice → recognition_attempt legal → valid.
+  assert.ok(validateTask(mk('retrieval', 'choice')).length === 0, 'retrieval+choice stays valid');
+
+  // d. delayed/transfer/assessment emit their fixed type regardless of
+  //    response shape — still valid with a choice response.
+  const delayedChoice = { ...mk('retrieval', 'choice'), purpose: 'delayed_retrieval', freshness: { required: false, familyClass: 'practiced' } };
+  assert.ok(validateTask(delayedChoice).length === 0, 'delayed_retrieval+choice stays valid');
+  const assessSig = { cueTopology: 'ac', setting: 'as', register: 'ar', channel: 'ah' };
+  const assessChoice = makeTask({
+    id: 't.compat.assess', missionId: 'm.compat', capabilityId: cap.id, modality: cap.modality,
+    purpose: 'assessment', promptFamily: 'p.compat.assess', contextSignature: assessSig,
+    response: { type: 'choice', options: [{ id: 'a', text: 'x', correct: true }], requiredFunctions: ['state_own_name'] },
+    evaluation: { authority: 'deterministic', contractId: 'eval.choice.correct.v1' },
+    freshness: { required: true, familyClass: 'fresh_assessment' },
+    assessment: { capabilitySample: [cap.id], answerRevealDuringAttempt: false }
+  });
+  assert.ok(validateTask(assessChoice).length === 0, 'assessment+choice stays valid');
+
+  console.log('✓ response×purpose: production+choice rejected, valid combos preserved');
+}

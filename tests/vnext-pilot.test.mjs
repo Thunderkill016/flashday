@@ -22,8 +22,10 @@ import assert from 'node:assert/strict';
 import { CAPABILITIES } from '../src/vnext/capabilities.js';
 import { RETENTION_DELAY_MS } from '../src/vnext/projection.js';
 import { RISK_PRIORS } from '../src/vnext/risk-priors.js';
-import { MISSION_MEET_PERSON, TASKS_MEET_PERSON } from '../src/vnext/fixtures.js';
+import { MISSION_MEET_PERSON, TASKS_MEET_PERSON, TASKS_MEET_AT_TIME } from '../src/vnext/fixtures.js';
 import { runPilot, runPilotLearner, evaluateClaim } from '../src/vnext/pilot-harness.js';
+import { makeEvent } from '../src/vnext/evidence.js';
+import { bindAttempt } from '../src/vnext/bind.js';
 
 const T0 = Date.parse('2026-03-02T09:00:00Z');
 const HOUR = 3600_000;
@@ -277,6 +279,62 @@ const PILOT = { learners: COHORT, mission: MISSION_MEET_PERSON, tasks: TASKS, ca
   const claim = evaluateClaim('learner.fast', forged, CAPABILITIES, TASKS, ASK);
   const clean = evaluateClaim('learner.fast', run.events, CAPABILITIES, TASKS, ASK);
   assert.deepEqual(claim, clean, 'forged event changed the claim');
+}
+
+/* ── 11. integrity oracle must not false-alarm on legal evidence ──
+ * Finding A (review of #64): the primitive cross-checks were weaker than
+ * the milestone semantics they verify — a rehearsed-family transfer and
+ * a conditions-violated success both produced false 'mismatch' alarms.
+ * The oracle must independently recompute the SAME semantics. */
+{
+  const OWN = 'production.speak.say_own_name';
+  const ownCap = CAPABILITIES.find((c) => c.id === OWN);
+  const retTask = TASKS.find((t) => t.capabilityId === OWN && t.purpose === 'retrieval');
+  const trTask = TASKS.find((t) => t.capabilityId === OWN && t.purpose === 'transfer');
+  const t0 = T0, DAY = 24 * HOUR;
+  const hist = [
+    bindAttempt(retTask, ownCap, { id: 'o.h1', learnerId: 'oracle.x', occurredAt: t0, attempt: { attemptId: 'o1', outcome: 'success', observed: true } }),
+    bindAttempt(retTask, ownCap, { id: 'o.h2', learnerId: 'oracle.x', occurredAt: t0 + DAY + 1, attempt: { attemptId: 'o2', outcome: 'success', observed: true } })
+  ];
+  // (a) rehearsed-family transfer: engine correctly refuses TRANSFERRED —
+  //     the primitive must agree, not alarm.
+  const poison = makeEvent({
+    id: 'o.p0', learnerId: 'oracle.x', capabilityId: OWN, taskId: retTask.id,
+    taskRevision: retTask.revision, eventType: 'exposure', modality: ownCap.modality,
+    occurredAt: t0 + 2 * DAY - 1,
+    context: { missionId: retTask.missionId, practicedOrTransfer: 'practiced', promptFamily: trTask.promptFamily }
+  });
+  const tAtt = bindAttempt(trTask, ownCap, { id: 'o.t1', learnerId: 'oracle.x', occurredAt: t0 + 2 * DAY, attempt: { attemptId: 'ot', outcome: 'success', observed: true } });
+  const rehearsed = evaluateClaim('oracle.x', [...hist, poison, tAtt], CAPABILITIES, TASKS, OWN);
+  assert.equal(rehearsed.transferred, false, 'milestone should refuse rehearsed-family transfer');
+  assert.equal(rehearsed.integrity.transferredMatchesPrimitives, true,
+    'rehearsed-family transfer must NOT raise a false integrity failure');
+
+  // (b) genuinely novel transfer: milestone and primitive agree it counts.
+  const novel = evaluateClaim('oracle.x', [...hist, tAtt], CAPABILITIES, TASKS, OWN);
+  assert.equal(novel.transferred, true);
+  assert.equal(novel.integrity.transferredMatchesPrimitives, true);
+
+  // (c) conditions-violated success (repeat beyond allowed on a cap that
+  //     permits none): engine refuses INDEPENDENT; primitive must not
+  //     count it either.
+  const otherCapId = 'reception.listen.understand_clock_time';
+  const otherCap = CAPABILITIES.find((c) => c.id === otherCapId);
+  const oRet = TASKS_MEET_AT_TIME.find((t) => t.capabilityId === otherCapId && t.purpose === 'retrieval');
+  const viol = bindAttempt(oRet, otherCap, {
+    id: 'o.v1', learnerId: 'oracle.y', occurredAt: t0,
+    attempt: { attemptId: 'ov', outcome: 'success', observed: true },
+    support: { repeat: true, repeatCount: 5 }
+  });
+  const violClaim = evaluateClaim('oracle.y', [viol], CAPABILITIES, [...TASKS, ...TASKS_MEET_AT_TIME], otherCapId);
+  assert.equal(violClaim.integrity.independentMatchesPrimitives, true,
+    'conditions-violated success must NOT raise a false integrity failure');
+  assert.equal(violClaim.unaidedSuccesses, 0, 'a conditions-violated success is not an unaided success');
+
+  // (d) valid unaided success: counted by both sides.
+  const clean = evaluateClaim('oracle.y', [...hist.map((e) => ({ ...e, learnerId: 'oracle.y' }))], CAPABILITIES, TASKS, OWN);
+  assert.equal(clean.integrity.independentMatchesPrimitives, true);
+  assert.ok(clean.unaidedSuccesses >= 2);
 }
 
 console.log('vnext-pilot: cohort claims, baseline attribution, contradiction resolution, re-probe, replay & isolation — PASS');

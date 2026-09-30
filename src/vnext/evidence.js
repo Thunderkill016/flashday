@@ -83,6 +83,29 @@ export function conditionsViolated(support, allowed) {
   return false;
 }
 
+/* Support revealed during an attempt belongs permanently to that
+ * attempt — a retry inside the same attemptId cannot launder itself
+ * back into "unaided" by resetting UI flags. unionSupport accumulates
+ * flags across events sharing an attemptId (canonical order); a replay
+ * reported without a count poisons the merged count so 'repeat_once'
+ * can never be satisfied by uncounted provenance. */
+export const unionSupport = (a, b) => {
+  if (!a) return b ?? null;
+  if (!b) return a;
+  const uncounted = (a.repeat && a.repeatCount == null) || (b.repeat && b.repeatCount == null);
+  const repeatCount = uncounted
+    ? null
+    : ((a.repeatCount ?? 0) + (b.repeatCount ?? 0)) || null;
+  return {
+    hint: a.hint || b.hint,
+    translation: a.translation || b.translation,
+    transcript: a.transcript || b.transcript,
+    modelAnswer: a.modelAnswer || b.modelAnswer,
+    repeat: a.repeat || (a.repeatCount ?? 0) > 0 || b.repeat || (b.repeatCount ?? 0) > 0,
+    repeatCount
+  };
+};
+
 export function validateEvent(e) {
   const problems = [];
   if (!e || typeof e !== 'object') return ['event must be an object'];
