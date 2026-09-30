@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import { bindAttempt, bindObservation } from '../src/vnext/bind.js';
 import { buildLearnerModel, explainCapability } from '../src/vnext/learner-model.js';
 import { capabilityById } from '../src/vnext/fixtures.js';
+import { makeTask } from '../src/vnext/contracts.js';
 import { toEventDoc, fromEventDoc } from '../src/vnext/persist.js';
 import { FIXTURES, MISSION_MEET_AT_TIME, TASKS_MEET_AT_TIME } from '../src/vnext/fixtures.js';
 import { CAPABILITIES } from '../src/vnext/capabilities.js';
@@ -223,10 +224,10 @@ const ok = (name) => { check++; console.log(`  ✓ ${name}`); };
   const v = cap(model(events, { now: T0 + 40 * DAY }));
   assert.equal(v.transfer.demonstrated, true, 'historical transfer fact survives');
   assert.equal(v.achievement.milestones.retained, true, 'historical retention survives');
-  assert.equal(v.retention.sinceLastIndependentMs, 40 * DAY - 2 * DAY);
-  assert.ok(v.uncertainty.reasons.some((r) => r.code === 'evidence_older_than_retention_window'),
-    'stale evidence is a reason, not a demotion');
-  ok('old transfer: milestones immutable; recency surfaces as uncertainty, not demotion');
+  assert.equal(v.retention.sinceLastIndependentMs, 40 * DAY - 2 * DAY, 'age is exposed as a fact');
+  assert.ok(!v.uncertainty.reasons.some((r) => r.code.startsWith('evidence_older')),
+    'recency is a fact, not a demotion — no invented expiry reason');
+  ok('old transfer: milestones immutable; age exposed, no expiry inference');
 }
 
 /* ── 11. Foreign learner events — zero contamination ────────── */
@@ -311,14 +312,14 @@ const ok = (name) => { check++; console.log(`  ✓ ${name}`); };
   const baseline = cap(model([
     attempt('task.time.diagnostic.hear', { at: T0 })
   ]));
-  assert.equal(baseline.evidence.origin, 'baseline', 'first verified event is a baseline probe');
+  assert.equal(baseline.evidence.origin, 'baseline_demonstrated', 'first verified event is a successful baseline probe');
   const learned = cap(model([
     observe('task.time.input.clock', { at: T0 }),
     attempt('task.time.retrieval.hear', { at: T0 + HOUR })
   ]));
   assert.equal(learned.evidence.origin, 'in_program');
   assert.equal(learned.achievement.milestones.independent, true);
-  ok('origin: diagnostic-first → baseline; input-first → in_program');
+  ok('origin: diagnostic-success-first → baseline_demonstrated; input-first → in_program');
 }
 
 /* ── 18. Missing evidence — explicit categorical uncertainty ── */
@@ -339,6 +340,141 @@ const ok = (name) => { check++; console.log(`  ✓ ${name}`); };
   const v = cap(model([e, crossModality]));
   assert.equal(v.evidence.attemptCount, 1, 'cross-modality record cannot count toward a listening capability');
   ok('modality mismatch: event ignored for the listening capability');
+}
+
+/* ── Hardening regressions (PR #67 review findings) ──────────── */
+
+/* A. A stamped missingFunctions on a NON-attributing evaluator
+ *    contract must not create a justified function gap — the binder
+ *    bounds the list to requiredFunctions but never proves attribution;
+ *    only contracts that isolate the miss may open a gap entry. */
+{
+  const say = taskById('task.time.diagnostic.say'); // eval.required_functions.v1 — cannot attribute
+  const forgedMiss = bindAttempt(say, capabilityById(SPEAK), {
+    id: `lm.${++seq}`, learnerId: LEARNER, occurredAt: T0,
+    attempt: { observed: true, outcome: 'fail', response: 'x', latencyMs: 1, attemptId: 'a.x' },
+    evaluation: { missingFunctions: ['state_clock_time'] }
+  });
+  const v = cap(model([forgedMiss]), SPEAK);
+  assert.deepEqual(v.failures.unresolvedFunctions, [],
+    'a non-attributing miss must not mint a function gap');
+  assert.ok(!v.uncertainty.reasons.some((r) => r.code === 'unresolved_function_gap'));
+  ok('A: non-attributing evaluator + stamped missingFunctions → no justified gap');
+}
+
+/* B. An UNOBSERVED checkpoint success must not satisfy assessment —
+ *    assessment evidence carries the same observation bar as every
+ *    other capability claim. */
+{
+  const chain = [
+    observe('task.time.input.clock', { at: T0 }),
+    attempt('task.time.retrieval.hear', { at: T0 + HOUR }),
+    attempt('task.time.delayed.hear', { at: T0 + DAY + HOUR }),
+    attempt('task.time.transfer.clinic', { at: T0 + 2 * DAY })
+  ];
+  const unobservedCheckpoint = attempt('task.time.assessment.hear', { at: T0 + 3 * DAY, observed: false });
+  const m = model([...chain, unobservedCheckpoint], { now: T0 + 3 * DAY + HOUR });
+  const v = cap(m);
+  assert.ok(!m.profile.assessed.includes(TARGET), 'unobserved checkpoint is not assessment evidence');
+  assert.equal(v.assessment.latestStatus, null);
+  assert.ok(v.uncertainty.reasons.some((r) => r.code === 'no_assessment_evidence'));
+  assert.equal(v.uncertainty.evidenceSufficient, false,
+    'one unobserved checkpoint cannot close the sufficiency chain');
+  ok('B: unobserved checkpoint success → not assessed, not sufficient');
+}
+
+/* C. Age alone must not expire evidence: retention.minLagMs is the
+ *    minimum spacing to PROVE retention, not an expiry horizon. A full
+ *    chain read long after the fact stays sufficient. */
+{
+  const chain = [
+    observe('task.time.input.clock', { at: T0 }),
+    attempt('task.time.retrieval.hear', { at: T0 + HOUR }),
+    attempt('task.time.retrieval.hear', { at: T0 + 2 * HOUR }),
+    attempt('task.time.delayed.hear', { at: T0 + DAY + HOUR }),
+    attempt('task.time.transfer.clinic', { at: T0 + 2 * DAY }),
+    attempt('task.time.assessment.hear', { at: T0 + 3 * DAY })
+  ];
+  const v = cap(model(chain, { now: T0 + 120 * DAY }));
+  assert.equal(v.transfer.demonstrated, true);
+  assert.equal(v.achievement.milestones.retained, true);
+  assert.equal(v.assessment.latestStatus, 'success');
+  assert.ok(!v.uncertainty.reasons.some((r) => r.code === 'evidence_older_than_retention_window'),
+    'minLagMs is not an expiry threshold — no invented staleness reason');
+  assert.equal(v.retention.sinceLastIndependentMs, 120 * DAY - 3 * DAY,
+    'age is still exposed as a fact');
+  assert.equal(v.uncertainty.evidenceSufficient, true);
+  ok('C: full chain + 120d age → facts intact, no expiry inference, age still reported');
+}
+
+/* D. A transfer success on an already-rehearsed family is not novel
+ *    transfer evidence — the success count must not imply validity. */
+{
+  const clinicTask = taskById('task.time.transfer.clinic');
+  const clinicFamily = clinicTask.promptFamily;
+  // A synthetic retrieval task rehearsing the SAME family on TARGET.
+  const rehearsal = makeTask({
+    id: 'task.time.syn.rehearse_clinic',
+    missionId: 'mission.meet_at_a_time',
+    capabilityId: TARGET,
+    modality: capabilityById(TARGET).modality,
+    purpose: 'retrieval',
+    promptFamily: clinicFamily,
+    stimulus: { type: 'text', text: 'rehearsal' },
+    response: {
+      type: 'choice',
+      requiredFunctions: ['understand_clock_time'],
+      options: [
+        { id: 'a', text: 'a', correct: true },
+        { id: 'b', text: 'b' }
+      ]
+    },
+    evaluation: { contractId: 'eval.choice.correct.v1' },
+    revision: 1
+  });
+  const rehearseEv = bindAttempt(rehearsal, capabilityById(TARGET), {
+    id: `lm.${++seq}`, learnerId: LEARNER, occurredAt: T0 + 90 * 60_000,
+    attempt: { observed: true, outcome: 'success', response: 'a', latencyMs: 1, attemptId: 'a.r' }
+  });
+  const events = [
+    observe('task.time.input.clock', { at: T0 }),
+    attempt('task.time.retrieval.hear', { at: T0 + HOUR }),
+    rehearseEv,
+    attempt('task.time.transfer.clinic', { at: T0 + 2 * DAY })
+  ];
+  const m = buildLearnerModel({
+    learnerId: LEARNER, events, capabilities: CAPABILITIES,
+    tasks: [...ALL_TASKS, rehearsal], now: T0 + 3 * DAY, roles
+  });
+  const v = cap(m);
+  assert.equal(v.transfer.demonstrated, false, 'rehearsed family is not novel transfer');
+  assert.equal(v.evidence.transferSuccessCount, 0,
+    'transferSuccessCount must only count novel-family transfer evidence');
+  assert.equal(v.evidence.transferAttemptCount, 1);
+  ok('D: rehearsed-family transfer success → not demonstrated, not counted as transfer evidence');
+}
+
+/* E. A FAILED first diagnostic must not imply pre-existing ability. */
+{
+  const v = cap(model([
+    attempt('task.time.diagnostic.hear', { at: T0, outcome: 'fail', missing: [CLOCK_FN] })
+  ]));
+  assert.notEqual(v.evidence.origin, 'baseline_demonstrated');
+  assert.equal(v.evidence.origin, 'baseline_probed',
+    'a failed baseline probe is evidence of testing, not of ability');
+  assert.equal(v.achievement.milestones.independent, false);
+  ok('E: failed first diagnostic → baseline_probed, never ability');
+}
+
+/* F. failureCount semantics match its name (lifetime miss count). */
+{
+  const v = cap(model([
+    attempt('task.time.retrieval.hear', { at: T0, outcome: 'fail', missing: [NUM_FN] }),
+    attempt('task.time.retrieval.hear', { at: T0 + HOUR, outcome: 'fail', missing: [NUM_FN] })
+  ]));
+  assert.equal(v.failures.failureCount, 2, 'lifetime failure count under its true name');
+  assert.equal(v.failures.recentFailureCount, undefined, 'misleading field name removed');
+  ok('F: failureCount is honestly lifetime-scoped');
 }
 
 /* ── Long-horizon simulations — six archetypes ──────────────── */
@@ -405,9 +541,11 @@ story('forgetful learner', [
 ], [T0 + 4 * DAY, T0 + 90 * DAY], (m, at) => {
   const v = cap(m);
   assert.equal(v.transfer.demonstrated, true, 'history is permanent');
+  assert.equal(v.assessment.latestStatus, 'success');
   if (at === T0 + 90 * DAY) {
-    assert.ok(v.uncertainty.reasons.some((r) => r.code === 'evidence_older_than_retention_window'));
-    assert.ok(m.profile.fragile.includes(TARGET), 'staleness puts a demonstrated cap in fragile');
+    assert.equal(v.retention.sinceLastIndependentMs, 90 * DAY - 3 * DAY, 'age is a fact, not a demotion');
+    assert.ok(!v.uncertainty.reasons.length, 'a complete old chain stays sufficient — no invented staleness');
+    assert.ok(!m.profile.fragile.includes(TARGET), 'silence alone is not fragility');
   }
 });
 
@@ -454,7 +592,7 @@ story('baseline-mastered learner', [
   attempt('task.time.assessment.hear', { at: T0 + 3 * DAY })
 ], [T0 + 3 * DAY + HOUR], (m) => {
   const v = cap(m);
-  assert.equal(v.evidence.origin, 'baseline');
+  assert.equal(v.evidence.origin, 'baseline_demonstrated');
   assert.equal(v.retention.demonstrated, true);
   assert.equal(v.transfer.demonstrated, true);
   assert.equal(v.uncertainty.evidenceSufficient, true);

@@ -42,6 +42,7 @@
 import { projectLearnerState } from './projection.js';
 import { answerBearing, conditionsViolated, unionSupport } from './evidence.js';
 import { effectiveAllowedSupport, verifyEventTask } from './contracts.js';
+import { contractAttributesFunctions } from './evaluators.js';
 import { resolvePolicy } from './policy.js';
 import { deriveSupportLifecycle } from './planner.js';
 
@@ -100,7 +101,10 @@ function emptyCapView() {
       dependent: false
     },
     failures: {
-      recentFailureCount: 0,
+      /* Lifetime verified miss count — honestly named: there is no
+       * recency window on this counter, callers read `consecutiveFailures`
+       * or `lastFailureAt` for recency. */
+      failureCount: 0,
       consecutiveFailures: 0,
       lastFailureAt: null,
       unresolvedFunctions: [],
@@ -119,8 +123,13 @@ function emptyCapView() {
     },
     assessment: {
       attempted: 0,
+      /* `latestStatus`/`lastAssessmentAt` carry only OBSERVED verified
+       * outcomes; `demonstrated` requires the full independent bar
+       * (observed + unaided + authority) — an unobserved checkpoint
+       * "success" is context, never certification. */
       latestStatus: null,
-      lastAssessmentAt: null
+      lastAssessmentAt: null,
+      demonstrated: false
     },
     uncertainty: {
       evidenceSufficient: false,
@@ -197,6 +206,10 @@ export function buildLearnerModel({ learnerId, events, capabilities, tasks, poli
   const supportByAttempt = new Map();
   // Per-capability function-gap ledgers: fn → { misses, lastMissAt, lastDemoAt, reopened }
   const fnLedger = new Map(capabilities.map((c) => [c.id, new Map()]));
+  // Rehearsed prompt families per capability — same rule the projection
+  // uses: any verified non-transfer context marks the family rehearsed,
+  // so a later transfer success on it is NOT novel transfer evidence.
+  const rehearsedFamilies = new Map(capabilities.map((c) => [c.id, new Set()]));
 
   for (const e of mine) {
     const cap = capById.get(e.capabilityId);
@@ -216,15 +229,13 @@ export function buildLearnerModel({ learnerId, events, capabilities, tasks, poli
     if (v.evidence.firstSeenAt == null) v.evidence.firstSeenAt = e.occurredAt;
     v.evidence.lastSeenAt = e.occurredAt;
 
-    // Origin: did this capability show demonstrated ability BEFORE the
-    // program ever exposed it? A diagnostic attempt as the first
-    // verified event = baseline (preexisting) evidence.
-    if (v.evidence.origin === 'unknown') {
-      if (task.purpose === 'diagnostic' && e.attempt?.outcome != null) {
-        v.evidence.origin = 'baseline';
-      } else if (e.eventType === 'exposure' || task.purpose === 'input' || task.purpose === 'notice') {
-        v.evidence.origin = 'in_program';
-      }
+    // Origin: a diagnostic attempt as the FIRST verified event is a
+    // baseline probe. Only an independent-bar success implies
+    // pre-existing ability — a failed baseline probe is evidence of
+    // testing, not of ability ('baseline_probed').
+    if (v.evidence.origin === 'unknown' &&
+        (e.eventType === 'exposure' || task.purpose === 'input' || task.purpose === 'notice')) {
+      v.evidence.origin = 'in_program';
     }
 
     const aid = e.attempt?.attemptId;
@@ -242,6 +253,12 @@ export function buildLearnerModel({ learnerId, events, capabilities, tasks, poli
       }
     }
 
+    // Non-transfer verified contexts rehearse the family (projection's
+    // rule) — later transfer successes on it are not novel evidence.
+    if (e.context?.practicedOrTransfer !== 'transfer' && e.context?.promptFamily) {
+      rehearsedFamilies.get(e.capabilityId).add(e.context.promptFamily);
+    }
+
     if (!ATTEMPT_TYPES.has(e.eventType) || e.attempt?.outcome == null) continue;
     v.evidence.attemptCount += 1;
     v.evidence.verifiedAttemptCount += 1;
@@ -250,14 +267,34 @@ export function buildLearnerModel({ learnerId, events, capabilities, tasks, poli
     if (e.eventType === 'checkpoint') {
       v.evidence.assessmentCount += 1;
       v.assessment.attempted += 1;
+    }
+
+    const independent = isSuccess(e) &&
+      e.attempt?.observed === true &&
+      !answerBearing(effSupport) &&
+      !conditionsViolated(effSupport, effectiveAllowedSupport(cap, task)) &&
+      INDEPENDENT_AUTHORITIES.has(e.evaluation?.authority);
+
+    // Assessment status is evidence-barred: only OBSERVED verified
+    // outcomes set latestStatus, and only an independent-bar success
+    // demonstrates the claim. An unobserved/aided checkpoint counts as
+    // an attempt, never as certification.
+    if (e.eventType === 'checkpoint' && e.attempt?.observed === true) {
       v.assessment.latestStatus = e.attempt.outcome;
       v.assessment.lastAssessmentAt = e.occurredAt;
+      v.assessment.demonstrated = independent;
     }
+
     if (isMiss(e)) {
-      v.failures.recentFailureCount += 1;
+      v.failures.failureCount += 1;
       v.failures.lastFailureAt = e.occurredAt;
-      // Evaluator-attributed missing functions → gap ledger.
-      if (e.attempt?.observed === true) {
+      /* Evaluator-attributed missing functions → gap ledger — but ONLY
+       * when the task's contract may attribute a miss at all (same
+       * boundary as SUPPORT_DEMAND). The binder bounds the list to
+       * requiredFunctions; it does not prove attribution, so a stamped
+       * missingFunctions on eval.required_functions.v1 is context, not
+       * a diagnosed gap. */
+      if (e.attempt?.observed === true && contractAttributesFunctions(task.evaluation?.contractId)) {
         const ledger = fnLedger.get(e.capabilityId);
         for (const fn of e.evaluation?.missingFunctions ?? []) {
           const rec = ledger.get(fn) ?? { misses: 0, lastMissAt: null, lastDemoAt: null, reopened: false };
@@ -269,11 +306,11 @@ export function buildLearnerModel({ learnerId, events, capabilities, tasks, poli
       }
     }
 
-    const independent = isSuccess(e) &&
-      e.attempt?.observed === true &&
-      !answerBearing(effSupport) &&
-      !conditionsViolated(effSupport, effectiveAllowedSupport(cap, task)) &&
-      INDEPENDENT_AUTHORITIES.has(e.evaluation?.authority);
+    // Diagnostic-first origin (see above): settled at the first attempt.
+    if (v.evidence.origin === 'unknown' && task.purpose === 'diagnostic') {
+      v.evidence.origin = independent ? 'baseline_demonstrated' : 'baseline_probed';
+    }
+
     if (!independent) continue;
 
     v.evidence.independentSuccessCount += 1;
@@ -283,8 +320,14 @@ export function buildLearnerModel({ learnerId, events, capabilities, tasks, poli
       v.retention.lastDelayedEvidenceAt = e.occurredAt;
     }
     if (e.eventType === 'transfer_attempt') {
-      v.evidence.transferSuccessCount += 1;
-      v.transfer.lastTransferAt = e.occurredAt;
+      /* Only a NOVEL-family transfer success counts as transfer
+       * evidence — the same novelty rule the projection applies to the
+       * TRANSFERRED milestone. */
+      const family = e.context?.promptFamily;
+      if (family && !rehearsedFamilies.get(e.capabilityId).has(family)) {
+        v.evidence.transferSuccessCount += 1;
+        v.transfer.lastTransferAt = e.occurredAt;
+      }
     }
     // Demonstrated recovery on a function closes its gap entry.
     const ledger = fnLedger.get(e.capabilityId);
@@ -351,8 +394,11 @@ export function buildLearnerModel({ learnerId, events, capabilities, tasks, poli
     v.support.dependent = relied &&
       (v.evidence.lastIndependentAt == null || (lastRelianceAt ?? 0) > v.evidence.lastIndependentAt);
 
-    const stale = generatedAt != null && v.evidence.lastIndependentAt != null &&
-      (generatedAt - v.evidence.lastIndependentAt) > pol.retention.minLagMs;
+    /* Recency is exposed as FACT (sinceLastIndependentMs), never as an
+     * inference: `retention.minLagMs` is the minimum spacing needed to
+     * PROVE retention — it is not an evidence-expiry horizon, and this
+     * model does not invent one. Whether old evidence still suffices is
+     * a policy question for the caller. */
     const reasons = [];
     if (v.achievement.state === 'NOT_SEEN') reasons.push(reason('no_evidence'));
     else if (v.evidence.attemptCount === 0) reasons.push(reason('no_attempts'));
@@ -364,14 +410,13 @@ export function buildLearnerModel({ learnerId, events, capabilities, tasks, poli
           reasons.push(reason('thin_independent_evidence', { count: v.evidence.independentSuccessCount }));
         }
         if (!v.retention.demonstrated) reasons.push(reason('no_delayed_evidence'));
-        if (stale) reasons.push(reason('evidence_older_than_retention_window', { lastIndependentAt: v.evidence.lastIndependentAt }));
       }
       if (v.achievement.milestones.independent && !v.transfer.demonstrated) {
         reasons.push(reason('no_transfer_evidence'));
       }
       if (v.transfer.demonstrated) {
         if (v.assessment.latestStatus == null) reasons.push(reason('no_assessment_evidence'));
-        else if (v.assessment.latestStatus !== 'success') reasons.push(reason('assessment_not_demonstrated'));
+        else if (!v.assessment.demonstrated) reasons.push(reason('assessment_not_demonstrated'));
       }
       if (v.failures.consecutiveFailures > 0) reasons.push(reason('currently_failing', { consecutive: v.failures.consecutiveFailures }));
       if (v.failures.unresolvedFunctions.length) reasons.push(reason('unresolved_function_gap', { functions: [...v.failures.unresolvedFunctions] }));
@@ -388,11 +433,14 @@ export function buildLearnerModel({ learnerId, events, capabilities, tasks, poli
       profile.insufficientEvidence.push(c.id);
     } else {
       profile.demonstrated.push(c.id);
-      if (v.failures.consecutiveFailures > 0 || stale) profile.fragile.push(c.id);
+      /* Fragile = currently failing — a live contradiction between
+       * earlier ability and latest evidence. Silence/age alone is not
+       * fragility (see the recency note above). */
+      if (v.failures.consecutiveFailures > 0) profile.fragile.push(c.id);
       if (v.retention.demonstrated) profile.retained.push(c.id);
       if (v.transfer.demonstrated) {
         profile.transferProven.push(c.id);
-        if (v.assessment.latestStatus === 'success') profile.assessed.push(c.id);
+        if (v.assessment.demonstrated) profile.assessed.push(c.id);
         else profile.assessmentPending.push(c.id);
       }
     }
