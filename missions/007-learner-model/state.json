@@ -1,0 +1,62 @@
+{
+  "id": "007-learner-model",
+  "status": "DONE",
+  "startedAt": "2026-09-30T10:11:28.540Z",
+  "finishedAt": "2026-09-30T10:28:54.641Z",
+  "startSha": "d5309a452b6efcce3805ecd822e5fff04e2155f5",
+  "startBranch": "main",
+  "missionSha256": "85c7635043d31d1b88da84433e4787df6947b0e1c5cd58c773c7c67f283649d1",
+  "currentSha": "f84d4dfba6793f5a66930afa87bba93f53eb3c5b",
+  "checkpoints": [
+    {
+      "n": 1,
+      "file": "checkpoints/001-checkpoint.md",
+      "at": "2026-09-30T10:26:10.131Z",
+      "sha": "d5309a452b6efcce3805ecd822e5fff04e2155f5"
+    }
+  ],
+  "commands": [
+    {
+      "at": "2026-09-30T10:11:28.564Z",
+      "type": "start",
+      "detail": "main@d5309a452b6e"
+    },
+    {
+      "at": "2026-09-30T10:26:10.138Z",
+      "type": "checkpoint",
+      "detail": "cp 1"
+    },
+    {
+      "at": "2026-09-30T10:28:08.936Z",
+      "type": "verify",
+      "detail": "PASS"
+    },
+    {
+      "at": "2026-09-30T10:28:54.641Z",
+      "type": "finish",
+      "detail": "done"
+    }
+  ],
+  "verifications": [
+    {
+      "at": "2026-09-30T10:28:08.935Z",
+      "sha": "f84d4dfba6793f5a66930afa87bba93f53eb3c5b",
+      "ok": true,
+      "results": [
+        {
+          "cmd": "npm run verify:full",
+          "exitCode": 0,
+          "ok": true,
+          "ms": 101723,
+          "log": "logs/verify-1790764088931-0.log"
+        }
+      ]
+    }
+  ],
+  "knownFailures": [],
+  "browserVerification": "not required — headless read-model; verify:full's browser suite re-verifies the kernel is untouched",
+  "result": {
+    "status": "done",
+    "summary": null
+  }
+}
