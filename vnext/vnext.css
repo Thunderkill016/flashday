@@ -1,0 +1,101 @@
+/* vNext mission surface — minimal honest UI (issue #55). */
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: #f6f5f1;
+  color: #1e1d1a;
+}
+
+.vnext-root {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 32px 16px 64px;
+}
+
+.vnext-card {
+  background: #fff;
+  border: 1px solid #e5e1d8;
+  border-radius: 16px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.vnext-card h1 { margin: 0; font-size: 1.4rem; }
+.vnext-blurb { margin: 0; color: #55504a; line-height: 1.5; }
+
+.vnext-frame {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #8a5a13;
+}
+
+.vnext-situation { margin: 0; font-style: italic; color: #55504a; }
+.vnext-hintline { margin: 0; font-size: 0.85rem; color: #8a857c; }
+.vnext-cue { margin: 0; font-weight: 600; }
+
+.vnext-dialogue { display: flex; flex-direction: column; gap: 6px; }
+.vnext-line {
+  margin: 0;
+  padding: 10px 14px;
+  background: #eef4fb;
+  border-radius: 12px;
+  font-size: 1.05rem;
+}
+.vnext-hidden-text { background: #f0eee8; color: #8a857c; font-style: italic; }
+
+.vnext-input {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid #d8d3c8;
+  border-radius: 10px;
+  font-size: 1rem;
+}
+.vnext-field { display: flex; flex-direction: column; gap: 6px; font-weight: 600; }
+
+.vnext-answer-row { display: flex; gap: 8px; }
+.vnext-answer-row .vnext-input { flex: 1; }
+
+.vnext-btn {
+  padding: 11px 18px;
+  border: 1px solid #d8d3c8;
+  border-radius: 10px;
+  background: #fff;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+.vnext-btn:hover { background: #f4f1ea; }
+.vnext-btn:disabled { opacity: 0.45; cursor: default; }
+.vnext-btn-primary { background: #1e1d1a; color: #fff; border-color: #1e1d1a; }
+.vnext-btn-primary:hover { background: #39352e; }
+.vnext-btn-ghost { border-style: dashed; color: #55504a; }
+.vnext-option { text-align: left; }
+
+.vnext-support-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.vnext-support {
+  margin: 0;
+  padding: 10px 14px;
+  background: #fdf6e5;
+  border: 1px solid #eed9a4;
+  border-radius: 10px;
+  font-size: 0.95rem;
+}
+
+.vnext-outcome { margin: 0; font-weight: 700; font-size: 1.05rem; }
+.vnext-outcome-success { color: #2e7d32; }
+.vnext-outcome-partial { color: #b26a00; }
+.vnext-outcome-fail { color: #b3261e; }
+.vnext-model { margin: 0; padding: 10px 14px; background: #eef4fb; border-radius: 10px; }
+.vnext-note { margin: 0; font-size: 0.85rem; color: #8a857c; }
+
+.vnext-progress { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.vnext-progress li { border-top: 1px solid #eceae3; padding-top: 10px; }
+.vnext-progress-line { margin: 4px 0 0; color: #55504a; font-size: 0.9rem; }
+
+.vnext-loading, .vnext-error { text-align: center; color: #55504a; }

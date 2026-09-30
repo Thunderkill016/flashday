@@ -158,10 +158,22 @@ export function nextMissionTask({ learnerId, mission, tasks, capabilities, event
    * prefer unrun, fall back to the first declared. The expose/resume
    * fallback reaches only retrieval/production/interaction — it can
    * never skip ahead to remediation, delayed, transfer or assessment. */
+  /* Practice and re-check intents may legitimately re-elicit a consumed
+   * task — remediation loops, another unaided attempt, and retention
+   * re-probes after another lag window are the point (a delayed check
+   * re-measures memory on the same practiced prompt). A failed transfer
+   * probe may also re-elicit: the engine does not burn a held-out
+   * family's novelty on a failure, so the retry is still a valid
+   * transfer sample — and once it succeeds the intent never fires
+   * again. Diagnostics stay single-sample: a consumed probe already
+   * answered what it was meant to ask. */
+  const REPEATABLE = new Set(['retrieval', 'production', 'interaction', 'remediation', 'delayed_retrieval', 'transfer']);
   const pick = (capId, purposes, { unattemptedOnly = false } = {}) => {
     const candidates = missionTasks.filter((t) => t.capabilityId === capId && purposes.includes(t.purpose));
     const fresh = candidates.filter((t) => !verifiedAttempt.has(keyOf(t)) && !verifiedEvent.has(keyOf(t)));
-    return fresh[0] ?? (unattemptedOnly ? null : candidates[0] ?? null);
+    if (fresh[0]) return fresh[0];
+    if (unattemptedOnly || purposes.every((p) => !REPEATABLE.has(p))) return null;
+    return candidates[0] ?? null;
   };
   const pickPendingPhase = (capId) =>
     pick(capId, EXPOSURE, { unattemptedOnly: true })
@@ -171,11 +183,16 @@ export function nextMissionTask({ learnerId, mission, tasks, capabilities, event
   const excluded = new Set();
   for (;;) {
     const plan = planNext(learnerId, events, {
-      capabilities: scopedCaps.filter((c) => !excluded.has(c.id)),
+      /* Exclusion is per (capability, intent kind) — caps stay in the
+       * surface so they still count as prerequisites and still route
+       * their other intents. Filtering a cap out entirely would poison
+       * dependent readiness checks and kill unrelated pending work. */
+      capabilities: scopedCaps,
       tasks,
       riskPriors,
       now,
-      policy
+      policy,
+      skipIntentFor: excluded
     });
     if (plan.kind === 'idle') break;
     const task = (plan.kind === 'expose' || plan.kind === 'resume')
@@ -186,7 +203,7 @@ export function nextMissionTask({ learnerId, mission, tasks, capabilities, event
     }
     const purposes = INTENT_PURPOSES[plan.kind] ?? [...EXPOSURE, ...ELICITABLE];
     skipped.push(`${plan.capabilityId}: planner wants '${plan.kind}' but the mission has no compatible task (${purposes.join('/')})`);
-    excluded.add(plan.capabilityId);
+    excluded.add(`${plan.capabilityId}|${plan.kind}`);
   }
 
   /* Assessment is the mission's closing step — it runs once, after the

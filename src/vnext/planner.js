@@ -20,15 +20,24 @@ import { RETENTION_DELAY_MS, projectLearnerState } from './projection.js';
 import { priorById } from './risk-priors.js';
 import { resolvePolicy } from './policy.js';
 
-export function planNext(learnerId, events, { capabilities, tasks = [], riskPriors = [], now, retentionDelayMs, policy }) {
+export function planNext(learnerId, events, { capabilities, tasks = [], riskPriors = [], now, retentionDelayMs, policy, skipIntentFor }) {
   const pol = resolvePolicy(policy);
   const lag = retentionDelayMs ?? pol.retention.minLagMs;
   const { byCapability } = projectLearnerState(learnerId, events, capabilities, tasks, { retentionDelayMs: lag, policy: pol });
   const priorMap = new Map(riskPriors.map((p) => [p.id, p]));
 
+  /* `skipIntentFor` holds 'capabilityId|intentKind' keys: it silences
+   * ONE kind of intent for a capability (the selector has no servable
+   * task for that intent) WITHOUT removing the capability itself —
+   * excluded caps still count as prerequisites, and their OTHER
+   * intents still route: a delayed check with no task must not also
+   * kill that same capability's pending transfer intent. */
+  const skipped = (id, kind) => skipIntentFor?.has(`${id}|${kind}`) === true;
+
   /* 1. Resume in-flight work: the encounter started but no attempt
    *    outcome exists yet. */
   for (const c of capabilities) {
+    if (skipped(c.id, 'resume')) continue;
     const s = byCapability.get(c.id);
     if (s.state === 'EXPOSED' && s.lastAttemptOutcome == null) {
       return { kind: 'resume', capabilityId: c.id, reason: 'encounter started, no attempt recorded yet' };
@@ -42,6 +51,7 @@ export function planNext(learnerId, events, { capabilities, tasks = [], riskPrio
    *    delayed_retrieval forever after each failure. */
   let due = null;
   for (const c of capabilities) {
+    if (skipped(c.id, 'delayed_retrieval')) continue;
     const s = byCapability.get(c.id);
     if (!s.milestones.independent || s.lastIndependentSuccessAt == null) continue;
     if (s.lastAttemptOutcome === 'fail' || s.lastAttemptOutcome === 'partial') continue;
@@ -57,6 +67,7 @@ export function planNext(learnerId, events, { capabilities, tasks = [], riskPrio
    *    The threshold is policy — a baseline probe failure still does
    *    NOT land here; untaught work routes to introduction below. */
   for (const c of capabilities) {
+    if (skipped(c.id, 'retry')) continue;
     const s = byCapability.get(c.id);
     if ((s.milestones.supported || s.milestones.independent) &&
         s.consecutiveFailures >= pol.remediation.minConsecutiveFailures) {
@@ -67,6 +78,7 @@ export function planNext(learnerId, events, { capabilities, tasks = [], riskPrio
   /* 4. Scheduled transfer: retained but never proven in a changed
    *    context — send it somewhere new. */
   for (const c of capabilities) {
+    if (skipped(c.id, 'transfer')) continue;
     const s = byCapability.get(c.id);
     if (s.milestones.retained && !s.milestones.transferred) {
       return { kind: 'transfer', capabilityId: c.id, reason: 'retained ability has not survived a changed context yet' };
@@ -75,6 +87,7 @@ export function planNext(learnerId, events, { capabilities, tasks = [], riskPrio
 
   /* 5. Continue current mission: supported work needs an unaided run. */
   for (const c of capabilities) {
+    if (skipped(c.id, 'independent_attempt')) continue;
     const s = byCapability.get(c.id);
     if (s.milestones.supported && !s.milestones.independent) {
       return { kind: 'independent_attempt', capabilityId: c.id, reason: 'succeeded with support — now try without it' };
@@ -85,6 +98,7 @@ export function planNext(learnerId, events, { capabilities, tasks = [], riskPrio
    *     capability whose prerequisites are NOW met gets its first real
    *     input — a mission in progress outranks opening a new one. */
   for (const c of capabilities) {
+    if (skipped(c.id, 'expose')) continue;
     const s = byCapability.get(c.id);
     if (s.state === 'NOT_SEEN') continue;
     if (s.milestones.supported || s.milestones.independent) continue;
@@ -106,10 +120,12 @@ export function planNext(learnerId, events, { capabilities, tasks = [], riskPrio
       .map((id) => priorMap.get(id) || priorById(id))
       .filter((p) => p && p.mayTriggerProbe && p.appliesTo.includes(c.modality))
       .map((p) => p.id);
+    const kind = probes.length ? 'diagnostic_probe' : 'expose';
+    if (skipped(c.id, kind)) continue;
     if (probes.length) {
-      return { kind: 'diagnostic_probe', capabilityId: c.id, probes, reason: 'eligible for introduction — probe known risk areas first' };
+      return { kind, capabilityId: c.id, probes, reason: 'eligible for introduction — probe known risk areas first' };
     }
-    return { kind: 'expose', capabilityId: c.id, reason: 'prerequisites met — comprehensible input first' };
+    return { kind, capabilityId: c.id, reason: 'prerequisites met — comprehensible input first' };
   }
 
   return { kind: 'idle', reason: 'nothing due, nothing eligible — fluency work or new content needed' };
