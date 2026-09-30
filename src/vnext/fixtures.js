@@ -806,7 +806,7 @@ const TF = {
 
 export const MISSION_MEET_AT_TIME = makeMission({
   id: 'mission.meet_at_a_time',
-  revision: 1,
+  revision: 2,
   scenario: 'Arrange a time to meet a classmate.',
   learnerGoal: 'Understand a stated time and say a time to meet.',
   targetCapabilities: [

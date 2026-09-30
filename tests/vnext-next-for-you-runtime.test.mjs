@@ -33,9 +33,10 @@ import { LEARNING_POLICY_V1 } from '../src/vnext/policy.js';
 import { nextMissionTask } from '../src/vnext/mission-runner.js';
 import { sha256, canon, sha256HexOfString } from '../src/vnext/next-for-you/canonical.js';
 import { emptyContext, consumeDecision, recordChoice, normalizeContext } from '../src/vnext/next-for-you/decision-context.js';
-import { selectNextTask, engineState, SELECTION_MODES } from '../src/vnext/next-for-you/selector.js';
+import { selectNextTask, engineState, SELECTION_MODES, POLICY_VERSIONS } from '../src/vnext/next-for-you/selector.js';
 import { policyB } from '../src/vnext/next-for-you/policies.js';
 import { KINDS } from '../src/vnext/next-for-you/constants.js';
+import { stateDigest } from '../src/vnext/next-for-you/decision-log.js';
 import { attemptEvent, observeEvent } from '../experiments/next-for-you/scenarios.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -941,7 +942,12 @@ const consumedKinds = (session) => (session.selectionContext()?.actionsChosen ??
  * Policy VERSION is pinned too — a semantic bump cannot slide into an
  * open run. */
 {
-  /* Legacy open run + B0 → fail closed; + REFERENCE → continues pinned */
+  /* Legacy open run — predates BOTH the mode pin and the mission
+   * revision pin (no selection block, no missionRevision). It can never
+   * prove which task surface it was minted against, so EVERY reopen
+   * explicitly supersedes it and mints a fresh run pinned to the
+   * current revision + requested mode — the record is never deleted
+   * and never silently reinterpreted as the current surface. */
   const mkLegacyStores = () => ({
     es: createMemoryEventStore(),
     rs: createMemoryRunStore([{
@@ -952,28 +958,26 @@ const consumedKinds = (session) => (session.selectionContext()?.actionsChosen ??
       learnerName: 'A',
       startedAt: 1,
       endedAt: null
-      /* no selection — a pre-008C run */
+      /* no selection, no missionRevision — a pre-008C/pre-008D run */
     }]),
     ds: createMemoryDecisionStore()
   });
-  {
+  for (const legacyMode of ['b0', 'shadow_b0', 'reference']) {
     const { es, rs, ds } = mkLegacyStores();
-    const s = makeSession({ eventStore: es, runStore: rs, decisionStore: ds, mode: 'b0' });
-    await assert.rejects(() => s.init(), /selection_mode_legacy/, 'B0 silently reinterpreted a legacy open run');
-    const sh = makeSession({ eventStore: es, runStore: rs, decisionStore: ds, mode: 'shadow_b0' });
-    await assert.rejects(() => sh.init(), /selection_mode_legacy/, 'SHADOW silently reinterpreted a legacy open run');
-    const legacyRun = (await rs.list()).find((r) => r.id === 'run.legacy');
-    assert.equal(legacyRun.selection ?? null, null, 'refused reopen still stamped selection bookkeeping');
-    ok(true, 'LEGACY-PIN: B0/SHADOW reopen of a pre-bookkeeping run fails closed');
-  }
-  {
-    const { es, rs, ds } = mkLegacyStores();
-    const s = makeSession({ eventStore: es, runStore: rs, decisionStore: ds, mode: 'reference' });
+    const s = makeSession({ eventStore: es, runStore: rs, decisionStore: ds, mode: legacyMode });
     await s.init();
-    const run = (await rs.list()).find((r) => r.id === 'run.legacy');
-    assert.equal(run.selection?.mode, 'reference', 'legacy run not pinned to its historical mode');
-    assert.equal(run.selection?.selectionPolicyVersion, 'production.nextMissionTask', 'legacy run not pinned to production policy version');
-    ok(true, 'LEGACY-PIN: reference continues a legacy run and pins it honestly');
+    const runs = await rs.list();
+    const legacyRun = runs.find((r) => r.id === 'run.legacy');
+    assert.equal(legacyRun.status, 'superseded', `${legacyMode}: unversioned open run was resumed instead of superseded`);
+    assert.equal(legacyRun.selection ?? null, null, 'supersede stamped selection bookkeeping onto a legacy run');
+    assert.match(legacyRun.supersedeReason ?? '', /mission_revision_unversioned_run/, 'supersede reason does not record unversioned provenance');
+    assert.ok(legacyRun.endedAt != null, 'superseded run missing endedAt');
+    const live = runs.find((r) => r.status === 'open');
+    assert.ok(live && live.id !== 'run.legacy', `${legacyMode}: no fresh run minted after legacy supersede`);
+    assert.equal(live.missionRevision, MEET.mission.revision ?? null, 'fresh run did not pin the current mission revision');
+    assert.equal(live.selection?.mode, legacyMode, 'fresh run not pinned to the requested mode');
+    assert.equal(live.learnerName, 'A', 'supersede dropped the learner name instead of handing it forward');
+    ok(true, `LEGACY-PIN: ${legacyMode} reopen supersedes the unversioned run and mints a pinned trajectory`);
   }
   /* Policy-version drift inside one mode also fails closed */
   {
@@ -989,7 +993,156 @@ const consumedKinds = (session) => (session.selectionContext()?.actionsChosen ??
     await assert.rejects(() => stale.init(), /selection_policy_version_pinned/, 'policy version drift inside an open run was not refused');
     ok(true, 'LEGACY-PIN: selection policy version drift fails closed');
   }
-  say('LEGACY-PIN: legacy runs stay reference; mode+version pinned (BLOCKER-1 re-review)');
+  say('LEGACY-PIN: unversioned runs supersede; mode+version pinned (008D r2 BLOCKER-1)');
+}
+
+/* REV-PIN (008D r2 BLOCKER-1): the mission task surface is versioned
+ * and open runs pin the revision they were minted against. Same
+ * missionId + different revision never shares one open trajectory —
+ * the stale run is explicitly superseded (auditable, never deleted)
+ * and a fresh run mints pinned to the current revision. */
+{
+  const seededOpenRun = (rev) => createMemoryRunStore([{
+    id: 'run.rev1',
+    learnerId: 'RT.learner',
+    missionId: TIME.mission.id,
+    missionRevision: rev,
+    status: 'open',
+    learnerName: 'A',
+    startedAt: 1,
+    endedAt: null,
+    selection: {
+      version: 'vnext.run-selection.v1',
+      mode: 'b0',
+      selectionPolicyVersion: POLICY_VERSIONS.B,
+      decisionEpisodeId: 'ep:run.rev1',
+      config: {},
+      decisionContext: null,
+      pendingConsumption: null
+    }
+  }]);
+  const curRev = TIME.mission.revision ?? null;
+  {
+    /* rev-(cur-1) open run + rev-cur mission → supersede + fresh run */
+    const rs = seededOpenRun(curRev - 1);
+    const s = makeSession({ fixture: TIME, runStore: rs, mode: 'b0' });
+    await s.init();
+    const runs = await rs.list();
+    const old = runs.find((r) => r.id === 'run.rev1');
+    assert.equal(old.status, 'superseded', 'stale-revision open run silently resumed under the new surface');
+    assert.equal(old.supersedeReason, `mission_revision_changed:${curRev - 1}->${curRev}`, 'supersede reason does not record the revision edge');
+    assert.ok(old.endedAt != null, 'superseded run missing endedAt');
+    const open = runs.filter((r) => r.status === 'open');
+    assert.equal(open.length, 1, 'supersede left multiple open runs for the same mission');
+    assert.equal(open[0].missionRevision, curRev, 'fresh run not pinned to the current mission revision');
+    assert.equal(open[0].learnerName, 'A', 'supersede dropped the learner name');
+    assert.equal(s.runInfo().id, open[0].id, 'session did not bind the fresh run');
+    assert.notEqual(s.runInfo().id, 'run.rev1', 'the stale trajectory was reused under a new revision');
+    ok(true, 'REV-PIN: stale-revision open run supersedes; fresh run pins current revision');
+  }
+  {
+    /* matching revision → the SAME run resumes (pin is sticky, not brittle) */
+    const rs = seededOpenRun(curRev);
+    const s = makeSession({ fixture: TIME, runStore: rs, mode: 'b0' });
+    await s.init();
+    assert.equal(s.runInfo().id, 'run.rev1', 'same-revision open run was not resumed');
+    assert.equal(s.runInfo().status, 'open', 'same-revision run was superseded anyway');
+    assert.equal(s.runInfo().missionRevision, curRev, 'resumed run lost its pinned revision');
+    ok(true, 'REV-PIN: matching revision resumes the pinned run');
+  }
+  {
+    /* a fresh mint stamps the revision and reloads into the same run */
+    const rs = createMemoryRunStore();
+    const es = createMemoryEventStore();
+    const ds = createMemoryDecisionStore();
+    const s1 = makeSession({ fixture: TIME, eventStore: es, runStore: rs, decisionStore: ds, mode: 'b0' });
+    await s1.init();
+    const runId = s1.runInfo().id;
+    assert.equal(s1.runInfo().missionRevision, curRev, 'minted run did not stamp missionRevision');
+    const s2 = makeSession({ fixture: TIME, eventStore: es, runStore: rs, decisionStore: ds, mode: 'b0' });
+    await s2.init();
+    assert.equal(s2.runInfo().id, runId, 'reload did not resume the revision-pinned run');
+    assert.equal(s2.runInfo().missionRevision, curRev, 'resumed run lost its revision pin');
+    ok(true, 'REV-PIN: minted run stores the revision and survives reload');
+  }
+  {
+    /* the persisted audit stamps the run's pinned revision */
+    const rs = createMemoryRunStore();
+    const es = createMemoryEventStore();
+    const ds = createMemoryDecisionStore();
+    const s = makeSession({ fixture: TIME, eventStore: es, runStore: rs, decisionStore: ds, mode: 'b0' });
+    await s.init();
+    await drive(s, (x) => x.type === 'task' && x.phase === 'feedback', {
+      /* TIME tasks aren't in SCRIPT — any non-empty response consumes
+       * the decision and mints the audit, which is all this asserts. */
+      answer: (x) => x.responseType === 'choice' ? (x.options?.[0]?.id ?? 'opt') : 'three pm'
+    });
+    const audits = await s.auditTrail();
+    const rec = audits.at(-1);
+    assert.ok(rec, 'consumed decision minted no audit record');
+    assert.equal(rec.missionRevision, s.runInfo().missionRevision, 'audit not stamped with the pinned run revision');
+    assert.equal(rec.missionRevision, curRev, 'audit revision disagrees with the mission surface');
+    assert.equal(rec.missionRunId, s.runInfo().id, 'audit not stamped with the run id');
+    ok(true, 'REV-PIN: consumed-decision audit stamps the pinned run revision');
+  }
+  say('REV-PIN: mission revision pinned per run; drift supersedes (008D r2 BLOCKER-1)');
+}
+
+/* SNAP-FREEZE (008D r2 BLOCKER-2): the decide-time input is an
+ * immutable snapshot, not a live alias — support events appended AFTER
+ * selection land in learner evidence but can never leak into the state
+ * the decision, its digest, and its audit all describe. */
+{
+  const es = createMemoryEventStore();
+  const rs = createMemoryRunStore();
+  const ds = createMemoryDecisionStore();
+  const s = makeSession({ eventStore: es, runStore: rs, decisionStore: ds, mode: 'b0' });
+  await s.init();
+  const scr = await drive(s, (x) => x.type === 'task' && x.phase === 'prompt' && (x.supportOffered ?? []).length > 0);
+  const snap = s.liveDecisionInput();
+  ok(snap != null && Object.isFrozen(snap) && Object.isFrozen(snap.events), 'live decision input is not a frozen snapshot');
+  const digestAtSelect = stateDigest(snap);
+  const snapEventCount = snap.events.length;
+  const preIds = new Set(snap.events.map((e) => e.id));
+  /* support AFTER selection: the events land in the learner log but
+   * must not exist inside the recorded decide-time input */
+  await s.support(scr.supportOffered.includes('hint') ? 'hint' : scr.supportOffered[0]);
+  if ((scr.supportOffered ?? []).length > 1) await s.support(scr.supportOffered[1]);
+  const supportEvents = s.log().filter((e) => e.eventType === 'support_use');
+  ok(supportEvents.length >= 1, 'support() produced no learner evidence');
+  ok(snap.events.length === snapEventCount && supportEvents.every((e) => !preIds.has(e.id)),
+    'post-selection support events leaked into the decide-time snapshot');
+  ok(stateDigest(snap) === digestAtSelect, 'snapshot digest drifted after post-selection support');
+  assert.throws(() => snap.events.push(supportEvents[0]), 'frozen decision input accepted an array mutation');
+  /* commit the on-screen task — consume must succeed AND bind the
+   * original decide-time digest across every provenance surface */
+  const cur = s.screen();
+  if (cur.responseType === 'choice') await s.commit({ optionId: SCRIPT[cur.taskId] ?? cur.options?.[0]?.id });
+  else await s.commit({ text: SCRIPT[cur.taskId] ?? 'hello' });
+  const entry = s.decisions().at(-1);
+  const audit = (await s.auditTrail()).at(-1);
+  ok(entry?.stateFingerprint === digestAtSelect, 'decision-log fingerprint ≠ decide-time digest');
+  ok(audit?.decisionInputDigest === digestAtSelect, 'audit decisionInputDigest ≠ decide-time digest');
+  ok((audit?.decisionId ?? '').includes(digestAtSelect.slice('sha256:'.length, 'sha256:'.length + 16)),
+    'decisionId does not embed the decide-time digest');
+  ok(audit?.missionRevision === s.runInfo()?.missionRevision, 'audit not stamped with the pinned run revision');
+  say('SNAP-FREEZE: support-after-selection stays out of decide-time provenance; digests agree');
+}
+{
+  /* deliberate mutation of the stored snapshot must fail closed —
+   * object/array fields throw on write (deep freeze); Set internals
+   * cannot be frozen, so the consume-time digest check is the second
+   * line of defense and it MUST fire */
+  const s = makeSession({ mode: 'b0' });
+  await s.init();
+  await drive(s, (x) => x.type === 'task' && x.phase === 'prompt' && x.responseType === 'text');
+  const snap = s.liveDecisionInput();
+  ok(snap != null, 'no live decision input to mutate');
+  assert.throws(() => { snap.mission.revision = 999; }, 'frozen snapshot accepted a field write');
+  snap.roles.targets.add('cap.bogus');
+  await assert.rejects(() => s.commit({ text: 'hi there' }), /decision_input_drift/,
+    'mutated decide-time input was consumed without rejection');
+  say('SNAP-FREEZE: mutated decide-time input fails closed at consume');
 }
 
 /* READ-FAIL (HIGH-2): absent key → fallback; inaccessible/corrupt
