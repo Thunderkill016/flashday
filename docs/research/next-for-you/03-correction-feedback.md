@@ -3,14 +3,14 @@
 ## Claims and evidence
 
 **C1. Corrective feedback works, durable.**
-Lyster et al. (2013) classroom CF meta: significant durable effects on
-target development. → **STRONG.**
+Lyster & Saito (2010) classroom CF meta-analysis (15 classroom studies,
+N=827): significant durable effects on target development. → **STRONG.**
 
 **C2. Prompts > recasts.**
-Lyster et al.: prompts (elicitation, clarification, metalinguistic cue)
-outperform recasts, most visible on free-production measures. Ranta &
-Lyster: prompts push learners to retrieve the rule and self-repair —
-proceduralization. → **STRONG.** Maps directly to FlashDay's
+Lyster & Saito (2010): prompts (elicitation, clarification,
+metalinguistic cue) outperform recasts, most visible on free-production
+measures. Ranta & Lyster: prompts push learners to retrieve the rule
+and self-repair — proceduralization. → **STRONG.** Maps directly to FlashDay's
 retry/self-repair remediation intent: make the learner produce the
 repair, don't just show the answer.
 
@@ -19,9 +19,11 @@ Ellis, Loewen & Erlam (2006): metalinguistic explanation beat recasts on
 delayed imitation AND grammaticality judgment. → **MODERATE.**
 
 **C4. Immediate CF > delayed CF for L2 skill development.**
-Li (2020 replication of Li, Zhu & Ellis 2016): immediate more
-facilitative; theory: correct before the error proceduralizes (SAT;
-Doughty's ~40s cognitive window for comparison). → **MODERATE.**
+Fu & Li (2020) empirical study: immediate CF more facilitative than
+delayed for EFL development; Li (2020) is a replication-agenda/review
+piece, not the primary experiment. Theory: correct before the error
+proceduralizes (SAT; Doughty's ~40s cognitive window for comparison).
+→ **MODERATE.**
 
 **C5. BUT error-type matters — not all failures deserve immediate repair.**
 Metcalfe hypercorrection: high-confidence errors correct *better* and
@@ -40,10 +42,10 @@ prompt-driven self-repair. → **MODERATE**, and consistent.
 
 ## Boundaries
 
-- Modality: oral-CF evidence (Lyster) is classroom; production-task CF
-  in a typed/choice app is a different delivery channel — transfer is
-  plausible but not proven.
-- Age: CF benefits are larger for younger learners (Lyster et al.
+- Modality: oral-CF evidence (Lyster & Saito 2010) is classroom;
+  production-task CF in a typed/choice app is a different delivery
+  channel — transfer is plausible but not proven.
+- Age: CF benefits are larger for younger learners (Lyster & Saito
   moderator); adult A1 learners still benefit but magnitude uncertain.
 - Error attribution: the kernel's `missingFunctions` gives *function-
   level* attribution only when the evaluator is contract-backed and
@@ -56,8 +58,12 @@ prompt-driven self-repair. → **MODERATE**, and consistent.
 1. Remediation should prefer **prompt-type** repair (make the learner
    regenerate), matching existing retry design — evidence-aligned.
 2. Sequencing: unresolved attributed gaps justify interrupting toward
-   repair; **unattributed** failures justify diagnostic probing (to get
-   attribution), not blind re-drilling.
+   repair. **Unattributed** failures (`missingFunctions=[]`) carry no
+   repairable-gap information — they *may admit* a diagnostic/
+   clarification candidate when a valid one exists and budget allows,
+   but they do not make probing universally correct: ordinary mission
+   continuation or a meaningful retry can remain valid, and a
+   substrate diagnosis must never be fabricated.
 3. After enough consecutive failures, *stop drilling* — escalate to
    substrate support (demand) or easier scaffolded work, not more of
    the same failing task. This is both a CF-timing insight and a

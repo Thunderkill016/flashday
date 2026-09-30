@@ -55,8 +55,12 @@ later encoding. Supports kernel's diagnostic-probe-first rule 8.
   "retrieval is good" into "repeat retrieval now."
 - Relearning overrides spacing benefits at the boundary (Nakata,
   Suzuki & He 2022): relearning forgotten material is not equivalent
-  to retrieval of retained material — post-30-day-absence learners
-  need *relearning*, not retrieval.
+  to retrieval of retained material. **Boundary caveat:** elapsed time
+  alone cannot mint a "forgotten" verdict — vNext has no decay model
+  and Mission 007 explicitly removed time-as-expiry semantics.
+  Relearning-mode semantics are justified only by direct performance
+  evidence (e.g., a failed due-probe on a previously demonstrated
+  capability); long absence may justify *checking*, never *declaring*.
 
 ## Implications for Next For You
 
@@ -65,8 +69,11 @@ later encoding. Supports kernel's diagnostic-probe-first rule 8.
 2. Due-ness should ideally be probability-based (recall likelihood),
    not just elapsed-lag — but vNext has no memory model; elapsed lag is
    the honest v0.
-3. A post-absence learner is a *relearning* case, not a retrieval case —
-   the policy should detect long-gap return and soften the demand.
+3. A post-absence learner is *not automatically* a relearning case —
+   time is not evidence of forgetting. Absence may make a check/
+   retrieval candidate *reasonable* on a justified schedule; only a
+   verified failure on previously-demonstrated ability may move the
+   semantics toward refresh/relearning.
 4. Session-level retrieval budgeting (not in current planner) is the
    mechanism that turns Nakata-2017 into a bound: cap massed re-probes
    per capability per session.

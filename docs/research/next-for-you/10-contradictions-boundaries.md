@@ -7,9 +7,9 @@ This file exists to record where the intuitive answer is *wrong* or
 
 | Assumption | Verdict | Why |
 |------------|---------|-----|
-| Due retrieval always outranks new input | **PARTIALLY TRUE** | Spacing evidence is strong, but a *relearning* case (long absence → forgotten) is not a retrieval case; and a due retrieval on a mastered cap should not starve all forward progress forever — needs budgeting |
-| Failure → immediate correction | **BOUNDED** | Immediate > delayed for proceduralizing skills (Li 2020), but high-confidence misconception errors hypercorrect; non-attributed failures need *diagnosis first*, not correction — blind re-drill through a non-attributing failure is wasted/minimally informative |
-| Harder retrieval is always better | **CONTRADICTED** | Desirable-difficulty effects vanish under high element-interactivity (Chen 2018); for novices the material is already high-load — extra difficulty is *undesirable* |
+| Due retrieval always outranks new input | **PARTIALLY TRUE** | Spacing evidence is strong, but elapsed time alone never proves forgetting (no decay model; Mission 007 removed time-as-expiry); and a due retrieval on a mastered cap should not starve all forward progress forever — needs budgeting |
+| Failure → immediate correction | **BOUNDED** | Immediate > delayed for L2 development (Fu & Li 2020 empirical; Li 2020 replication-review), but high-confidence misconception errors hypercorrect; non-attributed failures carry no repairable-gap info — blind re-drill is wasted, and probing is *a* candidate not *the* answer |
+| Harder retrieval is always better | **CONTRADICTED** | Desirable-difficulty effects vanish under high element-interactivity (Chen 2018); novice status raises overload risk — extra difficulty on already-complex material is *undesirable* |
 | More personalization → more learning | **UNSUPPORTED/mixed** | Learner-control meta: motivation yes, cognition mixed. Learned-policy literature shows completion gains, not learning gains |
 | Interleaving > blocking universally | **CONTRADICTED for words** | Brunmair & Richter: g=0.42 overall, **-0.39 for word-level materials** — vocabulary may prefer blocking |
 | Expanding retrieval schedules required | **CONTRADICTED** | g=0.034 vs uniform (Latimier) |
@@ -20,12 +20,17 @@ This file exists to record where the intuitive answer is *wrong* or
 
 ## Boundary conditions that matter for policy
 
-1. **Novice boundary (load):** A1 = all material high-interactivity.
+1. **Novice boundary (load):** novice status raises overload *risk*;
+   element-interactivity is task/material-dependent, not level-uniform.
    Difficulty escalation must wait for demonstrated stability
    (INDEPENDENT + evidence sufficiency), not be inferred from momentum.
-2. **Absence boundary (forgetting):** long gap → *relearning* semantics
-   (`relearning override`, Nakata 2022). A due-retrieval on a forgotten
-   item should be re-exposure+retrieval, not a hard test.
+2. **Absence boundary (forgetting):** a long gap is NOT evidence of
+   forgetting — Mission 007 removed time-as-expiry and vNext has no
+   decay model. Absence may justify scheduling a *check* (retrieval
+   candidate); refresh/relearning semantics require direct performance
+   evidence — a verified failure on a previously demonstrated
+   capability — never the calendar. (Nakata 2022's relearning-override
+   is about spacing *during* relearning, not a time-inference license.)
 3. **Dependency boundary:** supported-but-dependent ≠ weak — it's a
    fade stage. The policy must prefer unaided re-attempts over endless
    re-support (dependency ceiling), and support demands are bounded per

@@ -11,10 +11,11 @@ generated from `meet_at_a_time` fixtures (see bottom).
 |--------|---------------------|--------------------------|-------|
 | `RESUME` | rule 1 | — | Hard invariant: never abandon in-flight work |
 | `DUE_RETRIEVAL` | rule 2 | Teaching (retrieval IS the learning event) | Due = `lastUnaided + lag ≤ now` |
-| `RELEARNING` | — (new) | Teaching | Post-absence variant of retrieval: softer demand, re-exposure path; *not* a hard test |
+| `REFRESH/RELEARNING` | — (new) | Teaching | **Eligible ONLY on direct evidence**: verified failure on a previously demonstrated capability. Long absence may justify *scheduling a check* — it must NEVER mint this intent by itself (time-as-expiry was removed from the model; no decay model exists) |
 | `SUPPORT_DEMAND` | rule 3 | Diagnostic+repair substrate | Kernel-defined; unchanged |
 | `UNRESOLVED_CORRECTION` | rule 4 | Teaching (repair) | Only when failure is *attributed* |
-| `DIAGNOSTIC_PROBE` | part of rule 8 + (new) | Diagnostic | Bounded budget; serves `evidenceSufficient=false` caps |
+| `DIAGNOSTIC_PROBE` | part of rule 8 + (new) | Diagnostic | Uncertainty-resolution / baseline; serves `evidenceSufficient=false` caps; bounded per decision-episode |
+| `ASSESSMENT` | checkpoint events | Claim-bearing evidence | Distinct from DIAGNOSTIC_PROBE: assessment mints *fresh claim-bearing* evidence (checkpoint events); probing resolves uncertainty. Both retrieve; semantics must stay separate — never fold assessment into the probe budget |
 | `TRANSFER` | rule 5 | Teaching (generalization) | Novel-family only |
 | `INDEPENDENT_ATTEMPT` | rule 6 | Teaching+evidence | Supported → unaided run |
 | `MISSION_CONTINUATION` | rule 7 | Teaching (input/notice) | Exposure tasks; prerequisites met |
@@ -22,9 +23,11 @@ generated from `meet_at_a_time` fixtures (see bottom).
 | `IDLE` | rule 9 | — | Terminal |
 | `FLUENCY_PRACTICE` | — | — | **Reserved** — no calibrated contract; do not implement |
 
-`ASSESSMENT` (checkpoint) folds into `DIAGNOSTIC_PROBE` budget —
-assessment is the scheduled diagnostic pass (ALEKS lesson), not an
-always-on overlay.
+`DIAGNOSTIC_PROBE` carries a bounded budget per decision-episode
+(session), not per streak — a streak is an engagement construct, not a
+learning boundary. `ASSESSMENT` is separately gated by its own
+evidence-sufficiency conditions (it must not become constant testing,
+and it is not interchangeable with probing).
 
 ## Policy A — Conservative rule-based tutor
 
@@ -34,17 +37,23 @@ purely lexicographic (no scores).
 Corrections (each tied to a contradiction in file 10):
 
 - **A1 — failure escalation bound:** after `consecutiveFailures ≥ N`
-  on an *attributed* gap → `SUPPORT_DEMAND`/`DIAGNOSTIC_PROBE`, not
+  on an *attributed* gap → `SUPPORT_DEMAND`/easier scaffolded work, not
   unbounded `retry` on the same failing task. Kills the failure loop.
-- **A2 — non-attributing failure → diagnostic, not retry:** if
-  `missingFunctions` is empty, remediation is blind; route to probe.
-- **A3 — absence → RELEARNING:** `now − lastUnaidedSuccess ≥ absenceLag`
-  → re-exposure intent instead of hard retrieval test.
+- **A2 — non-attributing failure handling:** `missingFunctions=[]`
+  means *no justified attribution* — candidate generation may admit a
+  diagnostic/clarification action when a valid one exists and budget
+  allows, and may keep meaningful retry or mission continuation valid;
+  it must never fabricate a substrate diagnosis.
+- **A3 — refresh semantics, not time semantics:** elapsed absence never
+  mints a relearning intent. It may make a check/retrieval candidate
+  reasonable on a justified schedule; refresh becomes eligible only
+  after a verified failure on a previously demonstrated capability.
 
-Order (revised): resume → **relearning** → due_retrieval →
-support_demand → **correction (attributed only, bounded)** → transfer
-→ independent → diagnostic_probe (thin-evidence caps) → mission
-continuation → new_input → idle.
+Order (revised): resume → due_retrieval → support_demand →
+**correction (attributed only, bounded; else admit-not-force probe)** →
+**refresh (only on verified failure of demonstrated ability)** →
+transfer → independent → diagnostic_probe (thin-evidence caps,
+episode-budgeted) → mission continuation → new_input → idle.
 
 - Pros: maximal safety, total explainability, zero reward-hacking
   surface, trivially deterministic.
@@ -54,39 +63,50 @@ continuation → new_input → idle.
 
 ## Policy B — Constrained multi-factor ranking (hybrid J)
 
-**Shape:** `filter → generate valid set → score → argmax + reason`.
+**Shape:** `filter → generate valid set → tier/scorecard → deterministic
+tie-break → action + reason`. **v0 does not use an arbitrary floating-
+point weighted sum presented as calibrated** — preferences are ordinal
+and rule-attributable.
 
-- **Filters (hard, cannot be out-scored):** kernel invariants (in-flight
-  resume, attempt-type honesty, modality match, prereq gating,
-  demand lifecycle semantics, support-cap exclusion from direct
-  introduction); safety floors (consecutive-failure ceiling → no more
-  same-task candidates; non-attributing failure → no remediation
-  candidate, probe instead).
-- **Score:** `Σ w_i·f_i` over candidate features, all read from the
-  learner model:
-  - `overdueDepth` (how far past lag),
-  - `unresolvedGapSeverity` (attributed unresolved functions,
-    recurring),
-  - `supportDependency` (dependent → unaided re-attempt boosted,
-    re-support suppressed),
-  - `evidenceThinness` (`evidenceSufficient=false` → diagnostic value),
-  - `noveltyDebt`/`breadthDebt` (caps never-seen vs caps mastered —
-    starvation guards made explicit),
-  - `contextVariety` (families already exercised).
-- Every feature is an existing fact or an explicit policy knob — no
-  fake proxies.
-- Pros: expresses real tradeoffs; explainable per-decision (feature
-  breakdown); deterministic; simulatable offline; absorbs later
-  calibrated weights.
-- Cons: weight-setting needs 008B simulation benchmark to be
-  defensible; more surface for design error than A.
+- **Filters (hard, cannot be out-preferenced):** kernel invariants
+  (in-flight resume, attempt-type honesty, modality match, prereq
+  gating, demand lifecycle semantics, support-cap exclusion from
+  direct introduction); safety floors (consecutive-failure ceiling →
+  no more same-task candidates; `missingFunctions=[]` → remediation
+  candidate suppressed while diagnostic/continuation/retry candidates
+  remain admissible).
+- **Tier/scorecard + ordinal contributions:** each candidate reports
+  the model *facts* and *hypotheses* it satisfies:
+  - facts from the model: `dueStatus`/`evidenceAge` (observable age —
+    NOT a monotonic "the-more-overdue-the-better" weight; continuous
+    overdue scaling is an **experimental hypothesis** since no recall-
+    probability model exists), `unresolvedFunctions`, `recurring`
+    gaps, `support.dependent`, `consecutiveFailures`,
+    `evidenceSufficient`/reasons (`thin_independent_evidence`,
+    `no_delayed_evidence`, `no_transfer_evidence`), `retained`,
+    `transfer.demonstrated`, `assessment.demonstrated`.
+  - **policy hypotheses** (explicitly NOT evidence-backed facts —
+    benchmarkable as starvation guards/tie-breaks, not calibrated):
+    `breadthDebt`, `noveltyDebt`, `contextVariety`, session-composition
+    budgets.
+- Every contribution is an existing fact, a labeled hypothesis, or an
+  explicit policy knob — no fake proxies, no hidden precision.
+- Pros: expresses real tradeoffs while keeping "why A beat B"
+  rule-attributable; deterministic; replay-safe; cold-start viable;
+  simulatable offline (simulation falsifies pathologies and compares
+  behavior — it cannot calibrate true learning-effect weights; those
+  wait for human data).
+- Cons: preference ordering still needs 008B benchmarking for
+  pathology-freedom (not optimality claims); more design surface
+  than A.
 
 ## Policy C — Information-gain-aware ranking (B + explicit diagnostic leg)
 
-Policy B plus a **budgeted information objective**: candidates scored on
+Policy B plus a **budgeted information objective**: candidates score on
 *expected uncertainty reduction* (thinness, absent delayed evidence,
-unassessed-but-plausible) as a first-class feature, gated by a
-diagnostic budget (max K diagnostic actions per session / per streak).
+unassessed-but-plausible) as a first-class contribution, gated by a
+diagnostic budget scoped to the **decision-episode/session** — a streak
+is an engagement construct, not a learning boundary.
 
 - Pros: only architecture that correctly handles "two equally-weak
   capabilities, one barely observed" — CAT's core lesson; prevents
@@ -111,8 +131,9 @@ question, gated on a simulator/benchmark existing.
 transfer:true, retained:true, sufficient:true, reasons:[]}`
 
 - A: rules 2-8 all miss → continues to other caps / `idle`. Correct.
-- B: all intents on this cap score ~0 → session weight goes to weaker
-  caps (breadthDebt). Correct — no wasted drilling.
+- B: this cap offers no positive contributions → preference moves to
+  weaker caps (breadthDebt, a labeled hypothesis, would break the tie
+  toward never-seen work). Correct — no wasted drilling.
 - C: `sufficient:true` → zero diagnostic value. Same as B.
 
 **S2 — Support-dependent learner (probe served, aided win only):**
@@ -163,31 +184,39 @@ unresolved_function_gap, support_dependent]}`
 | Archetype | A (fixed rules) | B (ranking) | C (+info) | D (learned) |
 |-----------|------------------|-------------|-----------|-------------|
 | **Fast learner** | clean; minor risk of over-serving transfer early | good — zero score on mastered caps pushes breadth | good | risk: explores junk actions |
-| **Forgetful learner** | good — due retrievals dominate (right) | good | better — relearning vs retrieval distinguished if absence signal added | unknown |
+| **Forgetful learner** | good — due retrievals dominate (right) | good | same | unknown |
 | **Support-dependent** | ok — demand lifecycle caps it | better — dep explicitly suppresses re-support | better | risk: reward = easy aided wins |
-| **Repeated failure** | **BAD** unbounded retry loop (fixed by A1/A2) | good — ceiling filter + probe/demand | good | danger: learns to avoid hard caps (starve) |
-| **30-day return** | **BAD-ish** — hard retrieval on forgotten items | better — RELEARNING intent fixes it | better | unknown |
-| **Rapid new-input learner** | fine until review debt accumulates — no starvation guard | good — breadthDebt/overdueDepth trade | good | risk: chases novelty |
+| **Repeated failure** | **BAD** unbounded retry loop (fixed by A1/A2) | good — ceiling filter + demand/probe candidates | good | danger: learns to avoid hard caps (starve) |
+| **30-day return** | risk: hard retrieval that *may* be on forgotten items — but time alone never declares forgetting; the check is legitimate, the honest fix is refresh-eligibility only after a verified failure | same (check candidate; no relearning inference from calendar) | same | unknown |
+| **Rapid new-input learner** | fine until review debt accumulates — no starvation guard | good — breadthDebt (hypothesis) + due-status trade | good | risk: chases novelty |
 | **Pathology: review starvation** | moderate risk (new caps via 7/8 can crowd review if retrieval never due — actually low risk since lag gates) | explicitly scored tradeoff | same | high risk |
 | **Pathology: new-content starvation** | low-moderate (due retrieval + remediation can monopolize) | breadthDebt is the guard | same | moderate |
 | **Pathology: assessment spam** | none today (no assessment rule!) — but C needs budget | needs diagnostic budget | **budgeted by design** | severe if reward = info |
 | **Pathology: support loop** | lifecycle bounds it | dep-suppression adds guard | same | severe if reward = success-rate |
 | **Pathology: failure loop** | unbounded (fix via A1) | ceiling filter | same | severe |
-| **Pathology: easy-task loop** | low (rules prefer *needed* work) | needs `overdue`/need features to outrank easy wins | same | **highest risk** (success-reward hacking) |
-| **Pathology: transfer starvation** | moderate — transfer only fires at RETAINED | same; variety feature helps | same | unknown |
-| **Pathology: thrashing between caps** | low (strict order stabilizes) | needs stability term/hysteresis — real risk if scores tie-jitter | same | high |
+| **Pathology: easy-task loop** | low (rules prefer *needed* work) | due-status/gap contributions must outrank easy wins | same | **highest risk** (success-reward hacking) |
+| **Pathology: transfer starvation** | moderate — transfer only fires at RETAINED | same; variety hypothesis helps | same | unknown |
+| **Pathology: thrashing between caps** | low (strict order stabilizes) | needs a stability contribution/hysteresis — real risk if preferences tie-jitter | same | high |
 
 ## Recommendation for 008B adjudication
 
-- **Default: Policy B** (filter → score → reason) with Policy A as the
-  zero-weight fallback and regression baseline. B is the minimal
-  architecture that (a) makes eligibility vs preference honest, (b) has
-  an explanation contract, (c) preserves every kernel invariant as a
-  filter, and (d) is simulatable offline.
-- **Keep Policy C's diagnostic leg** as a bounded feature (`evidenceThinness`)
-  inside B rather than a separate governing layer — the marginal
-  architecture isn't justified until the uncertainty signal is richer.
+- **Default: Policy B** — hard eligibility/safety filters →
+  pedagogically valid candidate set → deterministic tier/scorecard with
+  ordinal preference contributions → deterministic tie-break → action
+  + machine-readable explanation — with Policy A as the corrected-cascade
+  baseline and reference oracle. v0 is NOT a calibrated weighted sum;
+  preference orderings are explicit versioned priors.
+- **Keep Policy C's information objective** as a bounded contribution
+  (`evidenceThinness` facts + episode-scoped diagnostic budget) inside
+  B rather than a separate governing layer — the marginal architecture
+  isn't justified until the uncertainty signal is richer.
 - **A1/A2/A3 corrections are needed regardless of winner** — they're
-  semantic fixes, not architecture.
+  semantic fixes, not architecture. Note A3 is deliberately *narrow*:
+  refresh eligibility only on verified failure of previously
+  demonstrated ability; time alone mints nothing.
+- **Simulation bounds:** the 008B benchmark can falsify pathologies
+  (loops, starvation, invalid ordering, thrash) and compare behavior —
+  it CANNOT calibrate pedagogical weights. Learning-effect weights wait
+  for real learner outcomes.
 - **D only after** a validated reward + logged corpus + simulation
   benchmark exist.

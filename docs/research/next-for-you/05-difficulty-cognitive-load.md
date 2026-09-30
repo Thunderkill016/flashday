@@ -69,6 +69,8 @@ controller is: `consecutiveFailures` + `unresolvedFunctions` +
    Raise demand only when the *evidence* supports sufficiency.
 2. Never keep drilling through consecutive failures — CLT boundary +
    CF evidence both say change the move.
-3. For absolute beginners (A1, all material high-interactivity), bias
-   toward supported/input work early; the kernel's SUPPORTED stage
-   before INDEPENDENT already encodes this correctly.
+3. Novice status raises overload *risk*, but element-interactivity is
+   task/material-dependent — do not assert "A1 = all high-interactivity."
+   Bias toward supported/input work early on genuinely novel, multi-
+   element material; the kernel's SUPPORTED stage before INDEPENDENT
+   already encodes that ordering.

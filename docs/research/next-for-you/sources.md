@@ -58,14 +58,19 @@ Grouped by topic. Links/DOIs for retrieval; no copyrighted text copied.
 
 ## Corrective feedback / error handling
 
-- Lyster, Saito & Sato (2013). Oral feedback in classroom SLA:
-  meta-analysis. *SSLA*. Prompts>recasts; durable effects.
+- Lyster & Saito (2010). Oral feedback in classroom SLA: meta-analysis.
+  *SSLA* — durable effects; prompts > recasts. (Note: Lyster, Saito &
+  Sato 2013 is a *review* of classroom CF, not the meta-analysis.)
 - Brown (2016). Type and linguistic foci of oral CF: meta-analysis.
   *Language Teaching Research* 20:436-458.
 - Ellis, Loewen & Erlam (2006). Implicit vs explicit CF and L2 grammar.
   *SSLA* 28:339-368.
-- Li (2020). What is the ideal time to provide CF? Replication.
-  *Language Teaching* 53:96-108 — immediate > delayed for development.
+- Fu & Li (2020). Empirical immediate-vs-delayed CF study — immediate
+  more facilitative for L2 development.
+- Li (2020). What is the ideal time to provide CF? *Language Teaching*
+  53:96-108 — replication-agenda/review piece; distinguish from the
+  primary empirical studies it replicates (e.g., Li, Zhu & Ellis 2016;
+  Arroyo & Yilmaz 2018).
 - Quinn & Nakata (2017); Frontiers (2023) systematic review of CF
   timing — immediate-CF theories (SAT, cognitive window ~40s Doughty),
   delay-retention counter-literature.

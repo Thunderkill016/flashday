@@ -125,13 +125,19 @@ Recommended-shape candidate:
 STATE (learner model + events + tasks + policy)
   → eligibility filters        (kernel invariants + safety floors)
   → pedagogically valid set    (one entry per defensible intent)
-  → candidate features         (all read from learner-model facts)
-  → deterministic score        (versioned weights, auditable)
-  → chosen action + reason     (explanation = features that won)
+  → candidate facts            (all read from learner-model evidence)
+  → deterministic tier/scorecard + ordinal preference list
+                               (NOT a calibrated weighted sum at v0)
+  → deterministic tie-break
+  → chosen action + reason     (explanation = the deciding rule/features)
 ```
 
-- Explainability: high (feature-level rationale).
-- Cold start: weights are explicit priors, versioned.
+- Explainability: high (tier + feature-level rationale; why A beat B is
+  answerable).
+- Cold start: preference orderings are explicit versioned priors; any
+  continuous weighting stays *experimental* until validated by real
+  learner outcomes — simulation can falsify pathologies, it cannot
+  calibrate pedagogical weights.
 - Safety: invariants are filters — cannot be out-scored.
 - Determinism: total; replay-safe; no hidden state.
 - Reward hacking: limited to weight design review.
