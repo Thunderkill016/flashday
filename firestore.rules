@@ -41,6 +41,16 @@ rules_version = '2';
 //   kind: 'drill'|'read'|'listen'|'write'|'speak' or the mission stage names
 //   payload, support: small maps; submitted_at, created_at: ISO-8601
 //   CREATE + READ + DELETE only — updates are denied (append-only).
+//
+// users/{uid}/vnext_events/{id}    (vNext evidence engine — immutable log)
+//   id: string (= doc id = EvidenceEvent.id), owner_id: string (= uid)
+//   learner_id: string (= uid — nobody writes evidence for another learner)
+//   capability_id, task_id: string; task_revision: int >= 1
+//   event_type, modality: string; occurred_at: number (client-observed ms)
+//   recorded_at: timestamp (server arrival); schema_version: 1
+//   policy_version, mission_run_id: string|null
+//   context/attempt/support/feedback/evaluation/binding: map|null
+//   CREATE + READ only — update AND delete denied: evidence is immutable.
 // ===============================================================
 
 service cloud.firestore {
@@ -205,6 +215,32 @@ service cloud.firestore {
         && isIsoDateString(d.created_at);
     }
 
+    function validVnextEvent(docId) {
+      let d = request.resource.data;
+      return hasOnly(['id', 'owner_id', 'learner_id', 'capability_id', 'task_id',
+                      'task_revision', 'event_type', 'modality', 'occurred_at',
+                      'recorded_at', 'schema_version', 'policy_version',
+                      'mission_run_id', 'context', 'attempt', 'support',
+                      'feedback', 'evaluation', 'binding'])
+        && hasAll(['learner_id', 'capability_id', 'task_id', 'task_revision',
+                   'event_type', 'modality', 'occurred_at', 'recorded_at',
+                   'schema_version'])
+        && idMatchesPath(docId)
+        // learner_id must equal the path owner — evidence for anyone
+        // else is a forgery, not a sync artefact.
+        && d.learner_id == request.auth.uid
+        && validString(d.capability_id, 1, 200)
+        && validString(d.task_id, 1, 200)
+        && d.task_revision is int && d.task_revision >= 1
+        && validString(d.event_type, 1, 40)
+        && validString(d.modality, 1, 40)
+        && d.occurred_at is number
+        && d.recorded_at is timestamp
+        && d.schema_version == 1
+        && (d.policy_version == null || validString(d.policy_version, 1, 80))
+        && (d.mission_run_id == null || validString(d.mission_run_id, 1, 200));
+    }
+
     function validProgress(docId) {
       let d = request.resource.data;
       return hasOnly(['id', 'owner_id', 'deck_id', 'payload', 'updated_at', 'created_at'])
@@ -264,6 +300,14 @@ service cloud.firestore {
       allow create: if isOwner(uid) && ownerPinned(uid) && validLessonEvent(docId);
       // Append-only: no update. Delete stays owner-scoped for data-wipe flows.
       allow delete: if isOwner(uid);
+    }
+
+    match /users/{uid}/vnext_events/{docId} {
+      allow read: if isOwner(uid);
+      allow create: if isOwner(uid) && ownerPinned(uid) && validVnextEvent(docId);
+      // Immutable evidence: a client can append but never rewrite or
+      // erase history — no update, no delete, not even for the owner.
+      allow update, delete: if false;
     }
 
     match /users/{uid}/learning_progress/{docId} {

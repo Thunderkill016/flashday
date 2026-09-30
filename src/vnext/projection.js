@@ -33,6 +33,7 @@
  */
 import { answerBearing, conditionsViolated } from './evidence.js';
 import { effectiveAllowedSupport, verifyEventTask } from './contracts.js';
+import { resolvePolicy } from './policy.js';
 
 export const CAPABILITY_STATES = [
   'NOT_SEEN',
@@ -122,6 +123,7 @@ function emptyCapability() {
     },
     lastEventAt: null,
     lastAttemptOutcome: null,
+    consecutiveFailures: 0,
     firstIndependentAt: null,
     lastIndependentSuccessAt: null,
     rehearsedPromptFamilies: [],
@@ -129,7 +131,12 @@ function emptyCapability() {
   };
 }
 
-export function projectLearnerState(learnerId, events, capabilities, tasks, { retentionDelayMs = RETENTION_DELAY_MS } = {}) {
+export function projectLearnerState(learnerId, events, capabilities, tasks, { retentionDelayMs, policy } = {}) {
+  // Thresholds are POLICY, not engine (issue #52): the caller's
+  // retentionDelayMs is a test override; otherwise the versioned
+  // learning policy decides. resolvePolicy fails closed on garbage.
+  const pol = resolvePolicy(policy);
+  const lag = retentionDelayMs ?? pol.retention.minLagMs;
   // A projection is always for exactly one learner — a log mixing
   // learners must never merge into one state.
   if (typeof learnerId !== 'string' || !learnerId) {
@@ -210,6 +217,12 @@ export function projectLearnerState(learnerId, events, capabilities, tasks, { re
     // performance, and must not advance state.
     if (!ATTEMPT_TYPES.has(e.eventType) || e.attempt?.outcome == null) continue;
     slot.lastAttemptOutcome = e.attempt.outcome;
+    // Engine fact: how many consecutive fail/partial outcomes end this
+    // capability's attempt trail. Whether N failures trigger remediation
+    // is the policy's call, not the projection's.
+    slot.consecutiveFailures = (e.attempt.outcome === 'fail' || e.attempt.outcome === 'partial')
+      ? slot.consecutiveFailures + 1
+      : 0;
     if (!isSuccess(e)) continue;
 
     if (!isIndependent(e, cap, effSupport, taskByRev.get(`${e.taskId}@${e.taskRevision}`))) {
@@ -222,7 +235,7 @@ export function projectLearnerState(learnerId, events, capabilities, tasks, { re
       slot.firstIndependentAt = e.occurredAt;
     }
     slot.lastIndependentSuccessAt = e.occurredAt;
-    if (e.occurredAt - slot.firstIndependentAt >= retentionDelayMs) {
+    if (e.occurredAt - slot.firstIndependentAt >= lag) {
       slot.milestones.retained = true;
     }
 
@@ -243,5 +256,5 @@ export function projectLearnerState(learnerId, events, capabilities, tasks, { re
     }
     slot.state = highest;
   }
-  return { learnerId, byCapability, generatedFrom: mine.length };
+  return { learnerId, byCapability, generatedFrom: mine.length, policyVersion: pol.version };
 }
