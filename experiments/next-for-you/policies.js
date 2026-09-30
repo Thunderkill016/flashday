@@ -19,7 +19,30 @@ import { KINDS, POLICY_VERSIONS, PROVENANCE, TIER_OF } from './constants.js';
 import { generateCandidates } from './candidate-generator.js';
 import { LEARNER_MODEL_VERSION } from '../../src/vnext/learner-model.js';
 import { decisionInputSnapshot } from './decision-log.js';
-import { sha256 } from './util.js';
+import { sha256, canon } from './util.js';
+import { nextMissionTask } from '../../src/vnext/mission-runner.js';
+
+/* BLOCKER-2 r3: ONE authoritative selection config per decision. The
+ * same resolved object feeds candidate generation, hard filtering,
+ * ordering, the input digest, and the log. A second, conflicting
+ * config source is a fail-closed integrity violation — never a silent
+ * X-for-generation / Y-for-filtering mix. */
+function resolveSelection(state, opts) {
+  const a = state?.selection;
+  const b = opts?.selection;
+  if (a == null && b == null) return { config: {}, conflict: false };
+  if (a == null) return { config: b, conflict: false };
+  if (b == null) return { config: a, conflict: false };
+  return canon(a) === canon(b)
+    ? { config: a, conflict: false }
+    : { config: a, conflict: true };
+}
+
+const configConflict = (version, state, sel) => makeDecision({
+  version, chosen: null, candidates: [], skipped: [], model: null,
+  ctx: state?.decisionContext, pendingDemands: [],
+  state: { ...state, selection: sel.config, integrityViolations: ['selection_config_conflict: state.selection vs call-option selection differ'] }
+});
 
 function makeDecision({ policy, version, chosen, candidates, skipped, model, ctx, pendingDemands = [], state = null, escape = null }) {
   const candidateView = candidates.map((c) => ({
@@ -146,7 +169,7 @@ const PURPOSE_OK = {
  * pedagogical optimum. */
 const REPAIR_BOUND_PER_CAP_EPISODE = 3;
 
-function hardFilter(cand, { ctx, selection, pendingDemands, roles, assessmentMode = 'fresh' }) {
+export function hardFilter(cand, { ctx, selection, pendingDemands, roles, assessmentMode = 'fresh' }) {
   const reasons = [];
   const diagBudget = selection.diagnosticMaxPerEpisode ?? 2;
   const ceiling = selection.failureCeiling ?? 3;
@@ -171,7 +194,10 @@ function hardFilter(cand, { ctx, selection, pendingDemands, roles, assessmentMod
       reasons.push('probe_does_not_cover_function');
     }
   }
-  if (cand.kind === KINDS.CORRECTION && cand.facts.consecutiveFailures >= ceiling) {
+  /* HIGH-6 r3: hard bounds run on the VERIFIED observed streak only —
+   * unobserved outcomes never move the failure ceiling, the refresh
+   * gate, or the identical-retry escape. */
+  if (cand.kind === KINDS.CORRECTION && (cand.facts.observedFails ?? 0) >= ceiling) {
     reasons.push(`failure_ceiling:${ceiling}`);
   }
   if (cand.identicalRetry) {
@@ -188,13 +214,15 @@ function hardFilter(cand, { ctx, selection, pendingDemands, roles, assessmentMod
      * (review MEDIUM-8). */
     reasons.push(`diagnostic_budget:${diagBudget}`);
   }
-  if (cand.kind === KINDS.REFRESH && !(cand.facts.lastAttemptOutcome === 'fail' || cand.facts.lastAttemptOutcome === 'partial')) {
+  if (cand.kind === KINDS.REFRESH && !(cand.facts.lastObservedOutcome === 'fail' || cand.facts.lastObservedOutcome === 'partial')) {
     reasons.push('no_verified_failure'); // time alone never mints refresh
   }
-  /* HIGH-8: consumed-assessment reuse is a POLICY choice, not kernel
-   * truth. A mirrors production (re-probe allowed); B/C refuse. */
-  if (assessmentMode === 'fresh' && cand.kind === KINDS.ASSESSMENT && cand.consumed) {
-    reasons.push('assessment_consumed');
+  /* HIGH-8/HIGH-4: consumed-assessment reuse is a POLICY choice, not
+   * kernel truth. A mirrors production (re-probe allowed); B/C refuse
+   * — and freshness is FAMILY-level: a same-promptFamily clone with a
+   * new id is not a fresh sample. */
+  if (assessmentMode === 'fresh' && cand.kind === KINDS.ASSESSMENT && (cand.consumed || cand.familyConsumed)) {
+    reasons.push(cand.familyConsumed ? 'assessment_family_consumed' : 'assessment_consumed');
   }
   return reasons;
 }
@@ -211,27 +239,45 @@ function applyFilters(candidates, env) {
 
 /* ============ POLICY A — production-mirror reference cascade ============ */
 
-export function policyA(state, { selection = {} } = {}) {
-  const gen = generateCandidates(state);
+export function policyA(state, opts = {}) {
+  const sel = resolveSelection(state, opts);
+  if (sel.conflict) return configConflict(POLICY_VERSIONS.A, state, sel);
+  const s2 = { ...state, selection: sel.config };
+  const gen = generateCandidates(s2);
   const { candidates, skipped, model, pendingDemands, integrityViolations } = gen;
   if (integrityViolations?.length) {
-    return makeDecision({ version: POLICY_VERSIONS.A, chosen: null, candidates, skipped, model, ctx: state.decisionContext, pendingDemands, state: { ...state, integrityViolations } });
+    return makeDecision({ version: POLICY_VERSIONS.A, chosen: null, candidates, skipped, model, ctx: state.decisionContext, pendingDemands, state: { ...s2, integrityViolations } });
   }
   /* HIGH-7: A runs the SAME hard filters as B/C — only ordering
    * differs. Production-mirror semantics keep consumed assessments
    * eligible (the runner re-probes failed checkpoints). */
-  applyFilters(candidates, { ctx: state.decisionContext, selection, pendingDemands, roles: state.roles, assessmentMode: 'production' });
+  applyFilters(candidates, { ctx: state.decisionContext, selection: sel.config, pendingDemands, roles: state.roles, assessmentMode: 'production' });
+
+  /* HIGH-3 r3: A follows the production `nextMissionTask` order —
+   * phase-0 declared baseline diagnostics first (mission order, once
+   * each), then resume → due → support_demand → remediation →
+   * transfer → independent → expose/continuation → introduce →
+   * assessment-close. */
+  const taskOrder = new Map((state.mission?.taskIds ?? []).map((id, i) => [id, i]));
+  const phase0 = candidates
+    .filter((c) => c.kind === KINDS.DIAGNOSTIC_PROBE && c.servableTask && taskOrder.has(c.servableTask.id))
+    .sort((a, b) => taskOrder.get(a.servableTask.id) - taskOrder.get(b.servableTask.id));
+  if (phase0[0] && phase0[0].eligible) {
+    phase0[0]._losers = candidates.filter((c) => c !== phase0[0] && c.eligible).map((c) => ({ candidate: c, lostTo: 'phase0', reason: 'declared baseline diagnostics precede generic planning' }));
+    phase0[0]._tieBreak = 'production_phase0_mission_order';
+    return makeDecision({ version: POLICY_VERSIONS.A, chosen: phase0[0], candidates, skipped, model, ctx: state.decisionContext, pendingDemands, state: s2 });
+  }
 
   const order = [
     KINDS.RESUME,
-    KINDS.REFRESH,
     KINDS.DUE_RETRIEVAL,
     KINDS.SUPPORT_DEMAND,
     KINDS.CORRECTION,
+    KINDS.REFRESH,
     KINDS.TRANSFER,
     KINDS.INDEPENDENT_ATTEMPT,
-    KINDS.DIAGNOSTIC_PROBE,
     KINDS.MISSION_CONTINUATION,
+    KINDS.DIAGNOSTIC_PROBE,
     KINDS.NEW_INPUT,
     KINDS.ASSESSMENT
   ];
@@ -240,40 +286,82 @@ export function policyA(state, { selection = {} } = {}) {
     if (hit) {
       hit._losers = candidates.filter((c) => c !== hit && c.eligible).map((c) => ({ candidate: c, lostTo: 'cascade', reason: `kernel order: ${kind} precedes ${c.kind}` }));
       hit._tieBreak = 'kernel_order';
-      return makeDecision({ version: POLICY_VERSIONS.A, chosen: hit, candidates, skipped, model, ctx: state.decisionContext, pendingDemands, state });
+      return makeDecision({ version: POLICY_VERSIONS.A, chosen: hit, candidates, skipped, model, ctx: state.decisionContext, pendingDemands, state: s2 });
     }
   }
-  return makeDecision({ version: POLICY_VERSIONS.A, chosen: null, candidates, skipped, model, ctx: state.decisionContext, pendingDemands, state });
+  return makeDecision({ version: POLICY_VERSIONS.A, chosen: null, candidates, skipped, model, ctx: state.decisionContext, pendingDemands, state: s2 });
+}
+
+/* Production reference policy [KERNEL]: a literal executable wrapper
+ * around the shipped `nextMissionTask` — the same code the product
+ * runs, wrapped in the decision record shape so the benchmark and
+ * differential tests can compare byte-for-byte choices. It does not
+ * emit candidates/explanations of its own; selection work belongs
+ * entirely to the production runner. */
+export function policyRef(state) {
+  const r = nextMissionTask({
+    learnerId: state.learnerId, mission: state.mission, tasks: state.tasks,
+    capabilities: state.capabilities, events: state.events,
+    riskPriors: state.riskPriors ?? [], now: state.now, policy: state.policy
+  });
+  const purposeToKind = {
+    assessment: KINDS.ASSESSMENT, diagnostic: KINDS.DIAGNOSTIC_PROBE,
+    delayed_retrieval: KINDS.DUE_RETRIEVAL, transfer: KINDS.TRANSFER,
+    support: KINDS.SUPPORT_DEMAND, remediation: KINDS.CORRECTION
+  };
+  const ready = r.status === 'ready';
+  const kind = ready ? (purposeToKind[r.purpose] ?? KINDS.MISSION_CONTINUATION) : r.status;
+  return {
+    decisionId: `ref:${r.status}:${r.taskId ?? 'none'}@${r.taskRevision ?? 0}`,
+    selectionPolicyVersion: 'production.nextMissionTask',
+    learnerModelVersion: null,
+    missionId: state.mission?.id ?? null,
+    missionRevision: state.mission?.revision ?? null,
+    chosen: ready
+      ? { kind, capabilityId: r.capabilityId, taskId: r.taskId, taskRevision: r.taskRevision, tier: 'PRODUCTION' }
+      : { kind: r.status, capabilityId: null, taskId: null, taskRevision: null, tier: 'TERMINAL' },
+    production: { status: r.status, reason: r.reason, skippedIntents: r.skippedIntents ?? [] },
+    explanation: { whyExists: r.reason, tier: 'PRODUCTION', preferences: [], penalties: [], beat: [], tieBreak: null, suppressed: [] },
+    candidates: [], candidateCount: 0,
+    integrityViolations: [],
+    blocked: r.status === 'blocked'
+  };
 }
 
 /* ============ POLICY B — filter → tier → ordinal → tie-break ============ */
 
-export function policyB(state, { selection = {} } = {}) {
-  const gen = generateCandidates(state);
+export function policyB(state, opts = {}) {
+  const sel = resolveSelection(state, opts);
+  if (sel.conflict) return configConflict(POLICY_VERSIONS.B, state, sel);
+  const s2 = { ...state, selection: sel.config };
+  const gen = generateCandidates(s2);
   const { candidates, skipped, model, pendingDemands, integrityViolations } = gen;
   const ctx = state.decisionContext;
   if (integrityViolations?.length) {
-    return makeDecision({ version: POLICY_VERSIONS.B, chosen: null, candidates, skipped, model, ctx, pendingDemands, state: { ...state, integrityViolations } });
+    return makeDecision({ version: POLICY_VERSIONS.B, chosen: null, candidates, skipped, model, ctx, pendingDemands, state: { ...s2, integrityViolations } });
   }
 
-  applyFilters(candidates, { ctx, selection, pendingDemands, roles: state.roles, assessmentMode: 'fresh' });
+  applyFilters(candidates, { ctx, selection: sel.config, pendingDemands, roles: state.roles, assessmentMode: 'fresh' });
   const eligible = candidates.filter((c) => c.eligible);
-  const { winner, losers, escape } = pickOrdinal(eligible, ctx, selection);
+  const { winner, losers, escape } = pickOrdinal(eligible, ctx, sel.config);
   if (winner) { winner._losers = losers; winner._tieBreak = winner._tieBreak ?? 'total_order'; }
-  return makeDecision({ version: POLICY_VERSIONS.B, chosen: winner, candidates, skipped, model, ctx, pendingDemands, state, escape });
+  return makeDecision({ version: POLICY_VERSIONS.B, chosen: winner, candidates, skipped, model, ctx, pendingDemands, state: s2, escape });
 }
 
 /* ============ POLICY C — B + bounded information value ============ */
 
-export function policyC(state, { selection = {} } = {}) {
-  const gen = generateCandidates(state);
+export function policyC(state, opts = {}) {
+  const sel = resolveSelection(state, opts);
+  if (sel.conflict) return configConflict(POLICY_VERSIONS.C, state, sel);
+  const s2 = { ...state, selection: sel.config };
+  const gen = generateCandidates(s2);
   const { candidates, skipped, model, pendingDemands, integrityViolations } = gen;
   const ctx = state.decisionContext;
   if (integrityViolations?.length) {
-    return makeDecision({ version: POLICY_VERSIONS.C, chosen: null, candidates, skipped, model, ctx, pendingDemands, state: { ...state, integrityViolations } });
+    return makeDecision({ version: POLICY_VERSIONS.C, chosen: null, candidates, skipped, model, ctx, pendingDemands, state: { ...s2, integrityViolations } });
   }
 
-  applyFilters(candidates, { ctx, selection, pendingDemands, roles: state.roles, assessmentMode: 'fresh' });
+  applyFilters(candidates, { ctx, selection: sel.config, pendingDemands, roles: state.roles, assessmentMode: 'fresh' });
   for (const c of candidates) {
     /* Information-value heuristic [EXPERIMENTAL]: thin/conflicting/
      * never-sampled evidence boosts probes within the budget. Coarse
@@ -287,9 +375,9 @@ export function policyC(state, { selection = {} } = {}) {
     }
   }
   const eligible = candidates.filter((c) => c.eligible);
-  const { winner, losers, escape } = pickOrdinal(eligible, ctx, selection);
+  const { winner, losers, escape } = pickOrdinal(eligible, ctx, sel.config);
   if (winner) { winner._losers = losers; winner._tieBreak = winner._tieBreak ?? 'total_order'; }
-  return makeDecision({ version: POLICY_VERSIONS.C, chosen: winner, candidates, skipped, model, ctx, pendingDemands, state, escape });
+  return makeDecision({ version: POLICY_VERSIONS.C, chosen: winner, candidates, skipped, model, ctx, pendingDemands, state: s2, escape });
 }
 
 /* Starvation-guard limits per variant [SAFETY_PRIOR/EXPERIMENTAL]: how
@@ -307,7 +395,12 @@ function pickOrdinal(eligible, ctx, selection) {
   /* Starvation escape (HIGH-9): if the best eligible tier has produced
    * ≥ limit consecutive decisions this episode and other tiers have
    * eligible work, one decision goes to the best candidate OUTSIDE the
-   * monopolizing tier. Limits are variant tunables, never "optimal". */
+   * monopolizing tier. Limits are variant tunables, never "optimal".
+   *
+   * HIGH-7 r3 boundaries: MANDATORY is NEVER escaped (in-flight work
+   * cannot be abandoned by a streak), and a tier carrying a still-
+   * pending support_demand is NEVER escaped — an active substrate
+   * obligation is a hard gate, not a preference. */
   let pool = eligible;
   let escape = null;
   let bestTier = Math.min(...pool.map((c) => c.tier));
@@ -317,7 +410,9 @@ function pickOrdinal(eligible, ctx, selection) {
   for (let i = actions.length - 1; i >= 0; i--) {
     if (TIER_OF[actions[i].kind] === bestTier) streak++; else break;
   }
-  if (streak >= limit && pool.some((c) => c.tier !== bestTier)) {
+  const bestTierPool = pool.filter((c) => c.tier === bestTier);
+  const tierProtected = bestTier === 0 || bestTierPool.some((c) => c.kind === KINDS.SUPPORT_DEMAND);
+  if (!tierProtected && streak >= limit && pool.some((c) => c.tier !== bestTier)) {
     pool = pool.filter((c) => c.tier !== bestTier);
     escape = { from: tierLabel(bestTier), streak, reason: `starvation_guard(${selection.starvationGuard ?? 'balanced'}):${limit}` };
     bestTier = Math.min(...pool.map((c) => c.tier));

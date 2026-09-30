@@ -13,7 +13,9 @@
 import { projectLearnerState } from '../../src/vnext/projection.js';
 import { deriveSupportLifecycle } from '../../src/vnext/planner.js';
 import { resolvePolicy } from '../../src/vnext/policy.js';
-import { validateTask } from '../../src/vnext/contracts.js';
+import { validateTask, verifyEventTask } from '../../src/vnext/contracts.js';
+import { generateCandidates } from './candidate-generator.js';
+import { hardFilter } from './policies.js';
 import { TIER_OF } from './constants.js';
 
 const PURPOSE_OK = {
@@ -37,21 +39,12 @@ export function validateDecision(decision, { events, tasks, capabilities, roles,
   const ch = decision?.chosen ?? {};
   const pol = resolvePolicy(policy);
 
-  /* Terminal kinds: idle is honest ONLY when nothing servable exists;
-   * blocked requires surviving-but-unservable work to point at. */
-  if (ch.kind === 'idle') {
-    if (ch.capabilityId != null || ch.taskId != null) v.push('idle_with_payload');
-    /* Fabricated idle: the decision's own eligible-candidate view says
-     * servable work existed — idle while candidates stand is a lie. */
-    if ((decision.candidates ?? []).some((c) => c.eligible === true)) v.push('fabricated_idle');
-    return v;
-  }
-  if (ch.kind === 'blocked') {
-    if (!(decision.candidateCount > 0) && !(decision.integrityViolations ?? []).length) v.push('blocked_without_work');
-    return v;
-  }
-  if (ch.kind == null) return ['no_chosen_kind'];
-
+  /* Terminal kinds are validated INDEPENDENTLY (HIGH-5 r3): the
+   * decision's own candidates/candidateCount are policy-produced
+   * metadata and can lie. The validator regenerates the candidate
+   * surface under the real state/config and applies its own minimal
+   * hard checks (purpose map + servable task) to decide whether honest
+   * work existed at all. */
   const latestById = new Map();
   const exactByKey = new Map();
   for (const t of tasks) {
@@ -63,6 +56,50 @@ export function validateDecision(decision, { events, tasks, capabilities, roles,
   }
   const capById = new Map(capabilities.map((c) => [c.id, c]));
   const missionTaskIds = mission ? new Set(mission.taskIds ?? []) : null;
+
+  /* kernel truth, recomputed independently of the policy's pipeline */
+  const proj = projectLearnerState(learnerId, events, capabilities, tasks, { policy: pol });
+  const lc = deriveSupportLifecycle(learnerId, events, { capabilities, tasks, roles, policy: pol });
+  const pending = lc.pending ?? [];
+  const byCap = proj.byCapability;
+
+  const rebuild = (selCfg, ctx) => {
+    try {
+      const gen = generateCandidates({
+        learnerId, events, capabilities, tasks, roles, policy: pol,
+        now, mission, decisionContext: ctx, selection: selCfg
+      });
+      if (gen.integrityViolations?.length) return { work: false, integrity: true };
+      /* Recompute eligibility with the shared hard-filter contract —
+       * the point is that the DECISION's emitted candidate view is
+       * untrusted, not that the filter spec is re-derived here. The
+       * freshness mode follows the decision's own policy version:
+       * a0 mirrors production re-probe; b0/c0 run fresh-only. */
+      const mode = /a0/.test(decision.selectionPolicyVersion ?? '') ? 'production' : 'fresh';
+      const env = { ctx, selection: selCfg, pendingDemands: pending, roles, assessmentMode: mode };
+      const work = (gen.candidates ?? []).some((c) =>
+        hardFilter(c, env).length === 0);
+      return { work, integrity: false };
+    } catch {
+      return { work: false, integrity: true };
+    }
+  };
+  if (ch.kind === 'idle' || ch.kind === 'blocked') {
+    if (ch.capabilityId != null || ch.taskId != null) v.push(`${ch.kind}_with_payload`);
+    const { work, integrity } = rebuild(selection, decisionContext);
+    if (ch.kind === 'idle') {
+      if (integrity) v.push('idle_during_integrity_violation');
+      if (work) v.push('fabricated_idle');
+    } else {
+      if (work && !integrity) v.push('blocked_while_valid_work');
+      if (!work && !integrity && !(decision.integrityViolations ?? []).length && !(decision.candidateCount > 0)) {
+        v.push('blocked_without_work');
+      }
+    }
+    return v;
+  }
+  if (ch.kind == null) return ['no_chosen_kind'];
+
 
   /* task existence + registry validity + EXACT revision (BLOCKER-2):
    * the decision stamps taskRevision; the validator resolves that
@@ -97,20 +134,27 @@ export function validateDecision(decision, { events, tasks, capabilities, roles,
   const cap = capById.get(ch.capabilityId);
   if (ch.capabilityId != null && !cap) v.push('capability_outside_surface');
 
-  /* kernel truth, recomputed independently of the policy's pipeline */
-  const proj = projectLearnerState(learnerId, events, capabilities, tasks, { policy: pol });
-  const lc = deriveSupportLifecycle(learnerId, events, { capabilities, tasks, roles, policy: pol });
-  const pending = lc.pending ?? [];
-  const byCap = proj.byCapability;
 
   /* future-evidence check: any learner event after `now` invalidates the
    * state the decision was made on */
   if (events.some((e) => e.learnerId === learnerId && e.occurredAt > now)) v.push('future_evidence_in_state');
 
-  /* observed direct verified failure — strict (MEDIUM-11): only
-   * attempt.observed === true counts. */
+  /* Verified observed attempts (MEDIUM-11 + HIGH-5 r3): an event only
+   * counts as direct verified evidence when it (a) resolves to an exact
+   * taskId@revision in the registry, (b) passes verifyEventTask against
+   * that exact revision and capability, and (c) stamps
+   * attempt.observed === true. A stale revision or malformed binding is
+   * context, never verified failure evidence. */
+  const verified = (e) => {
+    if (e.learnerId !== learnerId) return false;
+    const t = exactByKey.get(`${e.taskId}@${e.taskRevision ?? 1}`);
+    if (!t) return false;
+    const cap2 = capById.get(t.capabilityId);
+    if (!cap2) return false;
+    return verifyEventTask(e, t, cap2);
+  };
   const observedAttempts = (capId) => [...events]
-    .filter((e) => e.learnerId === learnerId && e.capabilityId === capId && e.attempt?.outcome != null && e.attempt.observed === true)
+    .filter((e) => verified(e) && e.capabilityId === capId && e.attempt?.outcome != null && e.attempt.observed === true)
     .sort((a, b) => b.occurredAt - a.occurredAt);
   const observedFailCount = (capId) => {
     let n = 0;

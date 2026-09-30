@@ -355,3 +355,58 @@ failure ceiling, repair bound, exact support-demand provenance,
 assessment/transfer freshness (policy-aware: A allows re-probe),
 strict observation, learner isolation, future evidence, and
 idle/blocked honesty.
+
+## 13. Round-3 hardening contract (PR #69 review 5912421748)
+
+### 13.1 Single authoritative selection config
+`state.selection` is the ONLY configuration source. A policy call that
+also receives a conflicting `options.selection` fails closed
+(`selection_config_conflict`) rather than silently mixing two configs —
+the same guard applies when both sources agree (no violation).
+
+### 13.2 Policy A is a production-reference differential
+Policy A mirrors `nextMissionTask` (mission-runner.js) order exactly:
+phase-0 baseline diagnostics first, then resume → due delayed-retrieval
+→ support demand → retry/remediation → transfer → independent attempt →
+expose. The benchmark's Z3 harness asserts A's chosen taskId equals the
+production selector's on identical frozen states (phase-0, resume, due,
+demand-over-remediation, assessment close-out). Divergence is a defect,
+not a difference.
+
+### 13.3 Resume and introduction serve pending-phase only
+`resume_in_flight` and the introduction path both serve the next
+UNCONSUMED pending-phase task (`pendingPhase`: unattempted-only exposure
+first, else unattempted retrieval/production/interaction — the runner's
+`pickPendingPhase` mirror). An exposure event already consumed the
+in-flight task's freshness: it is never re-served, and on a
+single-task capability the intent drops honestly rather than looping
+the same exposure forever. `ELICITING_FOR_INTRO` deliberately excludes
+`diagnostic` — probes are served solely by the `diagnostic_probe` intent;
+a resume or introduction that surfaced a probe would smuggle phase-0
+evidence collection into a continuation tier.
+
+### 13.4 Assessment family freshness (B/C)
+Assessment consumption is tracked at the PROMPT-FAMILY level, not per
+task id: after an assessment is consumed, any other assessment task
+sharing its `promptFamily`/familyClass is `assessment_family_consumed`
+for B/C, while a genuinely different family remains fresh. Policy A
+re-probes per production semantics (§12.5).
+
+### 13.5 Fail-closed provenance + canonical digest
+`decisionLog.append` fails closed when a decision lacks canonical
+provenance (task@revision + mission@revision stamps). The state digest
+covers the full decision-relevant surface — learner id, `now`, every
+canonicalized event (with conflicting duplicate ids surfaced, never
+deduped silently), capabilities, decision context, policy id, selection
+config, mission id/revision, and each mission task's decision-relevant
+fields (purpose, promptFamily, modality, context signature, required
+response functions, revision).
+
+### 13.6 Validator recomputes honest work
+Terminal validation never trusts the decision's own candidate view:
+the validator independently regenerates candidates under the real
+policy/selection/context and applies the shared hard-filter envelope
+(including the decision's own assessment-freshness mode). A forged
+`idle` with servable work → `fabricated_idle`; a forged `blocked` →
+`blocked_while_valid_work`; `blocked` with neither work nor integrity
+violation nor prior candidates → `blocked_without_work`.

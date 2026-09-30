@@ -41,6 +41,9 @@ function baseState(events = [], { now = T0, ctx = null } = {}) {
 
 const taskById = (id) => state.tasks.find((t) => t.id === id);
 const capOf = (id) => capabilityById(id);
+/* Consumed (hinted) declared baseline diagnostics for mission F — Policy
+ * A's production phase-0 serves any unsampled declared diagnostic first. */
+const meetDiagsR = F.tasks.filter((t) => t.purpose === 'diagnostic').map((t) => attemptEvent(t, capOf(t.capabilityId), { at: T0 - 6 * DAY, outcome: 'success', support: { hint: true } }));
 const policyOut = (d) => `${d.chosen.kind}|${d.chosen.capabilityId}|${d.chosen.taskId}`;
 
 /* ═══ 1. Determinism — same state, same decision, every policy ═══ */
@@ -304,6 +307,9 @@ function correctionSyntheticState({ remediationTasks = 1 } = {}) {
   const tasks = [...mat.tasks, ...remTasks];
   const mission = { ...mat.mission, taskIds: [...mat.mission.taskIds, ...remTasks.map((t) => t.id)] };
   const events = [
+    /* consume declared baseline diagnostics — Policy A's phase-0 would
+     * otherwise (correctly) serve them before the correction under test */
+    ...mat.tasks.filter((t) => t.purpose === 'diagnostic').map((t) => attemptEvent(t, capOf(t.capabilityId), { at: T0 - 4 * HOUR, outcome: 'success', support: { hint: true } })),
     /* supported: hinted success — taught but not independent */
     attemptEvent(hearTask, clockCap, { at: T0 - 3 * HOUR, support: { hint: true } }),
     /* observed attributing miss — unresolved function, no support provider */
@@ -321,15 +327,22 @@ function correctionSyntheticState({ remediationTasks = 1 } = {}) {
     for (let i = 0; i < n; i++) c = recordChoice(c, { kind: KINDS.DIAGNOSTIC_PROBE, capabilityId: 'cap.burn' + i, taskId: 'task.burn' + i, timestamp: T0 - i });
     return c;
   };
+  /* Policy A is a production mirror: the mission's declared baseline
+   * diagnostic runs in phase-0 before generic intents. Fixtures that
+   * intend a non-diagnostic kind must consume the declared probe. */
+  const consumeBaseline = (events) => [
+    attemptEvent(tmt('diagnostic.ask_name'), askCap(), { at: T0 - 5 * DAY, outcome: 'success', support: { hint: true } }),
+    ...events
+  ];
   const liveness = [
-    ['refresh', [...independentHistory(), attemptEvent(tmt('retrieval.ask_name'), askCap(), { at: T0 - HOUR, outcome: 'fail' })], [askCap()]],
-    ['transfer', retainedHistory(), [askCap()]],
-    ['independent_attempt', [observeEvent(tmt('input.ask_name'), askCap(), { at: T0 - DAY }), attemptEvent(tmt('interaction.guided'), askCap(), { at: T0 - 2 * HOUR, support: { hint: true } })], [askCap()], { burnDiagnostics: 2 }],
-    ['due_retrieval', [...independentHistory(T0 - DAY)], [askCap()]],
-    ['assessment', transferredHistory(), [askCap()]],
+    ['refresh', consumeBaseline([...independentHistory(), attemptEvent(tmt('retrieval.ask_name'), askCap(), { at: T0 - HOUR, outcome: 'fail' })]), [askCap()]],
+    ['transfer', consumeBaseline(retainedHistory()), [askCap()]],
+    ['independent_attempt', consumeBaseline([observeEvent(tmt('input.ask_name'), askCap(), { at: T0 - DAY }), attemptEvent(tmt('interaction.guided'), askCap(), { at: T0 - 2 * HOUR, support: { hint: true } })]), [askCap()], { burnDiagnostics: 2 }],
+    ['due_retrieval', consumeBaseline([...independentHistory(T0 - DAY)]), [askCap()]],
+    ['assessment', consumeBaseline(transferredHistory()), [askCap()]],
     ['correction', null, null, { synthetic: 'remediation_on_clock' }], /* correction unreachable in the authored corpus — the only remediation task lives on a cap with no attributing evaluator; synthetic labeled task below */
     ['diagnostic_probe', [], [askCap()]], /* never-seen target owes a baseline probe */
-    ['mission_continuation', [observeEvent(tmt('input.ask_name'), askCap(), { at: T0 - DAY }), attemptEvent(tmt('retrieval.ask_name'), askCap(), { at: T0 - HOUR, outcome: 'fail' })], [askCap()]], /* untaught cap with one unattributed miss — keep drilling the thread */
+    ['mission_continuation', [attemptEvent(tmt('diagnostic.ask_name'), askCap(), { at: T0 - 5 * DAY, outcome: 'fail' }), observeEvent(tmt('input.ask_name'), askCap(), { at: T0 - DAY }), attemptEvent(tmt('retrieval.ask_name'), askCap(), { at: T0 - HOUR, outcome: 'fail' })], [askCap()], { burnDiagnostics: 2 }], /* untaught cap (baseline fail doesn't mint supported) with unattributed misses — keep drilling the thread */
     ['new_input', [], [capOf('reception.listen.greeting_basic')]]
   ];
   const PURPOSE_OF = { refresh: ['remediation', 'retrieval'], transfer: ['transfer'], independent_attempt: ['retrieval', 'production', 'interaction'], due_retrieval: ['delayed_retrieval'], assessment: ['assessment'], correction: ['remediation'], diagnostic_probe: ['diagnostic'], mission_continuation: ['input', 'notice', 'retrieval', 'production', 'interaction', 'diagnostic'], new_input: ['input', 'notice', 'retrieval', 'production', 'interaction', 'diagnostic'], support_demand: ['support'] };
@@ -352,7 +365,8 @@ function correctionSyntheticState({ remediationTasks = 1 } = {}) {
   const mat = ALL_MISSIONS.find((f) => f.id === 'mission.meet_at_a_time');
   const ms = missionState(mat);
   const hearTask = mat.tasks.find((t) => t.id === 'task.time.retrieval.hear');
-  const st = { learnerId: 'SIM', events: [attemptEvent(hearTask, capOf(hearTask.capabilityId), { at: T0 - HOUR, outcome: 'fail', missing: ['identify_spoken_number'] })], capabilities: ms.capabilities, tasks: mat.tasks, roles: ms.roles, policy: LEARNING_POLICY_V1, now: T0, mission: mat.mission, decisionContext: emptyContext('e', 's'), selection: {} };
+  const matDiags = mat.tasks.filter((t) => t.purpose === 'diagnostic').map((t) => attemptEvent(t, capOf(t.capabilityId), { at: T0 - 4 * HOUR, outcome: 'success', support: { hint: true } }));
+  const st = { learnerId: 'SIM', events: [...matDiags, attemptEvent(hearTask, capOf(hearTask.capabilityId), { at: T0 - HOUR, outcome: 'fail', missing: ['identify_spoken_number'] })], capabilities: ms.capabilities, tasks: mat.tasks, roles: ms.roles, policy: LEARNING_POLICY_V1, now: T0, mission: mat.mission, decisionContext: emptyContext('e', 's'), selection: {} };
   for (const p of ['A', 'B', 'C']) {
     const d = POLICIES[p](st, {});
     ok(d.chosen.kind === KINDS.SUPPORT_DEMAND, `A.${p}: support_demand not chosen, got ${d.chosen.kind}`);
@@ -385,7 +399,7 @@ function correctionSyntheticState({ remediationTasks = 1 } = {}) {
 
 /* --- D. Assessment consumption: failed checkpoint — A re-probes, B/C demand fresh --- */
 {
-  const ev = [...transferredHistory(), attemptEvent(tmt('assessment.checkpoint'), askCap(), { at: T0 - HOUR, outcome: 'fail' })];
+  const ev = [...meetDiagsR, ...transferredHistory(), attemptEvent(tmt('assessment.checkpoint'), askCap(), { at: T0 - HOUR, outcome: 'fail' })];
   /* B/C must NOT re-sell the consumed item as a fresh sample */
   for (const p of ['B', 'C']) {
     const d = POLICIES[p](scopedState(ev, [askCap()]), {});
@@ -470,7 +484,7 @@ function correctionSyntheticState({ remediationTasks = 1 } = {}) {
   ok(d1.chosen.kind === KINDS.DIAGNOSTIC_PROBE, `I: expected baseline probe, got ${d1.chosen.kind}`);
   /* Simulate one probe spent, then budget exhaustion defers the rest. */
   const ctx1 = recordChoice(ctx, { kind: KINDS.DIAGNOSTIC_PROBE, capabilityId: d1.chosen.capabilityId, taskId: d1.chosen.taskId, timestamp: T0 });
-  const d2 = POLICIES.B(scopedState([], caps, { ctx: ctx1 }), { selection: { diagnosticMaxPerEpisode: 1 } });
+  const d2 = POLICIES.B(scopedState([], caps, { ctx: ctx1, selection: { diagnosticMaxPerEpisode: 1 } }), {});
   ok(d2.chosen.kind !== KINDS.DIAGNOSTIC_PROBE, `I: second baseline probe exceeded episode budget`);
 }
 
@@ -589,6 +603,7 @@ function correctionSyntheticState({ remediationTasks = 1 } = {}) {
   const t2 = mat.tasks.find((t) => t.id === 'task.time.diagnostic.hear');
   const clockCap = capOf(t2.capabilityId);
   const ev = [
+    ...mat.tasks.filter((t) => t.purpose === 'diagnostic').map((t) => attemptEvent(t, capOf(t.capabilityId), { at: T0 - 4 * HOUR, outcome: 'success', support: { hint: true } })),
     attemptEvent(hearTask, capOf(hearTask.capabilityId), { at: T0 - 2 * HOUR, outcome: 'fail', missing: ['identify_spoken_number'] }),
     attemptEvent(t2, clockCap, { at: T0 - HOUR, outcome: 'fail', missing: ['identify_spoken_number'] })
   ];
@@ -638,7 +653,7 @@ function correctionSyntheticState({ remediationTasks = 1 } = {}) {
 
 /* --- R. Assessment semantics: A mirrors production retry, B demands fresh --- */
 {
-  const ev = [...transferredHistory(), attemptEvent(tmt('assessment.checkpoint'), askCap(), { at: T0 - HOUR, outcome: 'fail' })];
+  const ev = [...meetDiagsR, ...transferredHistory(), attemptEvent(tmt('assessment.checkpoint'), askCap(), { at: T0 - HOUR, outcome: 'fail' })];
   /* Production mirror: remediation precedes re-probe, so A serves the
    * repair first — BUT the consumed assessment must remain ELIGIBLE
    * under A (mission-runner re-serves it after remediation). */
@@ -648,7 +663,7 @@ function correctionSyntheticState({ remediationTasks = 1 } = {}) {
   for (const p of ['B', 'C']) {
     const d = POLICIES[p](scopedState(ev, [askCap()]), {});
     const bc = d.candidates.find((c) => c.kind === KINDS.ASSESSMENT && c.taskId === 'task.meet.assessment.checkpoint');
-    ok(bc && bc.eligible === false && bc.filterReason.includes('assessment_consumed'),
+    ok(bc && bc.eligible === false && bc.filterReason.startsWith('assessment_'),
       `R.${p}: consumed assessment not hard-filtered (${bc?.filterReason ?? 'absent'})`);
     ok(!(d.chosen.kind === KINDS.ASSESSMENT && d.chosen.taskId === 'task.meet.assessment.checkpoint'),
       `R.${p}: consumed assessment re-sold as fresh under desired semantics`);
@@ -656,7 +671,7 @@ function correctionSyntheticState({ remediationTasks = 1 } = {}) {
   /* B with an unused fresh assessment family → serves that instead,
    * once the failed checkpoint's repair is cleared (REPAIR honestly
    * outranks EVIDENCE while a repair is pending). */
-  const altAssess = { ...tmt('assessment.checkpoint'), id: 'task.meet.assessment.second' };
+  const altAssess = { ...tmt('assessment.checkpoint'), id: 'task.meet.assessment.second', promptFamily: 'assessment.second_family' };
   const tasks2 = [...state.tasks, altAssess];
   const mission2 = { ...F.mission, taskIds: [...F.mission.taskIds, altAssess.id] };
   const repaired = [
@@ -702,7 +717,7 @@ function correctionSyntheticState({ remediationTasks = 1 } = {}) {
     let ctx = emptyContext('ep.t', 'ses.t');
     let escaped = false;
     for (let i = 0; i < 16; i++) {
-      const d = POLICIES.B({ ...baseState(ev, { now: T0 }), capabilities: caps, decisionContext: ctx }, { selection: { starvationGuard: variant } });
+      const d = POLICIES.B({ ...baseState(ev, { now: T0 }), capabilities: caps, decisionContext: ctx, selection: { starvationGuard: variant } }, {});
       if (d.chosen.kind !== KINDS.DUE_RETRIEVAL && d.chosen.kind !== 'idle' && d.chosen.kind !== 'blocked') { escaped = true; break; }
       if (!d.chosen.taskId) break;
       ctx = recordChoice(ctx, { kind: d.chosen.kind, capabilityId: d.chosen.capabilityId, taskId: d.chosen.taskId, timestamp: T0 + i });
@@ -769,6 +784,201 @@ function correctionSyntheticState({ remediationTasks = 1 } = {}) {
   const dA = POLICIES.B(baseState(evA, { now: T0 }), {});
   const dB = POLICIES.B(baseState(evB, { now: T0 }), {});
   ok(dA.decisionId !== dB.decisionId, 'Y: different input states collided on one decisionId');
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════
+ * ROUND 3 — FINAL HARDENING (PR #69 comment 5912421748).
+ * ══════════════════════════════════════════════════════════════════ */
+
+/* --- Z1. Digest: full semantic surface + exact-duplicate dedupe --- */
+{
+  const { stateDigest } = await import('../experiments/next-for-you/decision-log.js');
+  const ev = seedIndependentHistory(F, { caps: 2, at: T0 - 30 * DAY });
+  const st = baseState(ev, { now: T0 });
+  const snap = (over = {}) => stateDigest({
+    events: over.events ?? st.events, learnerId: 'SIM',
+    decisionContext: over.decisionContext ?? st.decisionContext,
+    now: over.now ?? st.now, policy: over.policy ?? st.policy,
+    selection: over.selection ?? st.selection, mission: over.mission ?? st.mission,
+    tasks: over.tasks ?? st.tasks, roles: over.roles ?? st.roles,
+    capabilities: over.capabilities ?? st.capabilities
+  });
+  const base = snap();
+  const mut = (name, over) => ok(snap(over) !== base, `Z1.${name}: decision-relevant input changed but digest did not`);
+  mut('evalAuthority', { events: ev.map((e, i) => i === 0 ? { ...e, evaluation: { ...(e.evaluation ?? {}), authority: 'mutated' } } : e) });
+  mut('repeatCount', { events: ev.map((e, i) => i === 0 ? { ...e, support: { ...(e.support ?? {}), repeatCount: 4 } } : e) });
+  mut('binding', { events: ev.map((e, i) => i === 0 ? { ...e, binding: { attemptId: 'mut' } } : e) });
+  mut('providesFunctions', { capabilities: state.capabilities.map((c, i) => i === 0 ? { ...c, providesFunctions: ['mut_fn'] } : c) });
+  mut('supportAllowed', { capabilities: state.capabilities.map((c, i) => i === 0 ? { ...c, conditions: { ...(c.conditions ?? {}), supportAllowed: false } } : c) });
+  mut('evaluatorContract', { tasks: state.tasks.map((t, i) => i === 0 ? { ...t, evaluation: { ...(t.evaluation ?? {}), contractId: 'mut.contract' } } : t) });
+  mut('promptFamily', { tasks: state.tasks.map((t, i) => i === 0 ? { ...t, promptFamily: (t.promptFamily ?? 'pf') + '.mut' } : t) });
+  mut('assessmentPlan', { mission: { ...F.mission, assessmentPlan: { ...(F.mission.assessmentPlan ?? {}), required: !(F.mission.assessmentPlan?.required ?? true) } } });
+  mut('taskIds', { mission: { ...F.mission, taskIds: [...F.mission.taskIds, 'task.mut'] } });
+  mut('taskRevision', { tasks: state.tasks.map((t, i) => i === 0 ? { ...t, revision: 9 } : t) });
+  mut('policy', { policy: { ...LEARNING_POLICY_V1, retention: { ...LEARNING_POLICY_V1.retention, minLagMs: 1 } } });
+  mut('selection', { selection: { diagnosticMaxPerEpisode: 7 } });
+  mut('now', { now: T0 + DAY });
+  /* exact duplicate delivery is idempotent — identical logical state */
+  const dup = { ...ev[0] };
+  ok(snap({ events: [...ev, dup] }) === base, 'Z1.dup: idempotent re-delivery changed the digest');
+  /* CONFLICTING duplicate (same id, different payload) is not hidden */
+  const conflict = { ...ev[0], attempt: { ...ev[0].attempt, outcome: 'fail' } };
+  ok(snap({ events: [...ev, conflict] }) !== base, 'Z1.conflict: conflicting duplicate id left digest unchanged');
+}
+
+/* --- Z2. Single authoritative selection config --- */
+{
+  const st = baseState([], { now: T0 });
+  st.selection = { starvationGuard: 'forward' };
+  const d = POLICIES.B(st, { selection: { starvationGuard: 'review' } });
+  ok(d.chosen.kind === 'blocked' || d.integrityViolations?.some((v) => v.includes('selection_config')),
+    'Z2: conflicting selection configs silently mixed');
+  const d2 = POLICIES.B({ ...st, selection: { starvationGuard: 'review' } }, { selection: { starvationGuard: 'review' } });
+  ok(d2.chosen.kind !== 'blocked' || !d2.integrityViolations?.some((v) => v.includes('selection_config')),
+    'Z2: identical configs falsely flagged as conflict');
+}
+
+/* --- Z3. Production-reference differential (Policy R wraps nextMissionTask) --- */
+{
+  const { nextMissionTask } = await import('../src/vnext/mission-runner.js');
+  const ref = (st) => nextMissionTask({ learnerId: st.learnerId, mission: st.mission, tasks: st.tasks, capabilities: st.capabilities, events: st.events, now: st.now, policy: st.policy });
+  const cases = [];
+
+  /* phase-0 baseline: fresh mission → first declared diagnostic */
+  const meetTargets = [...state.capabilities.filter((c) => !(state.roles?.supports ?? new Set()).has(c.id))];
+  const fresh = scopedState([], meetTargets);
+  cases.push(['phase0_diagnostic', fresh]);
+  const meetDiags = F.tasks.filter((t) => t.purpose === 'diagnostic').map((t) => attemptEvent(t, capOf(t.capabilityId), { at: T0 - 6 * HOUR, outcome: 'success', support: { hint: true } }));
+  /* resume: exposed cap, no attempt */
+  const enc = F.tasks.find((t) => t.id === 'task.meet.input.scene');
+  const res = scopedState([...meetDiags, observeEvent(enc, capOf(enc.capabilityId), { at: T0 - MIN })], meetTargets);
+  cases.push(['resume', res]);
+  /* due retrieval: independent + lag elapsed */
+  const due = scopedState([...meetDiags, ...independentHistory(T0 - 30 * DAY)], meetTargets, { now: T0 });
+  cases.push(['due', due]);
+  /* support demand beats remediation: attributed fail on target */
+  const mat = ALL_MISSIONS.find((f) => f.id === 'mission.meet_at_a_time');
+  const ms2 = missionState(mat);
+  const hearT = mat.tasks.find((t) => t.id === 'task.time.retrieval.hear');
+  const demandSt = { learnerId: 'SIM', events: [
+    ...mat.tasks.filter((t) => t.purpose === 'diagnostic').map((t) => attemptEvent(t, capOf(t.capabilityId), { at: T0 - 5 * HOUR, outcome: 'success', support: { hint: true } })),
+    observeEvent(mat.tasks.find((t) => t.purpose === 'input' && t.capabilityId === hearT.capabilityId) ?? hearT, capOf(hearT.capabilityId), { at: T0 - 3 * HOUR }),
+    attemptEvent(hearT, capOf(hearT.capabilityId), { at: T0 - 2 * HOUR, outcome: 'success', support: { hint: true } }),
+    attemptEvent(hearT, capOf(hearT.capabilityId), { at: T0 - HOUR, outcome: 'fail', missing: ['identify_spoken_number'] })
+  ], capabilities: ms2.capabilities, tasks: mat.tasks, roles: ms2.roles, policy: LEARNING_POLICY_V1, now: T0, mission: mat.mission, decisionContext: emptyContext('ep.z3', 'ses.z3'), selection: {} };
+  cases.push(['support_demand_over_remediation', demandSt]);
+  /* assessment close-out after transfer */
+  const assessSt = scopedState([...meetDiags, ...transferredHistory(T0), attemptEvent(tmt('remediation.ask_name'), askCap(), { at: T0 - 30 * MIN, outcome: 'success' })], meetTargets);
+  cases.push(['assessment', assessSt]);
+
+  for (const [name, st] of cases) {
+    const prod = ref(st);
+    const da = POLICIES.A(st, {});
+    if (prod.status === 'ready') {
+      ok(da.chosen.taskId === prod.taskId,
+        `Z3.${name}: A chose ${da.chosen.kind}@${da.chosen.taskId}, production chose ${prod.purpose}@${prod.taskId}`);
+    } else {
+      ok(da.chosen.kind === prod.status, `Z3.${name}: A=${da.chosen.kind} vs production=${prod.status} (${prod.reason ?? ''})`);
+    }
+  }
+}
+
+/* --- Z4. Assessment FAMILY freshness --- */
+{
+  const ev = [...transferredHistory(T0), attemptEvent(tmt('assessment.checkpoint'), askCap(), { at: T0 - HOUR, outcome: 'fail' }), attemptEvent(tmt('remediation.ask_name'), askCap(), { at: T0 - 30 * MIN, outcome: 'success' })];
+  /* same family + new id is NOT fresh for B/C */
+  const clone = { ...tmt('assessment.checkpoint'), id: 'task.meet.assessment.clone' };
+  const tasksC = [...state.tasks, clone];
+  const missionC = { ...F.mission, taskIds: [...F.mission.taskIds, clone.id] };
+  const dc = POLICIES.B(scopedState(ev, [askCap()], { tasks: tasksC, mission: missionC }), {});
+  const cc = dc.candidates.find((c) => c.kind === KINDS.ASSESSMENT && c.taskId === clone.id);
+  ok(cc && cc.eligible === false && cc.filterReason.includes('assessment_family_consumed'),
+    `Z4: same-family clone treated as fresh (${cc?.filterReason ?? 'absent'})`);
+  /* genuinely different family IS fresh */
+  const fresh = { ...tmt('assessment.checkpoint'), id: 'task.meet.assessment.newfam', promptFamily: 'assessment.alternate_family' };
+  const tasksF = [...state.tasks, fresh];
+  const missionF = { ...F.mission, taskIds: [...F.mission.taskIds, fresh.id] };
+  const df = POLICIES.B(scopedState(ev, [askCap()], { tasks: tasksF, mission: missionF }), {});
+  const fc = df.candidates.find((c) => c.kind === KINDS.ASSESSMENT && c.taskId === fresh.id);
+  ok(fc && fc.eligible === true, 'Z4: genuinely different assessment family not eligible');
+}
+
+/* --- Z5. Validator independently reconstructs terminal honesty --- */
+{
+  const { validateDecision } = await import('../experiments/next-for-you/validator.js');
+  const ev = seedIndependentHistory(F, { caps: 2, at: T0 - 30 * DAY });
+  const st = baseState(ev, { now: T0 });
+  const env = { events: ev, tasks: state.tasks, capabilities: state.capabilities, roles: state.roles, mission: F.mission, learnerId: 'SIM', now: T0, policy: LEARNING_POLICY_V1, selection: {}, decisionContext: st.decisionContext };
+  /* fabricated idle + forged EMPTY candidate view */
+  const good = POLICIES.B(st, {});
+  const fakeIdle = { ...good, chosen: { kind: 'idle', capabilityId: null, taskId: null, tier: 'TERMINAL' }, candidates: [], candidateCount: 0 };
+  ok(validateDecision(fakeIdle, env).some((v) => v.includes('idle')), 'Z5: forged-empty idle passed the validator');
+  /* fabricated blocked while a valid action exists */
+  const fakeBlocked = { ...good, chosen: { kind: 'blocked', capabilityId: null, taskId: null, tier: 'TERMINAL' }, candidates: [], candidateCount: 0, blocked: true };
+  ok(validateDecision(fakeBlocked, env).length > 0, 'Z5: forged blocked-with-work passed the validator');
+  /* stale-revision observed fail cannot justify refresh */
+  const stale = { ...good, chosen: { ...good.chosen, kind: 'refresh', capabilityId: 'interaction.ask_name', taskId: tmt('remediation.ask_name')?.id } };
+  const staleEvt = { ...attemptEvent(tmt('retrieval.ask_name'), askCap(), { at: T0 - MIN, outcome: 'fail' }), taskRevision: 99 };
+  const staleEnv = { ...env, events: [...ev, staleEvt] };
+  ok(validateDecision(stale, staleEnv).some((v) => v.includes('relearning') || v.includes('fail')),
+    'Z5: stale-revision failure justified a refresh');
+}
+
+/* --- Z6. Strict repair evidence: only verified observed fails move bounds --- */
+{
+  /* observed fail + LATER unobserved success → refresh still justified */
+  const t = tmt('retrieval.ask_name');
+  const ev = [
+    ...independentHistory(T0),
+    attemptEvent(t, askCap(), { at: T0 - 2 * HOUR, outcome: 'fail' }),
+    attemptEvent(t, askCap(), { at: T0 - HOUR, outcome: 'success', observed: false })
+  ];
+  const gen = generateCandidates(scopedState(ev, [askCap()]));
+  ok(gen.candidates.some((c) => c.kind === KINDS.REFRESH && c.servableTask), 'Z6: unobserved success erased a justified refresh');
+  /* 1 observed fail + N unobserved fails → not at ceiling */
+  const ev2 = [
+    observeEvent(tmt('input.ask_name'), askCap(), { at: T0 - 3 * DAY }),
+    attemptEvent(t, askCap(), { at: T0 - 5 * HOUR, outcome: 'success' }),
+    attemptEvent(t, askCap(), { at: T0 - 4 * HOUR, outcome: 'fail' }),
+    attemptEvent(t, askCap(), { at: T0 - 3 * HOUR, outcome: 'fail', observed: false }),
+    attemptEvent(t, askCap(), { at: T0 - 2 * HOUR, outcome: 'fail', observed: false })
+  ];
+  const gen2 = generateCandidates(scopedState(ev2, [askCap()]));
+  const corr = gen2.candidates.find((c) => c.kind === KINDS.CORRECTION);
+  ok(!(corr && corr.filterReason?.includes('failure_ceiling')), 'Z6: unobserved fails counted toward the hard ceiling');
+}
+
+/* --- Z7. Starvation never escapes MANDATORY --- */
+{
+  /* stack the mandatory streak past every variant's limit, then assert
+   * a live resume_in_flight still wins */
+  /* ask_name has an exposure task AND unconsumed eliciting tasks, so the
+   * resume is actually servable (a single-task cap's consumed exposure
+   * leaves nothing for pendingPhase — the intent would drop honestly). */
+  const enc = F.tasks.find((t) => t.id === 'task.meet.input.ask_name');
+  const encCap = capOf(enc.capabilityId);
+  for (const variant of ['review', 'balanced', 'forward']) {
+    let ctx = emptyContext('ep.z7', 'ses.z7');
+    for (let i = 0; i < 12; i++) ctx = recordChoice(ctx, { kind: KINDS.RESUME, capabilityId: 'cap.old' + i, taskId: 'task.old' + i, timestamp: T0 - 100 + i });
+    const ev = [observeEvent(enc, encCap, { at: T0 - MIN })];
+    const d = POLICIES.B(scopedState(ev, [encCap], { ctx, selection: { starvationGuard: variant } }), {});
+    ok(d.chosen.kind === KINDS.RESUME, `Z7.${variant}: mandatory resume escaped by starvation guard (${d.chosen.kind})`);
+  }
+}
+
+/* --- Z8. Log append fails closed without canonical provenance --- */
+{
+  const { createDecisionLog } = await import('../experiments/next-for-you/decision-log.js');
+  const log = createDecisionLog();
+  const ev = seedIndependentHistory(F, { caps: 2, at: T0 - 30 * DAY });
+  const d = POLICIES.B(baseState(ev, { now: T0 }), {});
+  let threw = false;
+  try { log.append(d, {}); } catch { threw = true; }
+  ok(threw, 'Z8: append accepted missing provenance');
+  let threw2 = false;
+  try { log.append(d, { eventCount: 3, capabilityCount: 2, lastEventId: 'x' }); } catch { threw2 = true; }
+  ok(threw2, 'Z8: weak fingerprint fallback still accepted');
 }
 
 function burnCtx2(n) {

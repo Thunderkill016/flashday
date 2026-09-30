@@ -21,7 +21,7 @@ import { KINDS, PROVENANCE } from './constants.js';
 
 const EXPOSURE_PURPOSES = ['input', 'notice'];
 const ELICITING_PURPOSES = ['retrieval', 'production', 'interaction'];
-const ELICITING_FOR_INTRO = ['retrieval', 'production', 'interaction', 'diagnostic'];
+const ELICITING_FOR_INTRO = ['retrieval', 'production', 'interaction'];
 
 const INTENT_PURPOSES = {
   diagnostic_probe: ['diagnostic'],
@@ -196,7 +196,7 @@ export function generateCandidates({ learnerId, events, capabilities, tasks, rol
   const pickTask = (capId, purposes, f) => {
     const primary = servable(capId, purposes);
     const lastTask = lastAttemptByCap.get(capId)?.task;
-    if (primary && f.consecutiveFailures >= ceiling && lastTask && primary.id === lastTask.id) {
+    if (primary && (f.observedFails ?? f.consecutiveFailures) >= ceiling && lastTask && primary.id === lastTask.id) {
       const alt = servable(capId, purposes, { exceptTaskId: lastTask.id });
       return { task: alt ?? primary, identicalRetry: alt == null, alternateTask: alt != null };
     }
@@ -216,15 +216,24 @@ export function generateCandidates({ learnerId, events, capabilities, tasks, rol
     const id = c.id;
     if (isSupportCap(id)) continue; // supports are demand-routed ONLY
     const f = capFacts(id, model, projection, c);
+    /* HIGH-6 r3: hard repair semantics use VERIFIED observed failures
+     * only — projection counters (consecutiveFailures, lastAttemptOutcome)
+     * can be moved by unobserved/context-only outcomes and must never
+     * gate a repair bound, an alternate-task escape, or a refresh. */
+    f.observedFails = observedFailStreak.get(id) ?? 0;
+    f.lastObservedOutcome = lastObservedAttemptByCap.get(id)?.outcome ?? null;
     const p = projection.byCapability.get(id);
     const reasons = reasonSet(id);
 
-    /* --- RESUME: encounter opened, no attempt yet [KERNEL] --- */
+    /* --- RESUME: encounter opened, no attempt yet [KERNEL] ---
+     * Mirrors the runner: resume serves the next UNCONSUMED pending-phase
+     * task (pickPendingPhase, unattempted-only); on a single-task cap the
+     * consumed exposure leaves nothing servable and the intent drops. */
     if (f.state === 'EXPOSED' && f.lastAttemptOutcome == null) {
       push({
         kind: KINDS.RESUME, capabilityId: id,
         facts: f,
-        servableTask: servable(id, INTENT_PURPOSES.resume_in_flight),
+        servableTask: pendingPhase(id),
         preferences: [],
         penalties: [],
         provenance: [PROVENANCE.KERNEL],
@@ -406,7 +415,7 @@ export function generateCandidates({ learnerId, events, capabilities, tasks, rol
     const task = servable(d.supportCapabilityId, INTENT_PURPOSES.support_demand, { requiresFunction: d.missingFunction });
     push({
       kind: KINDS.SUPPORT_DEMAND, capabilityId: d.supportCapabilityId,
-      facts: capFacts(d.supportCapabilityId, model, projection, capById.get(d.supportCapabilityId)),
+      facts: (() => { const sf = capFacts(d.supportCapabilityId, model, projection, capById.get(d.supportCapabilityId)); sf.observedFails = observedFailStreak.get(d.supportCapabilityId) ?? 0; sf.lastObservedOutcome = lastObservedAttemptByCap.get(d.supportCapabilityId)?.outcome ?? null; return sf; })(),
       demand: d,
       servableTask: task,
       preferences: [{ name: 'pending_demand', detail: `${d.targetCapabilityId}:${d.missingFunction}`, provenance: PROVENANCE.KERNEL }],
@@ -430,11 +439,22 @@ export function generateCandidates({ learnerId, events, capabilities, tasks, rol
        * B/C filter consumed tasks to a fresh alternate or honest
        * assessment backlog [SAFETY_PRIOR/EXPERIMENTAL]. */
       const consumed = verifiedEventKey.has(keyOf(t));
+      /* HIGH-4 r3: freshness is family-level, not task-level. Re-issuing
+       * a cloned item with a new id but the same promptFamily/context is
+       * NOT a fresh assessment sample — it reuses a revealed family. */
+      const fam = t.promptFamily ?? t.family ?? t.id;
+      const familyConsumed = missionTasks.some((o) =>
+        o !== t && (o.promptFamily ?? o.family ?? o.id) === fam && verifiedEventKey.has(keyOf(o))) ||
+        events.some((e) => e.learnerId === learnerId && e.attempt?.outcome != null && (() => {
+          const et = taskByRev.get(`${e.taskId}@${e.taskRevision}`);
+          return et && et.purpose === 'assessment' && (et.promptFamily ?? et.family ?? et.id) === fam;
+        })());
       push({
         kind: KINDS.ASSESSMENT, capabilityId: t.capabilityId,
         facts: f,
         servableTask: t,
         consumed,
+        familyConsumed,
         preferences: [{ name: 'mission_assessment_plan', provenance: PROVENANCE.KERNEL }],
         penalties: consumed ? [{ name: 'assessment_consumed', provenance: PROVENANCE.SAFETY }] : [],
         provenance: [PROVENANCE.KERNEL],

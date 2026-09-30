@@ -206,3 +206,23 @@ Production planner: zero diff vs main.
 | `observed!==false` | strict `===true` generator+validator |
 | shallow log | clone+deep-freeze on append |
 | thin trace | per-loser `lostTo`/`lostBecause` + tieBreak |
+
+## Round-3 hardening (post-review 5912421748)
+
+10 requirements → implemented → green. New semantics in
+`docs/specs/next-for-you-v0.md` §13. Suite: 907 checks (Z1–Z8 added).
+`verify` + `verify:full` PASS at this head. Production planner: zero
+diff vs main.
+
+| Requirement | Implementation |
+|-------------|----------------|
+| single authoritative selection config | `state.selection` only; conflicting options → `selection_config_conflict` (fail closed) |
+| Policy A = production reference | mirrors `nextMissionTask` order; Z3 differential asserts taskId parity on frozen states |
+| resume serves pending-phase | `pendingPhase` (unattempted-only) mirror of `pickPendingPhase`; single-task cap drops honestly |
+| intro eliciting excludes diagnostic | `ELICITING_FOR_INTRO` = retrieval/production/interaction; probes only via `diagnostic_probe` |
+| assessment family freshness | family-level consumption for B/C (`assessment_family_consumed`); A re-probes per production |
+| fail-closed log append | missing canonical provenance rejects the append |
+| full canonical digest | SHA-256 over events (conflict-aware), capabilities, ctx, policy, selection, mission, task decision surface |
+| validator recomputes work | independent candidate regen + shared hard-filter; `fabricated_idle` / `blocked_while_valid_work` / `blocked_without_work` |
+| starvation never escapes MANDATORY | tier-0 and pending-demand tiers are protected from the guard (Z7, all variants) |
+| strict observed everywhere | repair bounds, verified-failure views, and validator all key on `observed===true` + `verifyEventTask` |
