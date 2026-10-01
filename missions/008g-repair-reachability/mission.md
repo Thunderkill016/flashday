@@ -91,6 +91,13 @@ between evidence truth and routing truth.
 - `npm run verify:full` — full gate (typecheck, node suites, build,
   browser, Firestore emulator).
 
+## BROWSER VERIFICATION
+
+Not required — headless policy/routing change; B1 remains
+shadow/experiment only and production B0 serving is unchanged. The
+existing browser legs still run inside `verify:full` as a regression
+gate on shared session machinery.
+
 ## SAFETY CONSTRAINTS
 
 - Never force-push / reset --hard / delete branches.
