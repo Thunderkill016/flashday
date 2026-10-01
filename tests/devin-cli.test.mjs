@@ -162,7 +162,9 @@ const DANGEROUS = [
   "git push origin 'refs/heads/m*:refs/heads/m*'",
   // Aliases defined inline via -c are literal command text — the
   // expanded invocation must be checked; --config-env hides the body
-  // in the environment so it fails closed.
+  // in the environment so it fails closed. '!' bodies are shell
+  // commands, and a body that re-injects -c alias.* makes real git
+  // run the nested alias, so it fails closed too.
   "git -c alias.p='push origin HEAD:main' p",
   'git -c alias.p="push origin HEAD:main" p',
   'git -c alias.p=push p origin main',
@@ -171,6 +173,45 @@ const DANGEROUS = [
   'git --config-env alias.x=PCMD x',
   'git --config-env=alias.x=PCMD x',
   "bash -c 'git -c alias.p=\"push origin HEAD:main\" p'",
+  "git -c alias.p='!git push --force origin feature' p",
+  "git -c alias.p='!git push origin HEAD:main' p",
+  "git -c alias.p='!rm -rf src' p",
+  "git -c alias.p='!firebase deploy' p",
+  'git -c "alias.p=-c alias.q=\'push origin HEAD:main\' q" p',
+  'git -c "alias.p=-c alias.q=\'!git push --force origin feature\' q" p',
+  'git -c "alias.p=--config-env alias.q=PCMD q" p',
+  // --repo/--repository (and abbreviations) supply the remote via
+  // option — every positional is then a refspec destination.
+  'git push --repo=origin main',
+  'git push --repo=origin HEAD:main',
+  'git push --repo=origin +HEAD',
+  'git push --repo=origin :',
+  'git push --repo=origin refs/heads/*:refs/heads/*',
+  'git push --repo origin main',
+  'git push --repository=origin main',
+  'git push --receive-pack /tmp/x origin main',
+  // push.default=matching (inline, env-sourced, or written to config)
+  // turns a bare push into a publish-everything push; alias writes to
+  // persistent config smuggle commands the next invocation runs.
+  'git -c push.default=matching push origin',
+  'git -c push.default=matching push',
+  'git --config-env=push.default=PD push',
+  'git --config-env push.default=PD push',
+  'git config push.default matching',
+  'git config --global push.default matching',
+  "git config alias.p 'push origin main'",
+  "git config alias.p '!rm -rf /'",
+  "git config --global alias.p 'push --force'",
+  "GIT_CONFIG_KEY_0=alias.p GIT_CONFIG_VALUE_0='push origin main' git p",
+  'GIT_CONFIG_GLOBAL=/tmp/cfg git p',
+  'GIT_CONFIG_SYSTEM=/tmp/cfg git status',
+  // git rm -rf on the whole tree deletes worktree files and drops
+  // uncommitted changes; an alias write can hide it from later checks.
+  'git rm -rf .',
+  'git rm -rf -- .',
+  'git rm -rf *',
+  'git rm -rf',
+  "git config alias.d 'rm -rf .'",
   // GNU xargs reads its argument list from a file with -a/--arg-file;
   // the option value is input, not the command — the real command
   // follows it.
@@ -237,10 +278,38 @@ const SAFE = [
   "git push origin 'refs/tags/*:refs/tags/*'",
   "git push origin 'feature-*:feature-*'",
   // Aliases whose expanded body is a safe command stay usable — the
-  // guard evaluates the expansion, not the -c flag itself.
+  // guard evaluates the expansion, not the -c flag itself. '!' shell
+  // bodies get evaluated as shell text the same way.
   'git -c alias.st=status st',
   'git -c alias.l="log --oneline" l',
   "git -c alias.p='push origin feature' p",
+  "git -c alias.p='!echo hi' p",
+  "git -c alias.p='!ls -la' p",
+  // --repo on a safe destination and option forms that carry values.
+  'git push --repo=origin feature',
+  'git push --repo origin feature',
+  'git push --receive-pack /tmp/x origin feature',
+  // Attached -oVALUE must not leak its characters into short-flag
+  // parsing — values containing 'f' are not a force push.
+  'git push -ofoo origin feature',
+  'git push -oci.foo origin feature',
+  // Safe push.default values and benign config writes/reads.
+  'git -c push.default=simple push origin feature',
+  'git -c push.default=upstream push',
+  'git config push.default simple',
+  'git config alias.st status',
+  'git config alias.st',
+  'git config --unset alias.st',
+  'git config --global core.editor vim',
+  'git config user.name x',
+  'GIT_CONFIG_NOSYSTEM=1 git status',
+  'git -c core.editor=vim commit',
+  // Scoped git rm stays allowed — --cached is index-only, and a real
+  // pathspec bounds the sweep.
+  'git rm -r --cached node_modules',
+  'git rm -rf src/generated',
+  'git rm -f src/file.js',
+  'git rm --cached -r dist',
   // Git global options before the subcommand.
   'git -C . status',
   'git --no-pager log -5',

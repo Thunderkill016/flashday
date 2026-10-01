@@ -151,31 +151,43 @@ const GIT_VALUE_OPTS = new Set([
 // expands (git -c alias.p='push origin HEAD:main' p).
 function gitInvocation(args) {
   const aliases = Object.create(null);
+  const configs = Object.create(null);
+  const opaqueKeys = new Set();
   let opaqueAlias = false;
   let i = 0;
   while (i < args.length) {
     const t = stripQuotes(args[i]);
     if (GIT_VALUE_OPTS.has(t)) {
       const v = i + 1 < args.length ? stripQuotes(args[i + 1]) : '';
-      const m = t === '-c' || t === '--config-env'
-        ? /^alias\.([\w-]+)=(.*)$/s.exec(v)
-        : null;
-      if (m && t === '--config-env') {
-        // --config-env name=ENVVAR reads the body from the
-        // environment — statically invisible, so fail closed.
-        opaqueAlias = true;
-      } else if (m) {
-        // The body arrives with its quoting intact
-        // (alias.p='push origin HEAD:main') — unwrap then retokenize
-        // so the expanded invocation sees real argv words.
-        aliases[m[1]] = tokens(stripQuotes(m[2]));
+      if (t === '-c' || t === '--config-env') {
+        const eq = v.indexOf('=');
+        if (eq > 0) {
+          const key = v.slice(0, eq).toLowerCase();
+          const val = v.slice(eq + 1);
+          if (t === '--config-env') {
+            // Value comes from the environment — statically invisible.
+            opaqueKeys.add(key);
+            if (key.startsWith('alias.')) opaqueAlias = true;
+          } else {
+            configs[key] = stripQuotes(val);
+            const am = /^alias\.([\w-]+)$/.exec(key);
+            // The body arrives with its quoting intact
+            // (alias.p='push origin HEAD:main') — unwrap then
+            // retokenize so the expansion sees real argv words.
+            if (am) aliases[am[1]] = tokens(stripQuotes(val));
+          }
+        }
       }
       i += 2; continue;
     }
     if (/^--[^=]+=/.test(t)) {
       // Inline forms: --config-env=alias.x=VAR (opaque body) or
       // --exec-path=..., etc.
-      if (/^--config-env=alias\./.test(t)) opaqueAlias = true;
+      const ie = /^--config-env=([^=]+)=/.exec(t);
+      if (ie) {
+        opaqueKeys.add(ie[1].toLowerCase());
+        if (ie[1].toLowerCase().startsWith('alias.')) opaqueAlias = true;
+      }
       i++; continue;
     }
     if (/^-/.test(t)) { i++; continue; }
@@ -185,7 +197,9 @@ function gitInvocation(args) {
     sub: i < args.length ? stripQuotes(args[i]) : '',
     rest: args.slice(i + 1),
     aliases,
-    opaqueAlias
+    configs,
+    opaqueAlias,
+    opaqueKeys
   };
 }
 
@@ -216,26 +230,107 @@ function wildcardReachesProtected(dest) {
 }
 
 function checkGit(args, depth = 0) {
-  const { sub, rest, aliases, opaqueAlias } = gitInvocation(args);
+  const { sub, rest, aliases, configs, opaqueAlias, opaqueKeys } = gitInvocation(args);
 
   if (opaqueAlias) {
     return 'git --config-env alias.*=… reads the alias body from the environment — cannot verify it, blocked';
   }
-  // `git <alias> <args>` expands to `git <alias-body> <args>`; re-check
-  // the expanded invocation (git never expands aliases recursively).
+
+  // `git config <key> <value>` writes persistent config. An alias
+  // write smuggles a command the next invocation runs invisibly, and
+  // push.default=matching makes a bare push update every matching
+  // branch — the same checks apply to the literal value.
+  if (sub === 'config') {
+    const { positional } = flagInfo(rest);
+    const p = positional.map(stripQuotes);
+    if (p.length > 1) {
+      if (/^alias\./.test(p[0])) {
+        const bodyToks = tokens(p.slice(1).join(' '));
+        const f = stripQuotes(bodyToks[0] || '');
+        const r = f.startsWith('!')
+          ? evaluate(((f === '!' ? '' : f.slice(1)) + ' ' + bodyToks.slice(1).join(' ')).trim(), depth + 1)
+          : checkGit(bodyToks, depth + 1);
+        if (r) return r;
+      }
+      if (p[0] === 'push.default' && p[1] === 'matching') {
+        return "git config push.default=matching makes 'git push' update every matching branch — including main";
+      }
+    }
+  }
+  // `git <alias> <args>` expands to `git <alias-body> <args>`; bodies
+  // starting with '!' are SHELL commands and go through evaluate().
+  // A body that itself carries -c alias.*/--config-env makes git
+  // re-parse global options (real git DOES run the nested alias) —
+  // fail closed rather than bound recursion.
   const body = sub && aliases[sub];
   if (body && depth < 1) {
-    const reason = checkGit(body.concat(rest), depth + 1);
-    if (reason) return reason;
+    const first = stripQuotes(body[0] || '');
+    if (first === '!' || first.startsWith('!')) {
+      const shellCmd = (first === '!' ? '' : first.slice(1)) +
+        (body.length > 1 ? ' ' + body.slice(1).join(' ') : '');
+      const reason = evaluate(shellCmd.trim(), depth + 1);
+      if (reason) return reason;
+    } else {
+      const inv = gitInvocation(body.concat(rest));
+      if (inv.opaqueAlias || Object.keys(inv.aliases).length > 0) {
+        return 'git alias body redefines aliases — expansion cannot be verified, blocked';
+      }
+      const reason = checkGit(body.concat(rest), depth + 1);
+      if (reason) return reason;
+    }
+  }
+
+  // `git rm -rf .` deletes worktree copies of tracked files — -f drops
+  // uncommitted changes permanently. --cached stays index-only (safe),
+  // and a specific pathspec keeps the sweep scoped (allowed).
+  if (sub === 'rm') {
+    const { shorts, longs, positional } = flagInfo(rest);
+    const broad = positional.length === 0 ||
+      positional.every((t) => {
+        const s = stripQuotes(t);
+        return s === '.' || s === '*' || s === '--' || s === '/' ||
+          s === '--all' || s === '-A';
+      });
+    const force = shorts.has('f') || longs.has('--force');
+    if (shorts.has('r') && force && !longs.has('--cached') && broad) {
+      return 'git rm -rf on the whole tree deletes worktree files and drops uncommitted changes';
+    }
   }
 
   if (sub === 'push') {
-    // -o/--push-option consume a value token; strip them before
-    // classifying positionals as remote/refspec.
+    // -c push.default=matching (literal) or --config-env push.default=
+    // (env-sourced, unverifiable) can turn a bare push into a
+    // publish-everything push.
+    if ((configs['push.default'] || '').toLowerCase() === 'matching') {
+      return "git -c push.default=matching makes 'git push' update every matching branch — including main";
+    }
+    if (opaqueKeys.has('push.default')) {
+      return 'git --config-env push.default=… hides the push.default value — cannot verify it, blocked';
+    }
+    // Value-taking push options are stripped before positional
+    // classification — otherwise a `--repo origin main` misreads
+    // 'origin' as the remote and 'main' as a refspec destination.
+    // --repo/--repository (and their unambiguous git abbreviations)
+    // supply the remote via option, making every positional a refspec.
+    let remoteViaOpt = false;
     const filtered = [];
     for (let i = 0; i < rest.length; i++) {
       const t = stripQuotes(rest[i]);
-      if ((t === '-o' || t === '--push-option') && i + 1 < rest.length) { i++; continue; }
+      if (/^--rep\w*(?:=|$)/.test(t)) { // --repo, --repository, --rep…
+        if (t.includes('=')) { remoteViaOpt = true; continue; }
+        if (i + 1 < rest.length) { remoteViaOpt = true; i++; }
+        continue;
+      }
+      if (/^--rec\w*(?:=|$)/.test(t) || /^--e\w*(?:=|$)/.test(t) ||
+          t === '-o' || t === '--push-option') {
+        // --receive-pack/--exec consume a value; -o/--push-option too.
+        if (t.includes('=')) continue;
+        if (i + 1 < rest.length) { i++; continue; }
+        continue;
+      }
+      if (/^-o./.test(t) || /^--push-opt\w*=/.test(t)) {
+        continue; // attached-value forms: -ofoo, --push-option=x
+      }
       filtered.push(rest[i]);
     }
     const { shorts, longs, positional } = flagInfo(filtered);
@@ -255,11 +350,13 @@ function checkGit(args, depth = 0) {
     if (longs.has('--prune')) {
       return 'git push --prune deletes remote refs — human-only action';
     }
-    // positional[0] is the remote; later positionals are refspecs.
-    // The refspec destination (after the last ':') decides whether a
-    // protected ref is touched — 'main:feature-copy' pushes FROM main
-    // and is safe, 'feature/main-fix' never names main at all.
-    for (const rawRef of positional.slice(1)) {
+    // positional[0] is the remote unless --repo supplied it via
+    // option — then every positional is a refspec. The destination
+    // (after the last ':') decides whether a protected ref is
+    // touched — 'main:feature-copy' pushes FROM main and is safe,
+    // 'feature/main-fix' never names main at all.
+    const refspecs = remoteViaOpt ? positional : positional.slice(1);
+    for (const rawRef of refspecs) {
       const ref = stripQuotes(rawRef);
       if (ref.startsWith('+')) {
         return 'git push +<refspec> forces the update — equivalent to --force';
@@ -417,12 +514,21 @@ const ANYWHERE_RULES = [
   [/\bdd\b[^|;&]*\bof=\/dev\//, () => 'dd writing to a device node'],
 ];
 
+// Env-assignment forms that smuggle git config in literal text —
+// GIT_CONFIG_KEY_n/GIT_CONFIG_VALUE_n pairs can define aliases or
+// push.default, and GIT_CONFIG_GLOBAL/SYSTEM point at opaque files.
+const GIT_ENV_CFG = /^GIT_CONFIG_(?:KEY|VALUE)_\d+=|^GIT_CONFIG_(?:GLOBAL|SYSTEM)=/;
+
 function scanArgv(argv) {
   const realArgv = unwrap(argv);
   const realHead = realArgv.length ? cmdName(stripQuotes(realArgv[0])) : '';
+  const gitEnvCfg = argv.some((t) => GIT_ENV_CFG.test(stripQuotes(t)));
   for (const [cmd, check] of Object.entries(HEAD_RULES)) {
     // Normal position: first real command after wrappers.
     if (realHead === cmd) {
+      if (cmd === 'git' && gitEnvCfg) {
+        return 'GIT_CONFIG_* environment config can smuggle aliases/defaults — cannot verify, blocked';
+      }
       const reason = check(realArgv.slice(1));
       if (reason) return reason;
     }
@@ -430,6 +536,9 @@ function scanArgv(argv) {
     // ("bash -c 'cmd'" is handled by quoted-token recursion instead).
     for (let i = 0; i < argv.length; i++) {
       if (cmdName(stripQuotes(argv[i])) === cmd && inertPrefix(argv, i)) {
+        if (cmd === 'git' && gitEnvCfg) {
+          return 'GIT_CONFIG_* environment config can smuggle aliases/defaults — cannot verify, blocked';
+        }
         const reason = check(argv.slice(i + 1));
         if (reason) return reason;
       }
@@ -486,7 +595,14 @@ function main() {
     } catch {
       process.exit(0); // unreadable payload: not a command, allow
     }
-    const reason = evaluate(extractCommand(payload));
+    let reason = null;
+    try {
+      reason = evaluate(extractCommand(payload));
+    } catch {
+      // Guard bugs must not silently become decisions — fail open to
+      // the permission layer, same as malformed payloads.
+      reason = null;
+    }
     if (reason) {
       process.stdout.write(JSON.stringify({
         decision: 'block',
