@@ -22,7 +22,7 @@
  * re-selling a stale family or silently falling back to production.
  */
 import { nextMissionTask } from '../mission-runner.js';
-import { policyB, PURPOSE_TO_KIND } from './policies.js';
+import { policyB, policyB1, PURPOSE_TO_KIND } from './policies.js';
 import { validateDecision } from './validator.js';
 import { KINDS, POLICY_VERSIONS } from './constants.js';
 import { decisionInputSnapshot, stateDigest } from './decision-log.js';
@@ -31,12 +31,32 @@ import { deepFreezeAll, sha256 } from './canonical.js';
 export const SELECTION_MODES = Object.freeze({
   REFERENCE: 'reference',
   B0: 'b0',
-  SHADOW_B0: 'shadow_b0'
+  SHADOW_B0: 'shadow_b0',
+  /* 008F: B1 is correction-episode-gated B0. Direct `b1` serves it
+   * (test/experiment surfaces only); `shadow_b1` serves the REFERENCE
+   * runner while evaluating BOTH B0 and B1 on the same frozen input —
+   * experimental policies never reach the learner in shadow mode. */
+  B1: 'b1',
+  SHADOW_B1: 'shadow_b1'
 });
 
 export function isSelectionMode(mode) {
-  return mode === SELECTION_MODES.REFERENCE || mode === SELECTION_MODES.B0 || mode === SELECTION_MODES.SHADOW_B0;
+  return Object.values(SELECTION_MODES).includes(mode);
 }
+
+/* The selection-policy version a run pins for each mode. REFERENCE is
+ * production bookkeeping; shadow modes pin the ENGINE they evaluate
+ * (shadow_b0 → B0, shadow_b1 → B1) — the pin records which semantics the
+ * trajectory exercised, never the served reference runner. One map so a
+ * run record, its pin guard, and the validator's version check can never
+ * disagree about what a mode implies. */
+export const POLICY_VERSION_FOR_MODE = Object.freeze({
+  [SELECTION_MODES.REFERENCE]: 'production.nextMissionTask',
+  [SELECTION_MODES.B0]: POLICY_VERSIONS.B,
+  [SELECTION_MODES.SHADOW_B0]: POLICY_VERSIONS.B,
+  [SELECTION_MODES.B1]: POLICY_VERSIONS.B1,
+  [SELECTION_MODES.SHADOW_B1]: POLICY_VERSIONS.B1
+});
 
 /* Engine-facing state — the exact input object the promoted policies,
  * validator, and digest all see. One construction site so the served
@@ -165,6 +185,81 @@ export function shadowCompare(reference, b0Decision) {
   return { reference: ref, b0, sameTask, divergenceReason };
 }
 
+/* §008F — B0-vs-B1 divergence classifier. B0 is the control; B1 is the
+ * episode-gated hypothesis. Every difference must land in a named
+ * class — anything else is a BUG (the classifier must not hide an
+ * unexplained divergence):
+ *
+ *   MATCH                      identical serve
+ *   CORRECTION_RETEST_DUE      B1 served the delayed retest
+ *   CORRECTION_EPISODE_GATE    B1 gated certification while the
+ *                              episode awaited repair (OPEN/REPAIRING)
+ *   REPAIR_WAIT                B1 gated certification during the
+ *                              post-repair lag window
+ *   CORRECTION_CONTENT_BACKLOG the episode is due but no retest
+ *                              surface covers the remaining functions
+ *   RELAPSE_REPAIR             a post-repair failure reopened repair
+ *   BUG                        divergence with no episode cause — the
+ *                              policies should never disagree otherwise */
+export function classifyB0B1(b0, b1) {
+  const b0Task = b0?.chosen?.taskId ?? null;
+  const b1Task = b1?.chosen?.taskId ?? null;
+  const b0Kind = b0?.chosen?.kind ?? null;
+  const b1Kind = b1?.chosen?.kind ?? null;
+  if (b0Task != null && b0Task === b1Task) return { class: 'MATCH' };
+
+  const b0Terminal = b0Task == null;
+  const b1Terminal = b1Task == null;
+  if (b0Terminal && b1Terminal) {
+    /* Both terminal — but a B1 backlog suppression is a real divergence
+     * in vocabulary even when both sides have nothing to serve. */
+    const backlogNote = (b1?.explanation?.suppressed ?? []).find((s) => s.includes('correction_content_backlog'));
+    if (backlogNote) return { class: 'CORRECTION_CONTENT_BACKLOG', note: backlogNote };
+    return { class: 'MATCH', note: `both terminal: b0=${b0Kind}, b1=${b1Kind}` };
+  }
+
+  if (b1Kind === KINDS.CORRECTION_RETEST) {
+    return { class: 'CORRECTION_RETEST_DUE', note: `B1 serves delayed retest ${b1Task}; B0 chose ${b0Kind}@${b0Task ?? 'terminal'}` };
+  }
+
+  /* Did an episode gate what B0 wanted? Look at B1's filtered candidates
+   * and the episode digest stamped on the decision. */
+  const gatedOnB0Cap = (b1?.candidates ?? []).find((c) =>
+    c.eligible === false && typeof c.filterReason === 'string' &&
+    c.filterReason.includes('correction_episode_gate') &&
+    c.capabilityId === b0?.chosen?.capabilityId);
+  const gatedAny = gatedOnB0Cap ?? (b1?.candidates ?? []).find((c) =>
+    c.eligible === false && typeof c.filterReason === 'string' &&
+    c.filterReason.includes('correction_episode_gate'));
+  if (gatedAny) {
+    const epState = gatedAny.filterReason.split('correction_episode_gate:')[1] ?? null;
+    const backlog = (b1?.explanation?.suppressed ?? []).some((s) => s.includes('correction_content_backlog'));
+    if (epState === 'REPAIRED_WAITING') {
+      return { class: 'REPAIR_WAIT', note: `episode repaired; B1 withholds ${gatedAny.kind}@${gatedAny.capabilityId} until the retest lag` };
+    }
+    if (epState === 'RETEST_DUE') {
+      return backlog
+        ? { class: 'CORRECTION_CONTENT_BACKLOG', note: `episode due but no retest surface covers the remaining functions` }
+        : { class: 'CORRECTION_RETEST_DUE', note: `episode due; B1 routes the retest before ${gatedAny.kind}` };
+    }
+    if (epState === 'RELAPSED') {
+      return { class: 'RELAPSE_REPAIR', note: `retest/waiting failure reopened the episode — repair precedes certification` };
+    }
+    return { class: 'CORRECTION_EPISODE_GATE', note: `open episode (${epState}) gates ${gatedAny.kind}@${gatedAny.capabilityId}` };
+  }
+
+  const backlogOnly = (b1?.explanation?.suppressed ?? []).find((s) => s.includes('correction_content_backlog'));
+  if (backlogOnly) return { class: 'CORRECTION_CONTENT_BACKLOG', note: backlogOnly };
+
+  /* A relapsed episode re-routes to repair: B1 picked correction/refresh/
+   * demand while B0 (episode-blind) chose certification-tier work. */
+  const relapsed = (b1?.correctionEpisodes?.digest ?? []).some((e) => e.state === 'RELAPSED' && e.capabilityId === b0?.chosen?.capabilityId);
+  if (relapsed && [KINDS.TRANSFER, KINDS.ASSESSMENT].includes(b0Kind)) {
+    return { class: 'RELAPSE_REPAIR', note: `B1 picked ${b1Kind} — relapsed episode repairs before certification` };
+  }
+  return { class: 'BUG', note: `unexplained b0-vs-b1 divergence: b0=${b0Kind}@${b0Task} b1=${b1Kind}@${b1Task}` };
+}
+
 /* §21 — run the independent validator against the exact pre-decision
  * input. Any hard violation fails closed: the decision is never
  * served. Returns the violation list (empty = clean). */
@@ -229,6 +324,53 @@ export function selectNextTask(input) {
       inputDigest: `sha256:${state.inputDigestHex}`,
       decision: { ...referenceDecision(reference, state), shadow }
     };
+  }
+
+  if (mode === SELECTION_MODES.SHADOW_B1) {
+    const reference = nextMissionTask(referenceArgs);
+    /* B0 and B1 evaluate THE SAME frozen pre-decision state — the
+     * shadow comparison between them is the 008F experiment. Neither
+     * policy may affect the served task. */
+    const b0 = policyB(state);
+    const b1 = policyB1(state);
+    const shadow = shadowCompare(reference, b0);
+    const b1chosen = b1?.chosen;
+    shadow.b1 = {
+      kind: b1chosen?.kind ?? null,
+      task: b1chosen?.taskId == null ? null : `${b1chosen.taskId}@${b1chosen.taskRevision ?? 1}`,
+      decisionId: b1?.decisionId ?? null
+    };
+    shadow.b0VsB1 = classifyB0B1(b0, b1);
+    const violations = input.validate === false ? [] : validateB0(b0, state);
+    if (violations.length) shadow.b0Violations = violations;
+    const b1Violations = input.validate === false ? [] : validateB0(b1, state);
+    if (b1Violations.length) shadow.b1Violations = b1Violations;
+    input.shadowSink?.(shadow);
+    return {
+      ...reference, shadow, engineInput: state,
+      inputDigest: `sha256:${state.inputDigestHex}`,
+      decision: { ...referenceDecision(reference, state), shadow }
+    };
+  }
+
+  /* mode === B1: the episode-gated policy serves directly — experiment
+   * surfaces/tests only; production never selects this mode today. */
+  if (mode === SELECTION_MODES.B1) {
+    const decision = policyB1(state);
+    const inputDigest = `sha256:${state.inputDigestHex}`;
+    if (input.validate !== false) {
+      const violations = validateB0(decision, state);
+      if (violations.length) {
+        return {
+          status: 'blocked', taskId: null, taskRevision: null,
+          capabilityId: null, purpose: null,
+          reason: `validator_violation: ${violations.join('; ')}`,
+          reasonCode: 'validator_violation',
+          decision, engineInput: state, inputDigest
+        };
+      }
+    }
+    return { ...b0ToSelection(decision, input.tasks), engineInput: state, inputDigest };
   }
 
   /* mode === B0 */

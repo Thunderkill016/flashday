@@ -73,6 +73,11 @@ const COUNT_OF_KIND = {
   delayed_retrieval: 'retrieval',
   correction: 'correction',
   retry: 'correction',
+  /* 008F: a delayed correction retest is repair-lifecycle work — counted
+   * with correction so the episode's tallies stay honest. It is NOT a
+   * thread owner (verification ≠ learning thread — same rule as
+   * assessment/transfer). */
+  correction_retest: 'correction',
   support_demand: 'support',
   transfer: 'transfer',
   new_input: 'newInput',

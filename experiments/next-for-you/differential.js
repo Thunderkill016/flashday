@@ -26,8 +26,8 @@ import { LEARNING_POLICY_V1 } from '../../src/vnext/policy.js';
 import { RISK_PRIORS, priorById } from '../../src/vnext/risk-priors.js';
 import { contractAttributesFunctions } from '../../src/vnext/evaluators.js';
 import { canonicalFamilyId } from '../../src/vnext/contracts.js';
-import { engineState } from '../../src/vnext/next-for-you/selector.js';
-import { policyB, PURPOSE_TO_KIND } from '../../src/vnext/next-for-you/policies.js';
+import { engineState, classifyB0B1 } from '../../src/vnext/next-for-you/selector.js';
+import { policyB, policyB1, PURPOSE_TO_KIND } from '../../src/vnext/next-for-you/policies.js';
 import { validateDecision } from '../../src/vnext/next-for-you/validator.js';
 import { emptyContext, recordChoice } from '../../src/vnext/next-for-you/decision-context.js';
 import { generateCandidates } from '../../src/vnext/next-for-you/candidate-generator.js';
@@ -60,6 +60,9 @@ const KIND_SERVES = {
   diagnostic_probe: ['diagnostic'],
   assessment: ['assessment'],
   due_retrieval: ['delayed_retrieval'],
+  /* 008F/B1 shadow-only kind — kept so classification can name it if a
+   * row ever surfaces one through this path. */
+  correction_retest: ['delayed_retrieval', 'retrieval', 'production', 'interaction'],
   correction: ['remediation'],
   refresh: ['remediation', 'retrieval'],
   support_demand: ['support'],
@@ -221,11 +224,23 @@ export function runDifferential({ fixture, archetypeName, steps = 40, seed = nul
       roles: state.roles, mission, learnerId: 'SIM', now,
       policy: LEARNING_POLICY_V1, selection: {}, decisionContext: ctx
     });
+    /* 008F: B1 evaluates the identical frozen input; its divergence from
+     * the B0 control is classified separately (`b0VsB1`) and its
+     * counterfactual decisions are re-validated exactly like B0's. */
+    const b1 = policyB1(state);
+    const b1Violations = validateDecision(b1, {
+      events, tasks: TASK_REGISTRY, capabilities: state.capabilities,
+      roles: state.roles, mission, learnerId: 'SIM', now,
+      policy: LEARNING_POLICY_V1, selection: {}, decisionContext: ctx
+    });
     rows.push({
       step, mission: mission.id, archetype: archetypeName,
       ref: { status: ref.status, task: ref.taskId == null ? null : `${ref.taskId}@${ref.taskRevision ?? 1}`, purpose: ref.purpose ?? null },
       b0: { kind: b0.chosen?.kind ?? null, task: b0.chosen?.taskId == null ? null : `${b0.chosen.taskId}@${b0.chosen.taskRevision ?? 1}` },
       b0Violations: violations,
+      b1: { kind: b1.chosen?.kind ?? null, task: b1.chosen?.taskId == null ? null : `${b1.chosen.taskId}@${b1.chosen.taskRevision ?? 1}` },
+      b1Violations,
+      b0VsB1: classifyB0B1(b0, b1),
       ...cls
     });
 
@@ -676,7 +691,22 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   for (const r of rows.filter((r) => r.class !== 'MATCH' && r.class !== 'EXPECTED')) {
     console.log(`${r.class} | ${r.mission} ${r.archetype} step ${r.step} | ref:${r.ref.purpose ?? r.ref.status} -> b0:${r.b0.kind ?? 'none'} | ${r.note ?? ''}`);
   }
+  /* 008F: the B0↔B1 shadow comparison is the experiment surface —
+   * every divergence must land in the named taxonomy; a BUG class or a
+   * B1 validator violation fails the corpus. */
+  const b1ByClass = {};
+  let b1Violations = 0;
+  for (const r of rows) {
+    const cls = r.b0VsB1?.class ?? 'MISSING';
+    b1ByClass[cls] = (b1ByClass[cls] ?? 0) + 1;
+    b1Violations += (r.b1Violations ?? []).length;
+  }
+  console.log('b0-vs-b1:', JSON.stringify(b1ByClass), '| b1 validator violations:', b1Violations);
+  for (const r of rows.filter((r) => r.b0VsB1 && r.b0VsB1.class !== 'MATCH')) {
+    console.log(`B1:${r.b0VsB1.class} | ${r.mission} ${r.archetype} step ${r.step} | b0:${r.b0.kind ?? 'none'}@${r.b0.task ?? 'none'} -> b1:${r.b1?.kind ?? 'none'}@${r.b1?.task ?? 'none'} | ${r.b0VsB1.note ?? ''}`);
+  }
   if (rows.some((r) => r.class === 'BUG') || violations > 0) process.exitCode = 1;
+  if (rows.some((r) => r.b0VsB1?.class === 'BUG' || r.b0VsB1?.class === 'MISSING') || b1Violations > 0) process.exitCode = 1;
 
   /* HIGH-7 + 008D content coverage — conservative semantic
    * reachability audit (static surface model; required rows carry

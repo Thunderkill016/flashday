@@ -17,6 +17,7 @@
  */
 import { KINDS, POLICY_VERSIONS, PROVENANCE, TIER_OF } from './constants.js';
 import { generateCandidates } from './candidate-generator.js';
+import { deriveCorrectionEpisodes, episodeDigest, pickRetestSurface, remainingOf, CORRECTION_EPISODES_VERSION } from '../correction-episodes.js';
 import { LEARNER_MODEL_VERSION } from '../learner-model.js';
 import { decisionInputSnapshot } from './decision-log.js';
 import { sha256, canon } from './canonical.js';
@@ -154,6 +155,10 @@ function makeDecision({ policy, version, chosen, candidates, skipped, model, ctx
 
 const PURPOSE_OK = {
   correction: ['remediation'],
+  /* 008F/B1: a delayed retest may surface on ANY independent eliciting
+   * task — the episode contract excludes only the failed source task
+   * and consumed repair surfaces, never a purpose. */
+  correction_retest: ['delayed_retrieval', 'retrieval', 'production', 'interaction'],
   refresh: ['remediation', 'retrieval'],
   due_retrieval: ['delayed_retrieval'],
   transfer: ['transfer'],
@@ -173,7 +178,7 @@ const PURPOSE_OK = {
  * pedagogical optimum. */
 const REPAIR_BOUND_PER_CAP_EPISODE = 3;
 
-export function hardFilter(cand, { ctx, selection, pendingDemands, roles, assessmentMode = 'fresh' }) {
+export function hardFilter(cand, { ctx, selection, pendingDemands, roles, assessmentMode = 'fresh', episodes = null }) {
   const reasons = [];
   const diagBudget = selection.diagnosticMaxPerEpisode ?? 2;
   const ceiling = selection.failureCeiling ?? 3;
@@ -227,6 +232,23 @@ export function hardFilter(cand, { ctx, selection, pendingDemands, roles, assess
    * new id is not a fresh sample. */
   if (assessmentMode === 'fresh' && cand.kind === KINDS.ASSESSMENT && (cand.consumed || cand.familyConsumed)) {
     reasons.push(cand.familyConsumed ? 'assessment_family_consumed' : 'assessment_consumed');
+  }
+  /* 008F/B1 correction-episode gate: while an episode on this
+   * capability is unresolved (failure repaired but not yet verified by
+   * a delayed independent retest), certification intents may not
+   * serve — transfer/assessment evidence minted on an open episode
+   * would certify an unverified repair (research doc 14, D1/D5).
+   * `episodes` is null under A/B/C — the gate exists only inside B1. */
+  const openEp = episodes?.openByCapability?.[cand.capabilityId];
+  if (openEp && (cand.kind === KINDS.TRANSFER || cand.kind === KINDS.ASSESSMENT)) {
+    reasons.push(`correction_episode_gate:${openEp.state}`);
+  }
+  /* A correction retest is only honest while its episode is actually
+   * due — a retest candidate on a waiting/closed episode is malformed. */
+  if (cand.kind === KINDS.CORRECTION_RETEST) {
+    if (!openEp || openEp.state !== 'RETEST_DUE') {
+      reasons.push(`correction_retest_not_due:${openEp?.state ?? 'none'}`);
+    }
   }
   return reasons;
 }
@@ -390,6 +412,96 @@ export function policyC(state, opts = {}) {
   return makeDecision({ version: POLICY_VERSIONS.C, chosen: winner, candidates, skipped, model, ctx, pendingDemands, state: s2, escape });
 }
 
+/* ============ POLICY B1 — B0 + correction-episode gate (Mission 008F)
+ *
+ * B1 is a SHADOW/experimental policy over the same immutable input:
+ * same generator, same filters, same ordinal ladder — plus the
+ * correction-episode contract. A remediation success is immediate
+ * performance, never resolution; only a delayed independent retest on
+ * an alternate surface verifies the correction.
+ *
+ * Differences vs B0, all explicit and episode-scoped:
+ *   1. unresolved episodes hard-gate transfer + assessment candidates
+ *      (`correction_episode_gate:<state>` filter reason);
+ *   2. a `correction_retest` candidate mints while an episode is
+ *      RETEST_DUE — REPAIR tier so the delayed check is actually served;
+ *   3. a due episode with no retest-eligible surface is reported as
+ *      `correction_content_backlog` — authoring debt, never silently
+ *      falling through to transfer on the failed surface. */
+export function policyB1(state, opts = {}) {
+  const sel = resolveSelection(state, opts);
+  if (sel.conflict) return configConflict(POLICY_VERSIONS.B1, state, sel);
+  const s2 = { ...state, selection: sel.config };
+  const gen = generateCandidates(s2);
+  const { candidates, skipped, model, pendingDemands, integrityViolations } = gen;
+  const ctx = state.decisionContext;
+  if (integrityViolations?.length) {
+    return makeDecision({ version: POLICY_VERSIONS.B1, chosen: null, candidates, skipped, model, ctx, pendingDemands, state: { ...s2, integrityViolations } });
+  }
+
+  /* Episode derivation runs on THE SAME inputs as the learner model —
+   * learner-scoped, registered-task-verified, canonical replay order. */
+  const episodes = deriveCorrectionEpisodes({
+    learnerId: state.learnerId, events: state.events,
+    capabilities: state.capabilities, tasks: state.tasks,
+    policy: state.policy, now: state.now
+  });
+
+  /* Mint one retest candidate per due episode. The surface must not be
+   * a burned failure surface (the opening miss AND any retest that
+   * itself failed) or a consumed repair task (research D5) — and must
+   * cover a still-missing function, else it is honest backlog. */
+  const f = (capId) => candidates.find((c) => c.capabilityId === capId)?.facts
+    ?? { capabilityId: capId, state: 'NOT_SEEN', milestones: {}, consecutiveFailures: 0, reasonCodes: [] };
+  for (const ep of episodes.episodes) {
+    if (ep.state !== 'RETEST_DUE') continue;
+    const surface = pickRetestSurface(ep, missionTaskList(state));
+    if (!surface) {
+      skipped.push({
+        capabilityId: ep.capabilityId, kind: KINDS.CORRECTION_RETEST,
+        reason: `correction_content_backlog: episode ${ep.episodeId} due but no retest surface covers [${remainingOf(ep).join(',')}]`
+      });
+      continue;
+    }
+    candidates.push({
+      kind: KINDS.CORRECTION_RETEST, capabilityId: ep.capabilityId,
+      facts: f(ep.capabilityId),
+      servableTask: surface,
+      episodeId: ep.episodeId,
+      preferences: [{ name: 'correction_retest_due', detail: `${ep.episodeId} due since ${new Date(ep.retestDueAt).toISOString()}`, provenance: PROVENANCE.EVIDENCE }],
+      penalties: [],
+      provenance: [PROVENANCE.EVIDENCE, PROVENANCE.SAFETY],
+      why: `correction episode ${ep.episodeId} repaired at ${new Date(ep.repairedAt).toISOString()} — delayed independent retest now due`,
+      dueAt: ep.retestDueAt
+    });
+  }
+
+  applyFilters(candidates, { ctx, selection: sel.config, pendingDemands, roles: state.roles, assessmentMode: 'fresh', episodes });
+  const eligible = candidates.filter((c) => c.eligible);
+  const { winner, losers, escape } = pickOrdinal(eligible, ctx, sel.config);
+  if (winner) { winner._losers = losers; winner._tieBreak = winner._tieBreak ?? 'total_order'; }
+  const decision = makeDecision({ version: POLICY_VERSIONS.B1, chosen: winner, candidates, skipped, model, ctx, pendingDemands, state: s2, escape });
+  /* The episode view rides the decision record so the audit/shadow path
+   * and the B0↔B1 classifier can attribute every divergence to an
+   * episode state without re-deriving. */
+  decision.correctionEpisodes = {
+    contractVersion: CORRECTION_EPISODES_VERSION,
+    digest: episodeDigest(episodes)
+  };
+  return decision;
+}
+
+function missionTaskList(state) {
+  const ids = new Set(state.mission?.taskIds ?? []);
+  if (!ids.size) return state.tasks;
+  const latest = new Map();
+  for (const t of state.tasks) {
+    const prev = latest.get(t.id);
+    if (!prev || (t.revision ?? 1) > (prev.revision ?? 1)) latest.set(t.id, t);
+  }
+  return [...ids].map((id) => latest.get(id)).filter(Boolean);
+}
+
 /* Starvation-guard limits per variant [SAFETY_PRIOR/EXPERIMENTAL]: how
  * many consecutive same-tier decisions an episode tolerates before one
  * decision escapes to the next eligible tier. Bounded escape valve —
@@ -438,6 +550,7 @@ function pickOrdinal(eligible, ctx, selection) {
     const ladder = [
       'pending_demand',                 // KERNEL — open substrate gap
       'verified_failure_on_demonstrated',// KERNEL — refresh semantics
+      'correction_retest_due',          // EVIDENCE — 008F delayed retest gate
       'open_attributed_gap',            // EVIDENCE — repairable failure
       'support_dependency_fade',        // EVIDENCE — fade scaffolding
       'due',                            // EVIDENCE — spacing
@@ -456,7 +569,7 @@ function pickOrdinal(eligible, ctx, selection) {
   };
   const topPref = (c) => {
     const names = c.preferences.map((p) => p.name);
-    const ladder = ['pending_demand', 'verified_failure_on_demonstrated', 'open_attributed_gap', 'support_dependency_fade', 'due', 'mission_assessment_plan', 'unattributed_failure', 'information_value', 'baseline_probe', 'transfer_pending', 'thread_continuation', 'breadth'];
+    const ladder = ['pending_demand', 'verified_failure_on_demonstrated', 'correction_retest_due', 'open_attributed_gap', 'support_dependency_fade', 'due', 'mission_assessment_plan', 'unattributed_failure', 'information_value', 'baseline_probe', 'transfer_pending', 'thread_continuation', 'breadth'];
     return ladder.find((n) => names.includes(n)) ?? null;
   };
 
@@ -504,4 +617,4 @@ function tierNameOf(kind) {
   return tierLabel(TIER_OF[kind]);
 }
 
-export const POLICIES = { A: policyA, B: policyB, C: policyC };
+export const POLICIES = { A: policyA, B: policyB, C: policyC, B1: policyB1 };

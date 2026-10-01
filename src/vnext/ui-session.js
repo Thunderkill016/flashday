@@ -43,11 +43,10 @@ import {
   createMemoryEventStore, createMemoryRunStore, createMemoryDecisionStore, eventFingerprint
 } from './store-memory.js';
 import {
-  SELECTION_MODES, selectNextTask, decisionAuditRecord
+  SELECTION_MODES, selectNextTask, decisionAuditRecord, POLICY_VERSION_FOR_MODE
 } from './next-for-you/selector.js';
 import { emptyContext, normalizeContext, consumeDecision } from './next-for-you/decision-context.js';
 import { createDecisionLog, stateDigest } from './next-for-you/decision-log.js';
-import { POLICY_VERSIONS } from './next-for-you/constants.js';
 import { deepFreezeAll, sha256 } from './next-for-you/canonical.js';
 
 /* Purposes that may offer pre-commit support in v0. A used control
@@ -224,7 +223,10 @@ export function createMissionSession({
         && last.sameTask === sel.shadow.sameTask
         && last.reference?.task === sel.shadow.reference?.task
         && last.b0?.task === sel.shadow.b0?.task
-        && last.b0?.kind === sel.shadow.b0?.kind;
+        && last.b0?.kind === sel.shadow.b0?.kind
+        && last.b1?.task === sel.shadow.b1?.task
+        && last.b1?.kind === sel.shadow.b1?.kind
+        && last.b0VsB1?.class === sel.shadow.b0VsB1?.class;
       if (!same) {
         shadowLog.push(sel.shadow);
         if (shadowLog.length > 64) shadowLog.shift();
@@ -570,7 +572,7 @@ export function createMissionSession({
         run.selection = {
           version: 'vnext.run-selection.v1',
           mode,
-          selectionPolicyVersion: mode === SELECTION_MODES.REFERENCE ? 'production.nextMissionTask' : POLICY_VERSIONS.B,
+          selectionPolicyVersion: POLICY_VERSION_FOR_MODE[mode],
           decisionEpisodeId: episodeIdFor(),
           config: { ...selectionConfig },
           decisionContext: null,
@@ -585,9 +587,7 @@ export function createMissionSession({
        * change requires an explicit new run. Reachable only by
        * same-revision runs — revision drift was superseded above. */
       const pinnedMode = run.selection?.mode ?? null;
-      const expectedPolicyVersion = mode === SELECTION_MODES.REFERENCE
-        ? 'production.nextMissionTask'
-        : POLICY_VERSIONS.B;
+      const expectedPolicyVersion = POLICY_VERSION_FOR_MODE[mode];
       if (pinnedMode == null) {
         /* Legacy open run — created before selection bookkeeping
          * existed, so its trajectory is historical REFERENCE by
@@ -622,7 +622,7 @@ export function createMissionSession({
       const selBlock = {
         version: 'vnext.run-selection.v1',
         mode,
-        selectionPolicyVersion: mode === SELECTION_MODES.REFERENCE ? 'production.nextMissionTask' : POLICY_VERSIONS.B,
+        selectionPolicyVersion: POLICY_VERSION_FOR_MODE[mode],
         decisionEpisodeId: episodeId,
         config: run.selection?.config ?? { ...selectionConfig },
         decisionContext,

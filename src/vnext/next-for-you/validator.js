@@ -16,6 +16,7 @@ import { resolvePolicy } from '../policy.js';
 import { validateTask, verifyEventTask, canonicalFamilyId } from '../contracts.js';
 import { generateCandidates } from './candidate-generator.js';
 import { hardFilter } from './policies.js';
+import { deriveCorrectionEpisodes } from '../correction-episodes.js';
 import { TIER_OF } from './constants.js';
 
 const PURPOSE_OK = {
@@ -23,6 +24,9 @@ const PURPOSE_OK = {
   due_retrieval: ['delayed_retrieval'],
   refresh: ['remediation', 'retrieval'],
   correction: ['remediation'],
+  /* 008F/B1: the delayed retest may surface on any independent
+   * eliciting purpose — the episode contract does the freshness work. */
+  correction_retest: ['delayed_retrieval', 'retrieval', 'production', 'interaction'],
   support_demand: ['support'],
   transfer: ['transfer'],
   independent_attempt: ['retrieval', 'production', 'interaction'],
@@ -62,6 +66,12 @@ export function validateDecision(decision, { events, tasks, capabilities, roles,
   const lc = deriveSupportLifecycle(learnerId, events, { capabilities, tasks, roles, policy: pol });
   const pending = lc.pending ?? [];
   const byCap = proj.byCapability;
+  /* 008F: a B1-versioned decision is re-checked against independently
+   * derived correction episodes — never the decision's own digest. */
+  const isB1 = /b1/.test(decision.selectionPolicyVersion ?? '');
+  const episodes = isB1
+    ? deriveCorrectionEpisodes({ learnerId, events, capabilities, tasks, policy: pol, now })
+    : null;
 
   const rebuild = (selCfg, ctx) => {
     try {
@@ -74,9 +84,11 @@ export function validateDecision(decision, { events, tasks, capabilities, roles,
        * the point is that the DECISION's emitted candidate view is
        * untrusted, not that the filter spec is re-derived here. The
        * freshness mode follows the decision's own policy version:
-       * a0 mirrors production re-probe; b0/c0 run fresh-only. */
+       * a0 mirrors production re-probe; b0/c0 run fresh-only; b1
+       * additionally re-derives the correction-episode gate — the
+       * validator never trusts a B1 decision's own episode digest. */
       const mode = /a0/.test(decision.selectionPolicyVersion ?? '') ? 'production' : 'fresh';
-      const env = { ctx, selection: selCfg, pendingDemands: pending, roles, assessmentMode: mode };
+      const env = { ctx, selection: selCfg, pendingDemands: pending, roles, assessmentMode: mode, episodes };
       const work = (gen.candidates ?? []).some((c) =>
         hardFilter(c, env).length === 0);
       return { work, integrity: false };
@@ -244,6 +256,28 @@ export function validateDecision(decision, { events, tasks, capabilities, roles,
     if (ch.kind === 'transfer' && byCap.get(ch.capabilityId)?.milestones.transferred) {
       v.push('transfer_already_demonstrated');
     }
+  }
+
+  /* 008F/B1 rules — the validator derives episodes itself; a chosen
+   * retest must sit on a genuinely due episode and an eligible surface,
+   * and a B1 certification intent can never serve on an open episode. */
+  if (ch.kind === 'correction_retest') {
+    const ep = episodes?.openByCapability?.[ch.capabilityId];
+    if (!ep) v.push('correction_retest_without_episode');
+    else {
+      if (ep.state !== 'RETEST_DUE') v.push(`correction_retest_not_due:${ep.state}`);
+      const covered = ep.missingFunctions
+        .filter((f) => ep.verifiedFunctions[f] == null)
+        .filter((f) => (task?.response?.requiredFunctions ?? []).includes(f));
+      if (!covered.length) v.push('correction_retest_no_coverage');
+      const burned = new Set((ep.repairTaskIds ?? []));
+      for (const f of ep.failures ?? []) burned.add(f.taskId);
+      if (task && burned.has(task.id)) v.push('correction_retest_reused_surface');
+    }
+  }
+  if (episodes && (ch.kind === 'transfer' || ch.kind === 'assessment')) {
+    const ep = episodes.openByCapability?.[ch.capabilityId];
+    if (ep) v.push(`certification_under_open_episode:${ep.state}`);
   }
 
   return v;
