@@ -52,6 +52,7 @@ import { answerBearing, conditionsViolated, unionSupport } from './evidence.js';
 import { effectiveAllowedSupport, verifyEventTask } from './contracts.js';
 import { contractAttributesFunctions } from './evaluators.js';
 import { resolvePolicy } from './policy.js';
+import { sha256 } from './next-for-you/canonical.js';
 
 export const CORRECTION_EPISODES_VERSION = 'vnext.correction-episodes.v1';
 
@@ -85,9 +86,22 @@ const isMiss = (e) => e.attempt?.outcome === 'fail' || e.attempt?.outcome === 'p
 
 const keyOf = (t) => `${t.id}@${t.revision ?? 1}`;
 
-function newEpisode(seq, e, task, missing) {
+function newEpisode(learnerId, e, missing) {
   return {
-    episodeId: `cep:${e.capabilityId}:${seq}`,
+    /* Identity is provenance-bound — a canonical digest of the learner,
+     * the capability and the immutable opening-failure record — never an
+     * ordinal. The same failure replays to the same id under any event
+     * order or historical insertion, and two learners can never share
+     * an episode id. */
+    episodeId: `cep:${sha256({
+      learnerId,
+      capabilityId: e.capabilityId,
+      sourceEventId: e.id,
+      sourceTaskId: e.taskId ?? null,
+      sourceTaskRevision: e.taskRevision ?? null,
+      openedAt: e.occurredAt
+    }).slice(0, 20)}`,
+    learnerId,
     capabilityId: e.capabilityId,
     state: 'OPEN',
     openedAt: e.occurredAt,
@@ -102,7 +116,15 @@ function newEpisode(seq, e, task, missing) {
       at: e.occurredAt, missingFunctions: [...missing].sort()
     }],
     repairAttempts: 0,
+    /* remediation-purpose tasks consumed by this episode. */
     repairTaskIds: [],
+    /* EVERY independent covering surface whose success established or
+     * re-established repair — any purpose. A repair surface is exposed
+     * evidence, never a fresh delayed probe. */
+    repairSurfaceTaskIds: [],
+    /* Retest-eligible surfaces already practiced during the lag —
+     * exposed probes cannot double as the delayed retest. */
+    practicedRetestTaskIds: [],
     repairedAt: null,
     retestDueAt: null,
     /* fn → { at, eventId } — post-lag demonstrated functions; VERIFIED
@@ -124,13 +146,18 @@ export const remainingOf = (ep) =>
   ep.missingFunctions.filter((f) => ep.verifiedFunctions[f] == null);
 
 /* Every task surface this episode already burned: each failure surface
- * (opening miss + any failed retest) plus every remediation task
- * consumed. None may come back as the "independent fresh" retest. */
-const usedSurfaces = (ep) => {
+ * (opening miss + any failed retest), every remediation task consumed,
+ * every surface whose success established repair, and every retest-
+ * eligible surface practiced during the lag. None may come back as the
+ * "independent fresh" retest. */
+export const burnedSurfaces = (ep) => {
   const used = new Set((ep.failures ?? []).map((f) => f.taskId));
   for (const id of ep.repairTaskIds ?? []) used.add(id);
+  for (const id of ep.repairSurfaceTaskIds ?? []) used.add(id);
+  for (const id of ep.practicedRetestTaskIds ?? []) used.add(id);
   return used;
 };
+const usedSurfaces = burnedSurfaces;
 
 /* The retest surfaces a B1 retest candidate may serve: same capability,
  * a retest-eligible purpose, no burned surface (failure or repair), and
@@ -187,7 +214,6 @@ export function deriveCorrectionEpisodes({ learnerId, events, capabilities, task
   const supportByAttempt = new Map();
   const taught = new Set();          // caps with ≥1 verified success (any aid)
   const openByCap = new Map();       // capabilityId → live episode
-  const seqByCap = new Map();
   const episodes = [];
 
   for (const e of mine) {
@@ -235,9 +261,7 @@ export function deriveCorrectionEpisodes({ learnerId, events, capabilities, task
       if (!missing.length) continue;
       if (!taught.has(e.capabilityId)) continue; // baseline miss — nothing to correct
       if (!ep) {
-        const seq = (seqByCap.get(e.capabilityId) ?? 0) + 1;
-        seqByCap.set(e.capabilityId, seq);
-        const fresh = newEpisode(seq, e, task, missing);
+        const fresh = newEpisode(learnerId, e, missing);
         episodes.push(fresh);
         openByCap.set(e.capabilityId, fresh);
         continue;
@@ -277,20 +301,25 @@ export function deriveCorrectionEpisodes({ learnerId, events, capabilities, task
     if (!wasWaiting) {
       /* Any demonstrated recovery on a missed function is the repair —
        * not only remediation-purpose tasks (mirrors the support-demand
-       * lifecycle's "demonstrated recovery retires the demand"). */
+       * lifecycle's "demonstrated recovery retires the demand"). The
+       * surface that carried the repair is exposed evidence — burn it
+       * from the delayed retest pool regardless of its purpose. */
       ep.state = 'REPAIRED_WAITING';
       ep.repairedAt = e.occurredAt;
       ep.retestDueAt = e.occurredAt + lag;
+      if (!ep.repairSurfaceTaskIds.includes(task.id)) ep.repairSurfaceTaskIds.push(task.id);
       continue;
     }
 
     /* Waiting/due — a covering independent success is either premature
-     * practice (pre-lag), a burned surface (any failure or repair task
-     * in this episode), or the retest itself. */
+     * practice (pre-lag — the exposure burns the surface for the later
+     * retest), a burned surface (any failure or repair task in this
+     * episode), or the retest itself. */
     const eligibleSurface = RETEST_PURPOSES.includes(task.purpose) && !usedSurfaces(ep).has(task.id);
     if (!eligibleSurface) continue;
     if (e.occurredAt < ep.retestDueAt) {
       ep.earlyRetestAttempts += 1;
+      if (!ep.practicedRetestTaskIds.includes(task.id)) ep.practicedRetestTaskIds.push(task.id);
       continue;
     }
     for (const f of covered) ep.verifiedFunctions[f] = { at: e.occurredAt, eventId: e.id };
@@ -316,6 +345,29 @@ export function deriveCorrectionEpisodes({ learnerId, events, capabilities, task
     if (UNRESOLVED.has(ep.state)) unresolvedIndex[ep.capabilityId] = ep;
   }
 
+  /* Retest surfaces withheld while an episode is unresolved — practice
+   * on the probe contaminates the delayed evidence. During REPAIRING/
+   * RELAPSED the reservation applies only when a repair channel survives
+   * without the probes (a covering remediation or an already-burned
+   * surface can re-establish repair; re-practicing contaminated items
+   * costs nothing). During OPEN nothing is reserved: the first covering
+   * success legitimately IS the repair, whatever surface carries it. */
+  const retestReservedTaskIds = new Set();
+  for (const ep of episodes) {
+    if (ep.state !== 'REPAIRING' && ep.state !== 'REPAIRED_WAITING' && ep.state !== 'RELAPSED') continue;
+    const surfaces = retestSurfaces(ep, tasks);
+    if (!surfaces.length) continue;
+    if (ep.state !== 'REPAIRED_WAITING') {
+      const burned = usedSurfaces(ep);
+      const repairChannelSurvives = (tasks ?? []).some((t) =>
+        t.capabilityId === ep.capabilityId &&
+        (t.response?.requiredFunctions ?? []).some((f) => remainingOf(ep).includes(f)) &&
+        (t.purpose === 'remediation' || burned.has(t.id)));
+      if (!repairChannelSurvives) continue;
+    }
+    for (const t of surfaces) retestReservedTaskIds.add(t.id);
+  }
+
   return {
     contractVersion: CORRECTION_EPISODES_VERSION,
     learnerId,
@@ -325,7 +377,8 @@ export function deriveCorrectionEpisodes({ learnerId, events, capabilities, task
     episodes,
     /* capabilityId → episode for every UNRESOLVED episode — the B1
      * gate reads exactly this. */
-    openByCapability: unresolvedIndex
+    openByCapability: unresolvedIndex,
+    retestReservedTaskIds
   };
 }
 
@@ -334,8 +387,10 @@ export function deriveCorrectionEpisodes({ learnerId, events, capabilities, task
 export function episodeDigest(derived) {
   return (derived?.episodes ?? []).map((ep) => ({
     episodeId: ep.episodeId,
+    learnerId: ep.learnerId,
     capabilityId: ep.capabilityId,
     state: ep.state,
+    burnedTaskIds: [...usedSurfaces(ep)],
     missingFunctions: ep.missingFunctions,
     remainingFunctions: remainingOf(ep),
     sourceTaskId: ep.sourceTaskId,

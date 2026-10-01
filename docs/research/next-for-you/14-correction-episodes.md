@@ -79,8 +79,14 @@ this); the consistent synthesis: correct early, verify late.
   (support demand → correction) is unchanged. What changes is only
   *what certifies*: transfer/assessment wait for delayed retest
   evidence, not for the repair success itself.
-- *Falsification:* none needed for the gate to be safe — worst case it
-  adds a lag the evidence says is neutral-to-helpful.
+- *Falsification:* the added gate is friction, not free safety — it is
+  falsified if delayed-vs-immediate verification produces no measurable
+  calibration difference in the target population/material (e.g. the
+  B0↔B1 divergence classes show relapse near zero and downstream
+  assessment outcomes identical whether or not episodes gated them),
+  or if retest backlog routinely strands learners on already-verified
+  abilities. In that world the honest move is dropping the gate, not
+  keeping it as ceremony.
 
 **D4. Errors recur after correction — a relapse path is not optional.**
 
@@ -121,13 +127,24 @@ honest grade).
   surface — the opening failure's task AND every task a failure was
   later recorded on inside the episode (a retest that itself relapsed
   is a failed item; re-serving it would be reselling the miss) — AND
-  every remediation task consumed during the episode, and requires
-  `requiredFunctions` coverage of the still-missing functions.
-  Where no such surface exists, B1 emits an explicit
-  `correction_content_backlog` — authoring debt, never silent
+  every remediation task consumed during the episode, AND every surface
+  whose independent success established/re-established repair
+  (`repairSurfaceTaskIds` — a demonstrated recovery is exposed evidence,
+  whatever its purpose), AND every retest-eligible surface practiced
+  during the lag (`practicedRetestTaskIds` — an exposed probe cannot
+  double as the delayed check). To keep the lag honest, B1 additionally
+  WITHHOLDS those still-fresh probe surfaces while an episode is
+  repairing/waiting (`retestReservedTaskIds`) whenever a repair channel
+  survives without them — a covering remediation task or an
+  already-burned surface can carry repair at no freshness cost. The
+  retest still requires `requiredFunctions` coverage of the
+  still-missing functions. Where no such surface exists, B1 emits an
+  explicit `correction_content_backlog` — authoring debt, never silent
   fallthrough.
-- *Falsification:* none — this is a validity requirement, not an
-  efficacy claim.
+- *Falsification:* the burn set is falsified if burn-listened surfaces
+  empirically verify as well as never-exposed ones in this population —
+  i.e. exposure during repair/wait turns out not to inflate delayed
+  performance; until then freshness is the safe default.
 
 **D6. Only authoritative failures may open an episode.**
 
@@ -172,6 +189,14 @@ RETEST_DUE → RELAPSED   new authoritative failure while unresolved
                         → repair path returns; lag restarts at the new
                         repairedAt; the just-failed surface joins the
                         burned set and may never re-serve as retest
+
+burned set = every failure surface ∪ consumed remediation tasks
+             ∪ every repair-establishing success surface
+             ∪ every retest-eligible surface practiced pre-lag
+reserved   = retest-eligible surfaces withheld while REPAIRING /
+             REPAIRED_WAITING / RELAPSED (only where a repair channel
+             survives without them — covering remediation or an
+             already-burned surface)
 ```
 
 B1 gates `transfer`/`assessment` on unresolved-episode capabilities and

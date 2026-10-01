@@ -44,6 +44,15 @@ export function isSelectionMode(mode) {
   return Object.values(SELECTION_MODES).includes(mode);
 }
 
+/* The learner-facing route allowlist — exactly the pre-008F set. B1 and
+ * SHADOW_B1 stay reachable through createMissionSession/selectNextTask
+ * (test, tooling and experiment entry points) but a product URL can
+ * never activate them: ?mode=b1 fails closed to REFERENCE like any
+ * unrecognized value. */
+export const PRODUCT_ROUTE_MODES = Object.freeze([
+  SELECTION_MODES.REFERENCE, SELECTION_MODES.B0, SELECTION_MODES.SHADOW_B0
+]);
+
 /* The selection-policy version a run pins for each mode. REFERENCE is
  * production bookkeeping; shadow modes pin the ENGINE they evaluate
  * (shadow_b0 → B0, shadow_b1 → B1) — the pin records which semantics the
@@ -113,6 +122,13 @@ export function b0ToSelection(decision, tasks) {
     (c) => c.kind === KINDS.ASSESSMENT && typeof c.filterReason === 'string'
       && /assessment_(family_)?consumed/.test(c.filterReason)
   ) && !(decision?.candidates ?? []).some((c) => c.eligible === true && c.kind !== KINDS.ASSESSMENT);
+  /* 008F: a B1 correction backlog lives in explanation.suppressed (the
+   * retest was never a generated candidate) — surface it as its own
+   * reason code instead of collapsing into generic blocked/idle. */
+  const correctionBacklog = (decision?.explanation?.suppressed ?? []).some(
+    (s) => typeof s === 'string' && s.includes('correction_content_backlog'));
+  const backlog = correctionBacklog ? 'correction_content_backlog'
+    : assessmentBacklog ? 'assessment_content_backlog' : null;
   return {
     status: kind,
     taskId: null,
@@ -121,10 +137,10 @@ export function b0ToSelection(decision, tasks) {
     purpose: null,
     /* §16: one honest reason code the UI can map to safe copy — a
      * content backlog, not a learner failure and not an idle claim. */
-    reason: assessmentBacklog
-      ? `assessment_content_backlog: ${decision?.explanation?.whyExists ?? 'transferred capability has no fresh assessment family'}${reasons.length ? ` — ${reasons.join('; ')}` : ''}`
+    reason: backlog
+      ? `${backlog}: ${decision?.explanation?.whyExists ?? 'capability has no fresh evidence surface'}${reasons.length ? ` — ${reasons.join('; ')}` : ''}`
       : (reasons.length ? reasons.join('; ') : (decision?.explanation?.whyExists ?? 'no valid candidate')),
-    reasonCode: assessmentBacklog ? 'assessment_content_backlog' : null,
+    reasonCode: backlog,
     decision
   };
 }
@@ -198,6 +214,10 @@ export function shadowCompare(reference, b0Decision) {
  *                              post-repair lag window
  *   CORRECTION_CONTENT_BACKLOG the episode is due but no retest
  *                              surface covers the remaining functions
+ *   CORRECTION_RETEST_SURFACE_RESERVED
+ *                              B0's pick is a still-fresh retest probe —
+ *                              B1 withheld it during repair/lag and
+ *                              rerouted to a non-probe surface
  *   RELAPSE_REPAIR             a post-repair failure reopened repair
  *   BUG                        divergence with no episode cause — the
  *                              policies should never disagree otherwise */
@@ -220,6 +240,17 @@ export function classifyB0B1(b0, b1) {
 
   if (b1Kind === KINDS.CORRECTION_RETEST) {
     return { class: 'CORRECTION_RETEST_DUE', note: `B1 serves delayed retest ${b1Task}; B0 chose ${b0Kind}@${b0Task ?? 'terminal'}` };
+  }
+
+  /* B0's own pick may be a retest-eligible surface B1 reserved while an
+   * episode repairs or waits — the most direct explanation when the
+   * served difference is a reroute off the probe. */
+  const reservedB0Pick = (b1?.candidates ?? []).find((c) =>
+    c.eligible === false && typeof c.filterReason === 'string' &&
+    c.filterReason.includes('correction_retest_surface_reserved') &&
+    c.taskId === b0Task);
+  if (reservedB0Pick) {
+    return { class: 'CORRECTION_RETEST_SURFACE_RESERVED', note: `B0's pick ${b0Task} is a reserved delayed-retest probe — B1 withheld it and served ${b1Kind}@${b1Task ?? 'terminal'}` };
   }
 
   /* Did an episode gate what B0 wanted? Look at B1's filtered candidates

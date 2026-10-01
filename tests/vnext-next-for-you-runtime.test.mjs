@@ -2330,6 +2330,203 @@ const ANSWERS_008E = {
     say('VAL: validator independently re-derives episodes; forged/stale retest claims fail closed');
   }
 
+  /* ── CEP-ID: episode identity is provenance-bound — a canonical
+   *     digest of learner + capability + opening-failure record, never
+   *     an ordinal. Same replay → same id; inserts, permutations and
+   *     relapses can never renumber or share it. ── */
+  {
+    const cap = capabilityById(PRICE);
+    const ev = (tid, at, outcome, missing) =>
+      attemptEvent(BUY_T(tid), cap, { at, outcome, missing });
+
+    /* Two learners on the same capability can never share an id. */
+    const other = priceArc().map((e) => ({ ...e, learnerId: 'OTHER', id: `${e.id}.o` }));
+    const epSim = episodesOf(priceArc(), arcRepairedAt).episodes[0];
+    const epOther = deriveCorrectionEpisodes({
+      learnerId: 'OTHER', events: other, capabilities: CAPABILITIES,
+      tasks: TASK_REGISTRY, policy: LEARNING_POLICY_V1, now: arcRepairedAt
+    }).episodes[0];
+    ok(epSim.episodeId !== epOther.episodeId && epSim.learnerId === 'SIM' && epOther.learnerId === 'OTHER',
+      `CEP-ID: cross-learner episode collision — ${epSim.episodeId}`);
+
+    /* Appending an EARLIER closed episode on the same capability must
+     * not renumber an existing later episode (ordinal ids would). */
+    const epA = [
+      ev('task.price.diagnostic.hear', T0, 'success'),
+      ev('task.price.delayed.hear', T0 + DAY, 'fail', ['understand_spoken_price']),
+      ev('task.price.remediation.hear', T0 + DAY + HOUR, 'success'),
+      ev('task.price.retrieval.hear', T0 + DAY + HOUR + LAG, 'success')
+    ];
+    const epBEvents = [ev('task.price.delayed.hear', T0 + 4 * DAY, 'fail', ['understand_spoken_price'])];
+    const base = [...epA, ...epBEvents];
+    const idsBase = episodesOf(base, T0 + 5 * DAY).episodes.map((x) => x.episodeId);
+    /* C opens only AFTER A verified (A's retest lands at +2D+1h) and
+     * closes before B opens — a genuinely EARLIER closed episode in
+     * replay order that must not disturb B's identity. */
+    const epC = [
+      ev('task.price.delayed.hear', T0 + 2 * DAY + 2 * HOUR, 'fail', ['understand_spoken_price']),
+      ev('task.price.remediation.hear', T0 + 2 * DAY + 3 * HOUR, 'success'),
+      ev('task.price.retrieval.hear', T0 + 2 * DAY + 3 * HOUR + LAG, 'success')
+    ];
+    const idsAfter = episodesOf([...base, ...epC], T0 + 5 * DAY).episodes.map((x) => x.episodeId);
+    ok(idsBase.length === 2 && idsAfter.length === 3 && idsBase.every((id) => idsAfter.includes(id)),
+      `CEP-ID: historical insert renumbered episodes — ${JSON.stringify(idsBase)} → ${JSON.stringify(idsAfter)}`);
+
+    /* Event-order permutation is byte-irrelevant — same failure records
+     * produce the same episode ids regardless of delivery order. */
+    const shuffled = [...base].reverse();
+    const idsPerm = episodesOf(shuffled, T0 + 5 * DAY).episodes.map((x) => x.episodeId).sort();
+    assert.deepEqual(idsPerm, [...idsBase].sort(), 'CEP-ID: permutation changed episode ids');
+
+    /* A relapse keeps the same episode — identity is the opening
+     * failure, not the latest state. */
+    const rel = [
+      ev('task.price.diagnostic.hear', T0, 'success'),
+      ev('task.price.delayed.hear', T0 + DAY, 'fail', ['understand_spoken_price']),
+      ev('task.price.remediation.hear', T0 + DAY + HOUR, 'success'),
+      ev('task.price.retrieval.hear', T0 + DAY + HOUR + LAG, 'fail', ['understand_spoken_price'])
+    ];
+    const epRel = episodesOf(rel, T0 + DAY + HOUR + LAG + HOUR).episodes;
+    ok(epRel.length === 1 && epRel[0].relapseCount === 1
+      && epRel[0].episodeId === episodesOf(rel.slice(0, 3), T0 + DAY + 2 * HOUR).episodes[0]?.episodeId,
+      'CEP-ID: relapse did not retain the opening episode id');
+    say('CEP-ID: provenance-bound ids — cross-learner unique, insert/permutation/relapse stable');
+  }
+
+  /* ── CEP-BURN: every exposed surface is unfit to be the delayed
+   *     retest — repair-establishing successes (ANY purpose) and
+   *     pre-lag practiced probes burn exactly like failures do. ── */
+  {
+    const cap = capabilityById(PRICE);
+    const ev = (tid, at, outcome, missing) =>
+      attemptEvent(BUY_T(tid), cap, { at, outcome, missing });
+    const buyTasks = BUY.tasks.filter((t) => BUY.mission.taskIds.includes(t.id));
+    const dueNow = arcRepairedAt + LAG + HOUR;
+
+    /* Repair riding a retest-eligible surface (retrieval.hear, NOT a
+     * remediation task) — that surface is now exposed evidence and can
+     * never double as the delayed independent probe. */
+    const epA = episodesOf([
+      ev('task.price.diagnostic.hear', T0, 'success'),
+      ev('task.price.delayed.hear', T0 + DAY, 'fail', ['understand_spoken_price']),
+      ev('task.price.retrieval.hear', arcRepairedAt, 'success')
+    ], dueNow).episodes[0];
+    ok(epA?.state === 'RETEST_DUE' && epA.repairSurfaceTaskIds.includes('task.price.retrieval.hear')
+      && pickRetestSurface(epA, buyTasks) == null,
+      `CEP-BURN: repair surface still retest-eligible — ${pickRetestSurface(epA, buyTasks)?.id}`);
+
+    /* Pre-lag practice on the probe burns it too — an exposed item is
+     * not an independent delayed check. */
+    const epB2 = episodesOf([
+      ev('task.price.diagnostic.hear', T0, 'success'),
+      ev('task.price.delayed.hear', T0 + DAY, 'fail', ['understand_spoken_price']),
+      ev('task.price.remediation.hear', arcRepairedAt, 'success'),
+      ev('task.price.retrieval.hear', arcRepairedAt + HOUR, 'success')
+    ], dueNow).episodes[0];
+    ok(epB2?.earlyRetestAttempts === 1 && epB2.practicedRetestTaskIds.includes('task.price.retrieval.hear')
+      && pickRetestSurface(epB2, buyTasks) == null,
+      'CEP-BURN: pre-lag practiced surface stayed retest-eligible');
+
+    /* While the episode waits out the lag, the surviving probe surfaces
+     * are reserved — nothing may serve them inside the window. */
+    const dWait = episodesOf([
+      ev('task.price.diagnostic.hear', T0, 'success'),
+      ev('task.price.delayed.hear', T0 + DAY, 'fail', ['understand_spoken_price']),
+      ev('task.price.remediation.hear', arcRepairedAt, 'success')
+    ], arcRepairedAt + HOUR);
+    const waitEp = dWait.episodes[0];
+    ok(waitEp?.state === 'REPAIRED_WAITING'
+      && dWait.retestReservedTaskIds.has('task.price.retrieval.hear')
+      && !dWait.retestReservedTaskIds.has('task.price.delayed.hear'),
+      `CEP-BURN: probe surfaces not reserved during the lag — ${JSON.stringify([...dWait.retestReservedTaskIds])}`);
+
+    /* And with every honest surface consumed, B1 surfaces backlog —
+     * never a recycled probe. */
+    const arcBurned = [
+      ev('task.price.diagnostic.hear', T0, 'success'),
+      ev('task.price.delayed.hear', T0 + DAY, 'fail', ['understand_spoken_price']),
+      ev('task.price.remediation.hear', arcRepairedAt, 'success'),
+      ev('task.price.retrieval.hear', arcRepairedAt + HOUR, 'success')
+    ];
+    const stBurned = bState(BUY, arcBurned, dueNow);
+    const b1Burned = policyB1(stBurned);
+    ok((b1Burned.explanation?.suppressed ?? []).some((s) => s.includes('correction_content_backlog')),
+      'CEP-BURN: exhausted surfaces produced a recycled retest, not backlog');
+    say('CEP-BURN: repair surfaces + pre-lag probes burned; exhausted set → explicit backlog');
+  }
+
+  /* ── VAL-TERM: the validator independently reconstructs B1 due-retest
+   *     work — forged terminal decisions on a due episode with an
+   *     honest surface are caught even when the generic rebuild finds
+   *     nothing. Isolated single-task mission so generic work is ∅. ── */
+  {
+    const cap = capabilityById(PRICE);
+    const ev = (tid, at, outcome, missing) =>
+      attemptEvent(BUY_T(tid), cap, { at, outcome, missing });
+    const dueNow = arcRepairedAt + LAG + HOUR;
+    const isoMission = {
+      ...BUY.mission,
+      taskIds: ['task.price.retrieval.hear'],
+      targetCapabilities: [PRICE],
+      carrierCapabilities: [], prerequisiteCapabilities: [], supportCapabilities: []
+    };
+    const isoState = (events) => engineState({
+      learnerId: 'SIM', mission: isoMission, tasks: TASK_REGISTRY,
+      capabilities: CAPABILITIES, events, riskPriors: RISK_PRIORS,
+      policy: LEARNING_POLICY_V1, selection: {},
+      decisionContext: emptyContext('ep.vt', 'ses.vt'), now: dueNow
+    });
+
+    /* Due + honest surface: the retest is the ONLY work — forged
+     * terminals can only be caught by the episode-derived path. */
+    const stDue = isoState(priceArc());
+    const b1Due = policyB1(stDue);
+    ok(b1Due.chosen?.kind === KINDS.CORRECTION_RETEST, `VAL-TERM: setup wrong — ${b1Due.chosen?.kind}`);
+    const vIdle = validateB0({ ...structuredClone(b1Due), chosen: { kind: 'idle' } }, stDue);
+    ok(vIdle.includes('fabricated_idle'), `VAL-TERM: forged idle on due retest passed — ${vIdle.join(';')}`);
+    const vBlocked = validateB0({ ...structuredClone(b1Due), chosen: { kind: 'blocked' } }, stDue);
+    ok(vBlocked.includes('blocked_while_valid_work'), `VAL-TERM: forged blocked on due retest passed — ${vBlocked.join(';')}`);
+
+    /* Due + NO honest surface: blocked/backlog stays valid. */
+    const stBurned = isoState([
+      ...priceArc(),
+      ev('task.price.retrieval.hear', arcRepairedAt + HOUR, 'success')
+    ]);
+    const b1Burned = policyB1(stBurned);
+    const vReal = validateB0(b1Burned, stBurned);
+    ok(!vReal.some((x) => x === 'blocked_while_valid_work' || x === 'fabricated_idle'),
+      `VAL-TERM: honest backlog decision rejected — ${vReal.join(';')}`);
+    const vForgeBlocked = validateB0({ ...structuredClone(b1Burned), chosen: { kind: 'blocked' } }, stBurned);
+    ok(!vForgeBlocked.includes('blocked_while_valid_work'),
+      `VAL-TERM: blocked still rejected though no surface exists — ${vForgeBlocked.join(';')}`);
+    say('VAL-TERM: forged idle/blocked on due retest rejected; no-surface backlog stays valid');
+  }
+
+  /* ── SEL-ADAPTER: correction_content_backlog survives the selection
+   *     boundary as its own reasonCode, never generic blocked. ── */
+  {
+    const cap = capabilityById(PRICE);
+    const ev = (tid, at, outcome, missing) =>
+      attemptEvent(BUY_T(tid), cap, { at, outcome, missing });
+    const dueNow = arcRepairedAt + LAG + HOUR;
+    const sel = selectNextTask({
+      mode: 'b1', learnerId: 'SIM',
+      mission: { ...BUY.mission, taskIds: ['task.price.retrieval.hear'], targetCapabilities: [PRICE], carrierCapabilities: [], prerequisiteCapabilities: [], supportCapabilities: [] },
+      tasks: TASK_REGISTRY, capabilities: CAPABILITIES,
+      events: [
+        ...priceArc(),
+        ev('task.price.retrieval.hear', arcRepairedAt + HOUR, 'success')
+      ],
+      riskPriors: RISK_PRIORS, policy: LEARNING_POLICY_V1, selection: {},
+      decisionContext: emptyContext('ep.sa', 'ses.sa'), now: dueNow
+    });
+    ok(sel.reasonCode === 'correction_content_backlog' && sel.status === 'blocked',
+      `SEL-ADAPTER: backlog collapsed — status=${sel.status} reasonCode=${sel.reasonCode}`);
+    ok(typeof sel.reason === 'string' && sel.reason.includes('correction_content_backlog'),
+      `SEL-ADAPTER: reason text lost — ${sel.reason}`);
+    say('SEL-ADAPTER: b1 backlog surfaces as correction_content_backlog reasonCode');
+  }
+
   /* ── SES-B1: full trajectory under mode 'b1' — the policy actually
    *     serving. Miss → repair → WAIT (no certification) → lag → retest
    *     → verify → certification resumes. ── */

@@ -16,7 +16,7 @@ import { resolvePolicy } from '../policy.js';
 import { validateTask, verifyEventTask, canonicalFamilyId } from '../contracts.js';
 import { generateCandidates } from './candidate-generator.js';
 import { hardFilter } from './policies.js';
-import { deriveCorrectionEpisodes } from '../correction-episodes.js';
+import { deriveCorrectionEpisodes, pickRetestSurface, burnedSurfaces } from '../correction-episodes.js';
 import { TIER_OF } from './constants.js';
 
 const PURPOSE_OK = {
@@ -99,12 +99,26 @@ export function validateDecision(decision, { events, tasks, capabilities, roles,
   if (ch.kind === 'idle' || ch.kind === 'blocked') {
     if (ch.capabilityId != null || ch.taskId != null) v.push(`${ch.kind}_with_payload`);
     const { work, integrity } = rebuild(selection, decisionContext);
+    /* 008F: B1 due-retest work is synthesized inside policyB1 and never
+     * appears in the generic candidate rebuild — reconstruct it from
+     * the independently derived episodes, never from the decision's own
+     * correctionEpisodes digest. A due episode with an honest surface
+     * means a B1 idle/blocked decision is fabricated. */
+    let dueRetestWork = false;
+    if (isB1) {
+      const pool = missionTaskIds
+        ? [...latestById.values()].filter((t) => missionTaskIds.has(t.id))
+        : [...latestById.values()];
+      dueRetestWork = (episodes?.episodes ?? []).some((ep) =>
+        ep.state === 'RETEST_DUE' && pickRetestSurface(ep, pool) != null);
+    }
+    const anyWork = work || dueRetestWork;
     if (ch.kind === 'idle') {
       if (integrity) v.push('idle_during_integrity_violation');
-      if (work) v.push('fabricated_idle');
+      if (anyWork) v.push('fabricated_idle');
     } else {
-      if (work && !integrity) v.push('blocked_while_valid_work');
-      if (!work && !integrity && !(decision.integrityViolations ?? []).length && !(decision.candidateCount > 0)) {
+      if (anyWork && !integrity) v.push('blocked_while_valid_work');
+      if (!anyWork && !integrity && !(decision.integrityViolations ?? []).length && !(decision.candidateCount > 0)) {
         v.push('blocked_without_work');
       }
     }
@@ -270,9 +284,10 @@ export function validateDecision(decision, { events, tasks, capabilities, roles,
         .filter((f) => ep.verifiedFunctions[f] == null)
         .filter((f) => (task?.response?.requiredFunctions ?? []).includes(f));
       if (!covered.length) v.push('correction_retest_no_coverage');
-      const burned = new Set((ep.repairTaskIds ?? []));
-      for (const f of ep.failures ?? []) burned.add(f.taskId);
-      if (task && burned.has(task.id)) v.push('correction_retest_reused_surface');
+      /* Same burned set the derivation enforces: every failure surface,
+       * consumed remediation, repair-establishing success and pre-lag
+       * practiced probe. */
+      if (task && burnedSurfaces(ep).has(task.id)) v.push('correction_retest_reused_surface');
     }
   }
   if (episodes && (ch.kind === 'transfer' || ch.kind === 'assessment')) {

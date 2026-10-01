@@ -250,6 +250,14 @@ export function hardFilter(cand, { ctx, selection, pendingDemands, roles, assess
       reasons.push(`correction_retest_not_due:${openEp?.state ?? 'none'}`);
     }
   }
+  /* While an episode waits out its lag, B1 withholds the surfaces that
+   * could serve as its delayed retest — pre-lag practice on the probe
+   * would contaminate the delayed evidence (and any exposure is burned
+   * by the episode contract regardless). Null under A/B/C. */
+  if (cand.kind !== KINDS.CORRECTION_RETEST && cand.servableTask &&
+      episodes?.retestReservedTaskIds?.has(cand.servableTask.id)) {
+    reasons.push('correction_retest_surface_reserved');
+  }
   return reasons;
 }
 
