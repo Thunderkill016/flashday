@@ -6,7 +6,7 @@
 - finished: 2026-10-01T06:36:53.253Z
 - branch: devin/m008g-repair-reachability
 - starting sha: `c9e80562a887773c2147b14a3d97c0b917dbd494`
-- ending sha: `3870b9f8272c86aba82dee8f8104d98c991562e9`
+- ending sha: `fc50e9d` (R1 patch head; verify green directly + CI pending→green)
 
 ## Objective
 Mission 008G (ChatGPT control room): replace the full-task-registry repair-channel assumption with an explicit mission@revision + capability + missing-function reachability proof — episodes stay evidence-only, reservation moves to a routing-proof layer, B0 frozen byte-identical, B1 stays shadow/experiment.
@@ -134,7 +134,9 @@ candidate set: **no second learner-model replay, no second
 lazy/memoized.
 
 ### Gates
-- `npm run verify:full` PASS on `5b4f0ae` and `3870b9f` (typecheck 140
+- `npm run verify:full` PASS on `5b4f0ae`, `3870b9f` (pre-R1) and
+  `fc50e9d` (post-R1, direct run; factory verify is refused on a DONE
+  mission). Typecheck 140
   files; node suites incl. now-wired runtime suite; vite build; browser
   26+10; Firestore emulator ×2 PASS).
 - `node tests/vnext-next-for-you-runtime.test.mjs` — 335 checks PASS.
