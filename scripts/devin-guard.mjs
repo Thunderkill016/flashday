@@ -172,12 +172,12 @@ function gitInvocation(args) {
             // Value comes from the environment — statically invisible.
             opaqueKeys.add(key);
             if (key.startsWith('alias.')) opaqueAlias = true;
-            if (/^remote\.[^.]+\.push$/.test(key)) opaqueRemotePush = true;
+            if (isRemoteConfig(key, 'push')) opaqueRemotePush = true;
           } else {
             configs[key] = stripQuotes(val);
             // remote.<name>.push is multi-valued: repeated -c entries
             // ALL apply, so every value must be checked.
-            if (/^remote\.[^.]+\.push$/.test(key)) {
+            if (isRemoteConfig(key, 'push')) {
               remotePushSpecs.push(stripQuotes(val));
             }
             const am = /^alias\.([\w-]+)$/.exec(key);
@@ -198,7 +198,7 @@ function gitInvocation(args) {
         const ik = ie[1].toLowerCase();
         opaqueKeys.add(ik);
         if (ik.startsWith('alias.')) opaqueAlias = true;
-        if (/^remote\.[^.]+\.push$/.test(ik)) opaqueRemotePush = true;
+        if (isRemoteConfig(ik, 'push')) opaqueRemotePush = true;
       }
       i++; continue;
     }
@@ -249,6 +249,16 @@ function wildcardReachesProtected(dest) {
 const GIT_BOOL_FALSE = new Set(['false', 'no', 'off', '0']);
 function gitBoolFalse(v) {
   return GIT_BOOL_FALSE.has((v || '').toLowerCase());
+}
+
+// remote.<name>.<field> — <name> may itself contain dots (a remote
+// called 'origin.prod' is legal), so match prefix + suffix with a
+// non-empty middle, never a [^.]+ section.
+function isRemoteConfig(key, field) {
+  const prefix = 'remote.';
+  const suffix = `.${field}`;
+  return key.startsWith(prefix) && key.endsWith(suffix) &&
+    key.length > prefix.length + suffix.length;
 }
 
 // Single-refspec danger check — shared by command-line refspecs and
@@ -313,11 +323,11 @@ function checkGit(args, depth = 0) {
       if (key === 'push.default' && vals[0] === 'matching') {
         return "git config push.default=matching makes 'git push' update every matching branch — including main";
       }
-      if (/^remote\.[^.]+\.push$/.test(key)) {
+      if (isRemoteConfig(key, 'push')) {
         const r = refspecReason(vals.join(' '));
         if (r) return `git config ${key} persists a dangerous refspec — ${r}`;
       }
-      if (/^remote\.[^.]+\.mirror$/.test(key) && !gitBoolFalse(vals[0])) {
+      if (isRemoteConfig(key, 'mirror') && !gitBoolFalse(vals[0])) {
         return 'git config remote.*.mirror=true makes pushes behave as --mirror — never allowed';
       }
     }
@@ -376,11 +386,11 @@ function checkGit(args, depth = 0) {
     // regardless of refspecs; the remote name can't be resolved from
     // literal text so any remote.*.mirror counts.
     for (const key of Object.keys(configs)) {
-      if (/^remote\.[^.]+\.mirror$/.test(key) && !gitBoolFalse(configs[key])) {
+      if (isRemoteConfig(key, 'mirror') && !gitBoolFalse(configs[key])) {
         return 'git -c remote.*.mirror=true makes push behave as --mirror — never allowed';
       }
     }
-    if ([...opaqueKeys].some((k) => /^remote\.[^.]+\.mirror$/.test(k))) {
+    if ([...opaqueKeys].some((k) => isRemoteConfig(k, 'mirror'))) {
       return 'git --config-env remote.*.mirror=… hides the value — cannot verify it, blocked';
     }
     // Value-taking push options are stripped before positional

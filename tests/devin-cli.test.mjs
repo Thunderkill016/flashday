@@ -231,6 +231,19 @@ const DANGEROUS = [
   "git config set alias.p 'push origin main'",
   'git config set remote.origin.push +HEAD:main',
   'git config set remote.origin.mirror true',
+  // Remote names may themselves contain dots ('origin.prod' is a legal
+  // remote name) — the remote.* check must match prefix+suffix with a
+  // non-empty middle, never a [^.]+ section.
+  'git -c remote.origin.prod.push=+HEAD:main push origin.prod',
+  'git -c remote.origin.prod.push=HEAD:main push origin.prod',
+  'git -c remote.origin.prod.mirror=true push origin.prod',
+  'git -c remote.origin.prod.mirror push origin.prod',
+  'git --config-env=remote.origin.prod.push=RPUSH push origin.prod',
+  'git --config-env=remote.origin.prod.mirror=RM push origin.prod',
+  'git config remote.origin.prod.push +HEAD:main',
+  'git config remote.origin.prod.mirror true',
+  'git config set remote.origin.prod.push +HEAD:main',
+  'git config set remote.origin.prod.mirror true',
   // GNU xargs reads its argument list from a file with -a/--arg-file;
   // the option value is input, not the command — the real command
   // follows it.
@@ -338,6 +351,14 @@ const SAFE = [
   'git config set push.default simple',
   'git config set remote.origin.mirror false',
   'git config set remote.origin.push feature',
+  // Dotted remote names, safe values.
+  'git -c remote.origin.prod.push=HEAD:feature push origin.prod',
+  'git -c remote.origin.prod.push=feature push origin.prod another',
+  'git -c remote.origin.prod.mirror=false push origin.prod feature',
+  'git config remote.origin.prod.push feature',
+  'git config remote.origin.prod.mirror false',
+  'git config set remote.origin.prod.push feature',
+  'git config set remote.origin.prod.mirror false',
   'git config get alias.p',
   'git config unset alias.p',
   // Git global options before the subcommand.
