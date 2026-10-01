@@ -20,10 +20,18 @@
  */
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { basename, resolve, sep } from 'node:path';
 
-const PROJECT_DIR = process.env.DEVIN_PROJECT_DIR || process.cwd();
-const PROTECTED_BRANCHES = /\b(?:main|master)\b/;
+const PROJECT_DIR = (process.env.DEVIN_PROJECT_DIR || process.cwd()).replace(/[\\/]+$/, '');
+const PROTECTED_DEST = /^(?:main|master|refs\/heads\/(?:main|master))$/;
 const MAX_DEPTH = 3;
+
+// Canonical executable name: strips path prefixes and Windows suffixes
+// so /usr/bin/git, C:\Git\bin\git.exe and git resolve to the same head.
+function cmdName(head) {
+  const base = basename(head.replace(/\\/g, '/'));
+  return base.replace(/\.(?:exe|bat|cmd|com)$/i, '');
+}
 
 // Words that launch another command — skipped when locating the real
 // command, and allowed as the prefix of a rescan.
@@ -61,8 +69,8 @@ function unwrap(argv) {
   let i = 0;
   while (i < argv.length) {
     const head = stripQuotes(argv[i]);
-    if (!WRAPPERS.test(head)) break;
-    const w = head;
+    if (!WRAPPERS.test(cmdName(head))) break;
+    const w = cmdName(head);
     i++;
     while (i < argv.length) {
       const x = stripQuotes(argv[i]);
@@ -81,7 +89,7 @@ function unwrap(argv) {
 function inertPrefix(argv, i) {
   for (let k = 0; k < i; k++) {
     const t = stripQuotes(argv[k]);
-    if (WRAPPERS.test(t) || SHELLISH.test(t)) continue;
+    if (WRAPPERS.test(cmdName(t)) || SHELLISH.test(cmdName(t))) continue;
     if (/^-/.test(t) || /^[A-Za-z_]\w*=/.test(t)) continue;
     if (/^\\?;$/.test(t) || /^\d/.test(t)) continue;
     return false;
@@ -123,24 +131,67 @@ function currentBranch() {
   }
 }
 
+// Git global options that consume the following token
+// (git -C path, -c k=v, --git-dir d, --work-tree d, --namespace n, ...).
+const GIT_VALUE_OPTS = new Set([
+  '-C', '-c', '--git-dir', '--work-tree', '--namespace',
+  '--exec-path', '--html-path', '--man-path', '--info-path',
+  '--config-env', '--super-prefix', '--attr-source', '--list-cmds'
+]);
+
+// Split `git [global opts] <subcommand> <args>`; unknown dash tokens are
+// skipped conservatively so an unrecognized option never hides the verb.
+function gitInvocation(args) {
+  let i = 0;
+  while (i < args.length) {
+    const t = stripQuotes(args[i]);
+    if (GIT_VALUE_OPTS.has(t)) { i += 2; continue; }
+    if (/^--[^=]+=/.test(t)) { i++; continue; }
+    if (/^-/.test(t)) { i++; continue; }
+    break;
+  }
+  return {
+    sub: i < args.length ? stripQuotes(args[i]) : '',
+    rest: args.slice(i + 1)
+  };
+}
+
 function checkGit(args) {
-  const sub = args[0] && stripQuotes(args[0]);
-  const rest = args.slice(1);
+  const { sub, rest } = gitInvocation(args);
 
   if (sub === 'push') {
-    const { shorts, longs, positional } = flagInfo(rest);
+    // -o/--push-option consume a value token; strip them before
+    // classifying positionals as remote/refspec.
+    const filtered = [];
+    for (let i = 0; i < rest.length; i++) {
+      const t = stripQuotes(rest[i]);
+      if ((t === '-o' || t === '--push-option') && i + 1 < rest.length) { i++; continue; }
+      filtered.push(rest[i]);
+    }
+    const { shorts, longs, positional } = flagInfo(filtered);
     if (longs.has('--force') || longs.has('--force-with-lease') ||
         longs.has('--force-if-includes') || shorts.has('f')) {
       return 'git push --force rewrites remote history — never allowed';
     }
-    if (positional.some((p) => PROTECTED_BRANCHES.test(p))) {
-      return 'direct push to a protected branch (main/master) — open a PR instead';
+    // positional[0] is the remote; later positionals are refspecs.
+    // The refspec destination (after the last ':') decides whether a
+    // protected ref is touched — 'main:feature-copy' pushes FROM main
+    // and is safe, 'feature/main-fix' never names main at all.
+    for (const rawRef of positional.slice(1)) {
+      const ref = stripQuotes(rawRef);
+      if (ref.startsWith('+')) {
+        return 'git push +<refspec> forces the update — equivalent to --force';
+      }
+      const dest = ref.includes(':') ? ref.slice(ref.lastIndexOf(':') + 1) : ref;
+      if (PROTECTED_DEST.test(dest)) {
+        return 'push targets a protected branch (main/master) — open a PR instead';
+      }
     }
     const implicit = positional.length <= 1 ||
       positional.every((p) => /^(origin|upstream|HEAD)$/.test(p));
     if (implicit) {
       const br = currentBranch();
-      if (br && PROTECTED_BRANCHES.test(br)) {
+      if (br && PROTECTED_DEST.test(br)) {
         return `current branch is '${br}' — a bare 'git push' would publish to it directly`;
       }
     }
@@ -184,7 +235,7 @@ function checkGit(args) {
   if (sub === 'branch') {
     const { shorts, longs, positional } = flagInfo(rest);
     const forceDelete = shorts.has('D') || (longs.has('--delete') && longs.has('--force'));
-    if (forceDelete && positional.some((p) => PROTECTED_BRANCHES.test(p))) {
+    if (forceDelete && positional.some((p) => PROTECTED_DEST.test(stripQuotes(p)))) {
       return 'force-deleting a protected branch destroys shared history';
     }
     return null;
@@ -210,24 +261,53 @@ const EXACT_RM_TARGETS = new Set([
   '$HOME', '${HOME}', '$DEVIN_PROJECT_DIR', '${DEVIN_PROJECT_DIR}'
 ]);
 
-function isDangerousRmTarget(t) {
+// First-level repo paths that recursive rm may regenerate — everything
+// else inside the project (src, tests, .devin, missions, ...) is
+// protected work that a recursive delete could destroy.
+const GENERATED_DIRS = new Set([
+  'dist', 'build', 'out', 'coverage', 'tmp', 'temp',
+  'node_modules', '.vite', '.cache', '.turbo', '.next', '.nuxt',
+  'playwright-report', 'test-results', '.firebase'
+]);
+
+// Resolve a target to an absolute path (relative → under PROJECT_DIR)
+// and classify it: 'git' | 'inside-generated' | 'inside-repo' | 'outside'.
+function rmTargetClass(t) {
   const c = stripQuotes(t);
-  if (!c) return false;
-  if (EXACT_RM_TARGETS.has(c)) return true;
-  if (/^(~|\$\{?HOME\}?|\$\{?DEVIN_PROJECT_DIR\}?)\//.test(c)) return true;
-  if (PROJECT_DIR && (c === PROJECT_DIR || c === PROJECT_DIR + '/')) return true;
-  // System roots (absolute paths outside the project, incl. /home).
-  return /^\/(bin|boot|dev|etc|home|lib|lib64|opt|proc|root|run|sbin|snap|srv|sys|usr|var)(\/.*)?$/.test(c);
+  if (!c || /^-/.test(c)) return 'empty';
+  if (EXACT_RM_TARGETS.has(c)) return 'repo';
+  if (/^(~|\$\{?HOME\}?|\$\{?DEVIN_PROJECT_DIR\}?)/.test(c)) return 'repo';
+  const abs = c.startsWith('/') ? c : resolve(PROJECT_DIR, c);
+  if (abs === PROJECT_DIR) return 'repo';
+  if (abs.startsWith(PROJECT_DIR + sep)) {
+    const first = abs.slice(PROJECT_DIR.length + 1).split(sep)[0];
+    if (first === '.git') return 'git';
+    return GENERATED_DIRS.has(first) ? 'inside-generated' : 'inside-repo';
+  }
+  return 'outside';
 }
+
+// System roots outside the project (incl. /home) stay off-limits.
+const SYSTEM_ROOTS = /^\/(bin|boot|dev|etc|home|lib|lib64|opt|proc|root|run|sbin|snap|srv|sys|usr|var)(\/.*)?$/;
 
 function checkRm(args) {
   const { shorts, longs, positional } = flagInfo(args);
   if (longs.has('--no-preserve-root')) return 'rm --no-preserve-root targets the filesystem root';
+  if (positional.some((t) => rmTargetClass(t) === 'git')) {
+    return 'rm targeting .git corrupts the repository';
+  }
   const recursive = shorts.has('r') || shorts.has('R') || longs.has('--recursive');
   if (!recursive) return null;
   if (positional.length === 0) return 'recursive rm with no resolvable target';
-  if (positional.some(isDangerousRmTarget)) {
-    return 'recursive rm against a repo/system/root path';
+  for (const t of positional) {
+    const cls = rmTargetClass(t);
+    if (cls === 'repo') return 'recursive rm against a repo/system/root path';
+    if (cls === 'inside-repo') {
+      return `recursive rm deletes '${stripQuotes(t)}' inside the repo — only generated dirs (dist/, node_modules/, coverage/, ...) may be removed`;
+    }
+    if (cls === 'outside' && SYSTEM_ROOTS.test(resolve(PROJECT_DIR, stripQuotes(t)))) {
+      return 'recursive rm against a repo/system/root path';
+    }
   }
   return null;
 }
@@ -251,7 +331,7 @@ const ANYWHERE_RULES = [
 
 function scanArgv(argv) {
   const realArgv = unwrap(argv);
-  const realHead = realArgv.length ? stripQuotes(realArgv[0]) : '';
+  const realHead = realArgv.length ? cmdName(stripQuotes(realArgv[0])) : '';
   for (const [cmd, check] of Object.entries(HEAD_RULES)) {
     // Normal position: first real command after wrappers.
     if (realHead === cmd) {
@@ -261,7 +341,7 @@ function scanArgv(argv) {
     // Rescan: git/rm buried behind inert shell syntax
     // ("bash -c 'cmd'" is handled by quoted-token recursion instead).
     for (let i = 0; i < argv.length; i++) {
-      if (stripQuotes(argv[i]) === cmd && inertPrefix(argv, i)) {
+      if (cmdName(stripQuotes(argv[i])) === cmd && inertPrefix(argv, i)) {
         const reason = check(argv.slice(i + 1));
         if (reason) return reason;
       }

@@ -4,6 +4,14 @@ description: Counterexample-first review for FlashDay semantic/state-machine wor
 triggers:
   - user
   - model
+permissions:
+  deny:
+    - edit
+    - mcp__github-mcp-server__merge_pull_request
+    - mcp__github-mcp-server__push_files
+    - mcp__github-mcp-server__create_or_update_file
+    - mcp__github-mcp-server__delete_file
+    - mcp__vercel__*
 ---
 
 Review FlashDay semantic and state-machine changes by falsification, not

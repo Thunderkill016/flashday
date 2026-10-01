@@ -17,6 +17,13 @@ permissions:
     - Exec(npm run)
     - Exec(npm test)
     - Exec(node tests/)
+  deny:
+    - edit
+    - mcp__github-mcp-server__merge_pull_request
+    - mcp__github-mcp-server__push_files
+    - mcp__github-mcp-server__create_or_update_file
+    - mcp__github-mcp-server__delete_file
+    - mcp__vercel__*
 ---
 
 Verify a PR before reporting it. Call the repo's own commands — do not

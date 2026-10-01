@@ -74,7 +74,13 @@
     ],
     "deny": [
       "Exec(sudo)",
-      "Write(.git/**)"
+      "Write(.git/**)",
+      "mcp__github-mcp-server__merge_pull_request",
+      "mcp__github-mcp-server__push_files",
+      "mcp__github-mcp-server__create_or_update_file",
+      "mcp__github-mcp-server__delete_file",
+      "mcp__vercel__*",
+      "mcp__supabase-mcp-server__*"
     ]
   },
   "read_config_from": {
@@ -84,6 +90,7 @@
     "claude": true,
     "copilot": true,
     "opencode": true,
-    "zed": true
+    "zed": true,
+    "vscode": true
   }
 }

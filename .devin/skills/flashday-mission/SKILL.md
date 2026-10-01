@@ -3,6 +3,13 @@ name: flashday-mission
 description: Run a FlashDay engineering mission end-to-end through the repo Work Factory — base verification to PR, without crossing human-only boundaries
 triggers:
   - user
+permissions:
+  deny:
+    - mcp__github-mcp-server__merge_pull_request
+    - mcp__github-mcp-server__push_files
+    - mcp__github-mcp-server__create_or_update_file
+    - mcp__github-mcp-server__delete_file
+    - mcp__vercel__*
 ---
 
 Run a FlashDay engineering mission consistently. This is the checklist

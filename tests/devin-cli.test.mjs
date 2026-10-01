@@ -131,6 +131,29 @@ const DANGEROUS = [
   'git status && rm -rf /',
   'npm test; firebase deploy',
   'git commit -m x && git push --force',
+  // Executable-path and git-global-option evasions (OPS-CLI-001 review).
+  '/usr/bin/git push --force origin feature',
+  '/bin/rm -rf /',
+  '/usr/bin/rm -rf ~',
+  'env F=1 /usr/bin/git push --force',
+  'git -C . push --force',
+  'git --no-pager push --force origin feature',
+  'git -c protocol.version=2 push -f',
+  'git --git-dir /tmp/x push --force',
+  // '+'-prefixed refspecs force the update just like --force.
+  'git push origin +HEAD',
+  'git push origin +HEAD:main',
+  'git push origin +refs/heads/feature:refs/heads/feature',
+  // Recursive rm against repo-owned work (generated dirs excepted).
+  'rm -rf .git',
+  'rm -rf .git/objects',
+  'rm .git/HEAD',
+  'rm -rf src',
+  'rm -rf src/components/x',
+  'rm -rf .devin',
+  'rm -rf tests/unit',
+  'rm -rf package.json',
+  'rm -rf ../other-project/build',
   // Quoted dangerous payloads are recursively evaluated: a quoted string
   // is indistinguishable from `bash -c "…"` at text level, so these
   // block by design (documented conservative choice).
@@ -163,6 +186,21 @@ const SAFE = [
   'rm -rf node_modules/.vite',
   'rm -rf /tmp/flashday-test-x',
   'rm -r build/out',
+  // Feature-branch refspecs whose names merely contain 'main' — the
+  // protected-branch rule matches the refspec destination exactly.
+  'git push origin feature/main-fix',
+  'git push origin main:feature-copy',
+  'git push -o ci.skip origin feature',
+  'git push --push-option=ci.skip origin feature',
+  'git push origin --delete feature',
+  // Git global options before the subcommand.
+  'git -C . status',
+  'git --no-pager log -5',
+  'git -c core.pager=cat diff',
+  // Non-recursive file rm and generated-dir cleanups.
+  'rm -f src/old-file.ts',
+  'rm -rf ./build',
+  'rm -rf coverage',
   'firebase emulators:exec --project demo-flashday-test --only firestore "node tests/x.mjs"',
   'env -u DEBUG npx --yes --package=firebase-tools@15.30.2 firebase emulators:exec --project demo-flashday-test --only firestore "node tests/firestore-emulator.test.mjs"',
   'vercel deploy',
@@ -221,12 +259,24 @@ test('.devin/config.json parses with only schema-known keys', () => {
   const cfg = JSON.parse(readFileSync(join(DEVIN_DIR, 'config.json'), 'utf8'));
   const allowedTop = new Set(['permissions', 'read_config_from', 'hooks']);
   for (const k of Object.keys(cfg)) assert.ok(allowedTop.has(k), `unexpected config key: ${k}`);
-  const importers = ['agents_standard', 'cursor', 'windsurf', 'claude', 'copilot', 'opencode', 'zed'];
+  const importers = ['agents_standard', 'cursor', 'windsurf', 'claude', 'copilot', 'opencode', 'vscode', 'zed'];
   assert.deepEqual(Object.keys(cfg.read_config_from).sort(), importers.sort());
   for (const v of Object.values(cfg.read_config_from)) assert.equal(v, true);
   for (const section of ['allow', 'ask', 'deny']) {
     assert.ok(Array.isArray(cfg.permissions[section]), `permissions.${section} must be an array`);
     for (const e of cfg.permissions[section]) assert.equal(typeof e, 'string');
+  }
+  // The exec/write_to_process hook cannot see MCP tool calls — merge,
+  // deploy and direct-repo-mutation channels must be denied in config.
+  for (const mcpDeny of [
+    'mcp__github-mcp-server__merge_pull_request',
+    'mcp__github-mcp-server__push_files',
+    'mcp__github-mcp-server__create_or_update_file',
+    'mcp__github-mcp-server__delete_file',
+    'mcp__vercel__*',
+    'mcp__supabase-mcp-server__*'
+  ]) {
+    assert.ok(cfg.permissions.deny.includes(mcpDeny), `permissions.deny missing ${mcpDeny}`);
   }
 });
 
@@ -265,6 +315,29 @@ test('no stray skills directories', () => {
   const dirs = readdirSync(join(DEVIN_DIR, 'skills')).sort();
   assert.deepEqual(dirs, Object.keys(EXPECTED_SKILLS).sort());
 });
+
+// Skills run inline with the session's full tool set (allowed-tools is
+// auto-approval, not a restriction), so merge/deploy channels must be
+// hard-denied via permissions.deny — the exec hook cannot see MCP calls.
+const SKILL_DENIES = {
+  'flashday-mission': ['mcp__github-mcp-server__merge_pull_request',
+    'mcp__github-mcp-server__push_files', 'mcp__vercel__*'],
+  'flashday-policy-review': ['edit',
+    'mcp__github-mcp-server__merge_pull_request',
+    'mcp__github-mcp-server__push_files', 'mcp__vercel__*'],
+  'verify-pr': ['edit',
+    'mcp__github-mcp-server__merge_pull_request',
+    'mcp__github-mcp-server__push_files', 'mcp__vercel__*']
+};
+
+for (const [name, denies] of Object.entries(SKILL_DENIES)) {
+  test(`skill ${name}: denies merge/deploy channels`, () => {
+    const fm = parseFrontmatter(join(DEVIN_DIR, 'skills', name, 'SKILL.md'));
+    for (const d of denies) {
+      assert.ok((fm.permissions || []).includes(d), `${name} permissions.deny missing ${d}`);
+    }
+  });
+}
 
 // --- Custom subagents -------------------------------------------------
 
