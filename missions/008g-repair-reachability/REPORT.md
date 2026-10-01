@@ -85,7 +85,8 @@ existence was treated as reachability.
 `missionId` + `missionRevision` + `episodeId` + `capabilityId` +
 `remainingFunctions[]`, with `witnesses[fn][]`, `required`, `complete`,
 `reserved`, `reasonCode`. Reservation table: `OPEN` never ·
-`REPAIRING`/`RELAPSED` iff ∀ missing fn ∃ clean witness ·
+`REPAIRING`/`RELAPSED` iff every live repair route's actual next serve is
+inert-or-covering and ≥1 is usable (R2 — see below) ·
 `REPAIRED_WAITING` direct · `RETEST_DUE`/`VERIFIED` never.
 
 ### Shared resolver
@@ -100,21 +101,24 @@ machinery the counterfactual "reachable while probes stay withheld".
 `candidateKind` (correction|refresh — SUPPORT_DEMAND never repairs),
 `taskId`, `taskRevision`, `purpose`, `missionMember`, `coversFunction`,
 `hardFilterClean`, `filterReasons[]`, `consumesFreshRetestSurface`,
-`servedNext` (route's actual next serve under probe exclusion).
+`servedNext` (audit flag: is this the route's primary). The load-bearing
+record is `plan.servedNext[]` — one entry per live route with its natural
+pick and `classification ∈ {usable, inert, dangerous}`.
 
 ### Positive proofs (real paths)
 - clock-time `meet_at_a_time` REPAIRING → witness `task.time.remediation.hear@1`; reserves `task.time.retrieval.hear`.
 - price `buy_small_item` REPAIRING → witness `task.price.remediation.hear@1`; reserves `task.price.retrieval.hear`.
 - direction `find_a_place` REPAIRING → witness `task.place.remediation.follow@1`; reserves `{retrieval.follow, retrieval.follow_landmark}`.
 
-### Attacks (335-check runtime suite, all green)
+### Attacks (342-check runtime suite, all green)
 - cross-mission: remediation dropped from `taskIds` but present in registry → `mission_repair_channel_unproven`, nothing reserved; undeclared ghost task changes nothing.
 - registry-invariance metamorphic: +ghost / −unrelated registry changes leave proof, reserved ids, and B1 decision canon-identical (modulo `decisionId` input digest).
 - wrong capability / wrong function: no witness → proof false → no reservation.
 - stale revision: registry bump to rev2 rebinds witness `taskRevision: 2`; mission revision bump rebinds `missionRevision` — no reuse.
 - repair bound: saturated `actionsChosen` → every witness `repair_bound:3`-unclean → false, probes freed.
 - failure ceiling: 3-fail streak ending on last non-probe surface → refresh serve is `identical_retry_after_failure_ceiling` → false, probe freed.
-- alternate repick: PLACE refresh's natural next serve IS the reserved probe (`retrieval.follow`); under exclusion the route repicks `remediation.follow` — `servedNext` proves it.
+- alternate repick: PLACE refresh's natural next serve IS the reserved probe (`retrieval.follow`) → classified `inert/reserved_probe` (the reservation itself filters it dead); correction serves `remediation.follow` → `usable`; the exclusion-repick to `remediation.follow` stays in the refresh witness stream as audit evidence.
+- cross-route (R2): REFRESH's actual serve is burned partial `retrieval.follow` (covers F1 only) while CORRECTION serves full-cover `remediation.follow` → refresh `dangerous` → `complete=false`, empty reservations; same arc in natural mission order (both routes land on the covering remediation) → proven.
 - multi-function: DIR episode missing `{follow_short_direction, identify_basic_direction_term}` with only the first covered in-mission → `complete=false`, empty reservations — ∀-fn not ∃-task.
 - relapse: burned retest surface leaves the probe set (repair-eligible); fresh alternate stays reserved — the reservation tracks the live surface set exactly.
 - validator: forged B1 serve on a reserved probe → `correction_retest_surface_reserved`; identical serve in OPEN → clean. The validator re-derives plans+reservations in its own memoized rebuild, never trusting the decision payload.
@@ -139,9 +143,11 @@ lazy/memoized.
   mission). Typecheck 140
   files; node suites incl. now-wired runtime suite; vite build; browser
   26+10; Firestore emulator ×2 PASS).
-- `node tests/vnext-next-for-you-runtime.test.mjs` — 335 checks PASS.
-- CI: **Verify FlashDay** green on head `9d3690c` — push run
-  `36825803861` + pull_request run `36825837191` both success.
+- `node tests/vnext-next-for-you-runtime.test.mjs` — 342 checks PASS
+  (R2 head; 338 at R1, 335 at first submission).
+- CI: **Verify FlashDay** green on `9d3690c` (push `36825803861` + pr
+  `36825837191`) and on R1 `fc50e9d` (push `36827937771` + pr
+  `36827941112`). R2 head CI is recorded in the PR thread.
 
 ### Extra fix in this diff
 `package.json` `test` script now includes `tests/vnext-next-for-you-runtime.test.mjs` —
@@ -163,6 +169,28 @@ Pinned by `MRP-SERVEDNEXT` regression pair (split coverage under
 bound→false; covers-all→proven). Differential counts unchanged —
 remediation tasks on all three real paths cover their caps' full
 missing-function sets.
+
+### R2 patch — every live route is load-bearing
+R1 accepted the proof if ONE route's served-next covered everything.
+Counterexample from review: REFRESH → burned retrieval B covering F1
+only, CORRECTION → remediation A covering F1+F2; the policy may prefer
+REFRESH, serve B, and burn the last repair action before A gets a turn.
+"A safe route exists" ≠ "the policy will take it".
+Patch (conservative, no planner): each live CORRECTION/REFRESH route is
+evaluated on its **natural pick — no exclusions**, i.e. exactly what the
+policy would serve, and classified:
+- `inert` — pick is a fresh probe (the reservation under evaluation
+  filters it dead), a hard-filter-rejected task, or nothing;
+- `usable` — mission-local, clean, repair-eligible, non-probe, covers
+  ALL remaining functions;
+- `dangerous` — choosable (clean, non-probe) but fails any repair
+  condition (out-of-mission, not repair-eligible, partial coverage).
+`complete ⇔ ∃ usable ∧ ∄ dangerous`. A non-repair-eligible pick is never
+skipped — if the policy can choose it, it falsifies the proof.
+Pinned by `MRP-XROUTE` (conflict → false / both-covering dual → proven).
+The PLACE refresh case now records `inert/reserved_probe` instead of an
+exclusion repick. Differential unchanged
+(`1792 {1009,783}`; `MATCH:1744 + RESERVED:42 + DUE:6`; 0 violations).
 
 ### Known limitations
 - `REPAIRED_WAITING` reserves directly without witnesses (repair already

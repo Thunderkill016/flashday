@@ -10,18 +10,22 @@
  * another mission (false positive) or name a task the live routes would
  * never actually serve (existence ≠ reachability).
  *
- * This module proves, per open episode, that SOME repair route's actual
- * next serve — computed with the fresh retest probes withheld — is a
- * mission-local, validator-clean, non-probe task covering EVERY
- * still-missing function. Per-function witness streams are kept for
- * audit only; a different-stream-member-per-function proof is NOT
- * accepted, because the route can only serve one task next and serving
- * it may exhaust the repair bound (R1 review):
+ * This module proves, per open episode, that repair is safe under the
+ * CURRENT policy: every live repair route's actual next serve — the
+ * natural pick, no exclusions, exactly what the policy would serve — is
+ * either neutralised (its pick is a reserved probe, a filtered task, or
+ * nothing) or a mission-local, validator-clean, repair-eligible,
+ * non-probe task covering EVERY still-missing function, and at least
+ * one route is actually usable. Per-function witness streams are kept
+ * for audit only; a different-stream-member-per-function proof is NOT
+ * accepted — the route can only serve one task next and serving it may
+ * exhaust the repair bound (R1 review), and the policy is free to
+ * prefer a partial-coverage route over the covering one (R2 review):
  *
  *   deriveCorrectionEpisodes()      — evidence truth
  *         ↓
- *   deriveMissionRepairPlan(s)()    — this file: ∃ route whose
- *                                     servedNext covers ALL missing fns
+ *   deriveMissionRepairPlan(s)()    — this file: ∀ live routes inert-or-
+ *                                     covering, ≥1 actually usable
  *         ↓
  *   deriveRetestReservations()      — the withheld probe-id set
  *         ↓
@@ -139,15 +143,16 @@ export function deriveMissionRepairPlan({
     assessmentMode: 'fresh', episodes, reservations: null
   };
 
-  /* Load-bearing check (R1 patch): a route serves exactly ONE task next,
-   * and serving it may consume the last repair action the episode budget
-   * allows. A proof built by picking a different stream member per
-   * function can claim reachability that never materialises — F1→A and
-   * F2→B are witnesses on paper, but if only A can actually serve next
-   * and it does not cover F2, B is dead. So `complete` requires SOME
-   * repair route whose actual next serve (probes withheld) is
-   * mission-local, filter-clean, non-probe AND covers EVERY remaining
-   * function. Per-function witness streams remain below for audit. */
+  /* Load-bearing check (R2 patch): a route serves exactly ONE task next
+   * — its NATURAL pick, with NO exclusions. At serve time there is no
+   * exclusion list: a candidate serving a reserved probe is filtered
+   * dead (the reservation under evaluation neutralises that route), and
+   * a candidate serving any other unsafe task is live danger the policy
+   * can actually choose. "A safe route exists somewhere" does not
+   * constrain which route the policy prefers (R1 review), so
+   * `complete` requires EVERY live repair route to be either neutralised
+   * or fully safe, AND at least one route that can actually carry the
+   * repair now. Per-function witness streams remain below for audit. */
   for (const route of REPAIR_ROUTES) {
     /* Route liveness is read from the ACTUAL generated candidate set —
      * the policy only serves through intents it minted. A route the
@@ -156,27 +161,51 @@ export function deriveMissionRepairPlan({
     const live = candidates.find((c) => c.capabilityId === ep.capabilityId && c.kind === route.kind);
     if (!live) continue;
     const pick = route.viaPickTask
-      ? resolver.pickTask(ep.capabilityId, route.purposes, live.facts ?? {}, ceiling, { excludeTaskIds: probeIds })
-      : { task: resolver.servable(ep.capabilityId, route.purposes, { excludeTaskIds: probeIds }), identicalRetry: false, alternateTask: false };
+      ? resolver.pickTask(ep.capabilityId, route.purposes, live.facts ?? {}, ceiling)
+      : { task: resolver.servable(ep.capabilityId, route.purposes), identicalRetry: false, alternateTask: false };
     const t = pick.task;
-    if (!t || !repairEligible(t, burned)) continue;
+    if (!t) {
+      plan.servedNext.push({
+        candidateKind: route.kind, taskId: null,
+        classification: 'inert', inertReason: 'no_servable'
+      });
+      continue;
+    }
     const violations = hardFilter({
       kind: route.kind, capabilityId: ep.capabilityId,
       servableTask: t, facts: live.facts ?? {},
       identicalRetry: pick.identicalRetry, alternateTask: pick.alternateTask
     }, envSansReservation);
-    plan.servedNext.push({
+    const entry = {
       candidateKind: route.kind,
       taskId: t.id,
       taskRevision: t.revision ?? 1,
       purpose: t.purpose,
       missionMember: missionTaskIds.has(t.id),
+      repairEligible: repairEligible(t, burned),
       coversAllRemaining: remaining.every((fn) =>
         (t.response?.requiredFunctions ?? []).includes(fn)),
       hardFilterClean: violations.length === 0,
       filterReasons: violations,
       consumesFreshRetestSurface: probeIds.has(t.id)
-    });
+    };
+    /* inert — the route cannot serve an unsafe task at this decision:
+     * its pick is a probe the reservation itself withholds, a task the
+     * hard filter rejects anyway, or nothing at all. dangerous — the
+     * pick IS choosable (clean, non-probe) yet fails a repair condition:
+     * outside the mission, not repair-eligible, or covering only part
+     * of what the episode still owes. usable — survives everything. */
+    entry.classification = entry.consumesFreshRetestSurface
+      ? 'inert'
+      : !entry.hardFilterClean
+        ? 'inert'
+        : (entry.missionMember && entry.repairEligible && entry.coversAllRemaining)
+          ? 'usable'
+          : 'dangerous';
+    entry.inertReason = entry.classification === 'inert'
+      ? (entry.consumesFreshRetestSurface ? 'reserved_probe' : 'filtered')
+      : null;
+    plan.servedNext.push(entry);
   }
 
   /* Per-function audit streams: every repair-eligible member of each
@@ -220,9 +249,13 @@ export function deriveMissionRepairPlan({
     }
   }
 
-  plan.complete = plan.servedNext.some((w) =>
-    w.missionMember && w.coversAllRemaining && w.hardFilterClean &&
-    !w.consumesFreshRetestSurface);
+  /* ≥1 route must be able to carry the full repair now, and NO live
+   * route may be able to serve an unsafe task next — one choosable
+   * partial/ineligible serve is enough to burn the remaining repair
+   * bound before the covering route ever gets its turn. */
+  plan.complete =
+    plan.servedNext.some((w) => w.classification === 'usable') &&
+    !plan.servedNext.some((w) => w.classification === 'dangerous');
   plan.reasonCode = plan.complete
     ? 'mission_repair_channel_proven'
     : 'mission_repair_channel_unproven';

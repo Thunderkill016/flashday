@@ -2627,9 +2627,19 @@ const ANSWERS_008E = {
         `MRP-PLACE: expected both retest surfaces — ${JSON.stringify(p.retestSurfaceIds)}`);
       ok(liveRefresh?.servableTask?.id === 'task.place.retrieval.follow',
         `MRP-PLACE: refresh primary was not the reserved probe — ${liveRefresh?.servableTask?.id}`);
+      /* R2: the route's NATURAL pick is the load-bearing truth — the
+       * refresh route would serve the probe itself and be filtered dead
+       * by the reservation (inert), while correction actually carries
+       * the repair. The exclusion-repick remains in the witness stream
+       * as audit evidence of repair-channel depth. */
       ok(p.complete
-        && p.witnesses[FN_DIR].some((w) => w.candidateKind === KINDS.REFRESH && w.taskId === remP && w.servedNext && w.hardFilterClean),
-        `MRP-PLACE: refresh repick under probe-exclusion did not reach ${remP} — ${JSON.stringify(p.witnesses)}`);
+        && p.servedNext.some((w) => w.candidateKind === KINDS.REFRESH
+          && w.taskId === 'task.place.retrieval.follow'
+          && w.classification === 'inert' && w.inertReason === 'reserved_probe')
+        && p.servedNext.some((w) => w.candidateKind === KINDS.CORRECTION
+          && w.taskId === remP && w.classification === 'usable')
+        && p.witnesses[FN_DIR].some((w) => w.candidateKind === KINDS.REFRESH && w.taskId === remP && w.hardFilterClean),
+        `MRP-PLACE: refresh probe-pick not neutralised / correction not usable — ${JSON.stringify(p.servedNext)}`);
       ok(sortedIds(r.reservations).join() === 'task.place.retrieval.follow,task.place.retrieval.follow_landmark',
         `MRP-PLACE: reservation set wrong — ${JSON.stringify([...r.reservations])}`);
       say('MRP-POS: clock/price/direction proofs; refresh repick off the reserved probe');
@@ -2809,6 +2819,67 @@ const ANSWERS_008E = {
         && whole.reservations.has('task.place.retrieval.follow_landmark'),
         `MRP-SERVEDNEXT: single served task covering all missing fns must prove — ${JSON.stringify({ c: wp.complete, sn: wp.servedNext, r: [...whole.reservations] })}`);
       say('MRP-SERVEDNEXT: split coverage under bound → false; covers-all served-next → proven');
+    }
+
+    /* — A5c (R2): cross-route safety — EVERY live route's actual next
+     *     serve is load-bearing, not just the safest one. Burned
+     *     retrieval B covers F1 only and is mission-ordered ahead of the
+     *     covering remediation, so REFRESH prefers B while CORRECTION
+     *     serves the full cover: the policy is free to choose REFRESH
+     *     first, and serving B burns the last repair action — proof must
+     *     be false even though a safe route exists. Same arc in the
+     *     natural mission order puts the covering task first on BOTH
+     *     routes → proven. — */
+    {
+      const IBDT = 'identify_basic_direction_term';
+      /* Both retest surfaces consumed by early successes (fresh tier
+       * empty → repeatable-tier order picks the serve). The episode
+       * opens on delayed.follow, the failed remediation carries ibdt
+       * into missing, retrieval.follow's covering success burns it as
+       * the repair surface (REPAIRED_WAITING), and the delayed re-fail
+       * relapses the episode — observed streak 1, last-attempted is
+       * delayed.follow, so no ceiling escape touches the refresh pick. */
+      const crossArc = [
+        evP('task.place.diagnostic.follow', T0, 'success'),
+        evP('task.place.retrieval.follow', T0 + 1, 'success'),
+        evP('task.place.retrieval.follow_landmark', T0 + 2, 'success'),
+        evP('task.place.delayed.follow', T0 + DAY, 'fail', [FN_DIR]),
+        evP(remP, T0 + DAY + HOUR, 'fail', [FN_DIR, IBDT]),
+        evP('task.place.retrieval.follow', T0 + DAY + 2 * HOUR, 'success'),
+        evP('task.place.delayed.follow', T0 + DAY + 3 * HOUR, 'fail', [FN_DIR])
+      ];
+      const boundLeft = {
+        ...emptyContext('ep.mrpx', 'ses.mrpx'),
+        actionsChosen: [
+          { kind: KINDS.CORRECTION, capabilityId: DIR },
+          { kind: KINDS.CORRECTION, capabilityId: DIR }
+        ]
+      };
+      const bFirst = {
+        ...PLACE.mission,
+        taskIds: ['task.place.retrieval.follow',
+          ...PLACE.mission.taskIds.filter((id) => id !== 'task.place.retrieval.follow')]
+      };
+
+      const unsafe = repairable(PLACE, DIR, crossArc, T0 + DAY + 4 * HOUR, { mission: bFirst, ctx: boundLeft });
+      const up = planOf(unsafe);
+      ok(up.servedNext.some((w) => w.candidateKind === KINDS.REFRESH
+          && w.taskId === 'task.place.retrieval.follow'
+          && w.classification === 'dangerous' && w.hardFilterClean && !w.coversAllRemaining),
+        `MRP-XROUTE: refresh's actual serve should be the partial burned surface — ${JSON.stringify(up.servedNext)}`);
+      ok(up.servedNext.some((w) => w.candidateKind === KINDS.CORRECTION
+          && w.taskId === remP && w.classification === 'usable'),
+        `MRP-XROUTE: correction route should still be usable — ${JSON.stringify(up.servedNext)}`);
+      ok(!up.complete && unsafe.reservations.size === 0,
+        `MRP-XROUTE: one choosable unsafe route must falsify the proof — complete=${up.complete} reserved=${JSON.stringify([...unsafe.reservations])}`);
+
+      const safe = repairable(PLACE, DIR, crossArc, T0 + DAY + 4 * HOUR, { ctx: boundLeft });
+      const xp = planOf(safe);
+      ok(xp.complete
+        && xp.servedNext.filter((w) => w.classification === 'usable').length === 2
+        && safe.reservations.has('task.place.retrieval.follow_landmark'),
+        `MRP-XROUTE: both routes serving full-coverage repair must prove — ${JSON.stringify({ c: xp.complete, sn: xp.servedNext, r: [...safe.reservations] })}`);
+      say('MRP-XROUTE: refresh prefers a partial burned surface → proof false; both routes covering → proven');
     }
 
     /* — A6: relapse rewrites the surface set — the burned retest surface
