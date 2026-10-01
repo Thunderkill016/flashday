@@ -2758,6 +2758,59 @@ const ANSWERS_008E = {
       say('MRP-MF: ∀ missing fn required — partial coverage falsifies');
     }
 
+    /* — A5b (R1): servedNext is load-bearing — the route serves ONE task
+     *     next, so the proof needs a served task covering EVERY missing
+     *     function. Split coverage across two remediation tasks fails
+     *     even though each function "has a witness in the stream": after
+     *     the served task consumes the last repair action, the other fn
+     *     is unreachable. — */
+    {
+      const cloneFor = (id, fns) => {
+        const t = structuredClone(PLACE_T(remP));
+        t.id = id;
+        t.response = { ...t.response, requiredFunctions: fns };
+        return t;
+      };
+      const clA = cloneFor('task.place.remediation.fsd_only', [FN_DIR]);
+      const clB = cloneFor('task.place.remediation.ibdt_only', ['identify_basic_direction_term']);
+      const clAB = cloneFor('task.place.remediation.both_fns', [FN_DIR, 'identify_basic_direction_term']);
+      const arc = [
+        evP('task.place.diagnostic.follow', T0, 'success'),
+        evP('task.place.delayed.follow', T0 + DAY, 'fail', [FN_DIR]),
+        evP(remP, T0 + DAY + HOUR, 'fail', [FN_DIR, 'identify_basic_direction_term'])
+      ];
+      const swap = (...ids) => ({
+        ...PLACE.mission,
+        taskIds: PLACE.mission.taskIds.flatMap((id) => id === remP ? ids : [id])
+      });
+      const boundOneLeft = {
+        ...emptyContext('ep.mrp', 'ses.mrp'),
+        actionsChosen: [
+          { kind: KINDS.CORRECTION, capabilityId: DIR },
+          { kind: KINDS.CORRECTION, capabilityId: DIR }
+        ]
+      };
+      const tasksWith = (...extra) => [...TASK_REGISTRY, ...extra];
+
+      const split = repairable(PLACE, DIR, arc, T0 + DAY + 2 * HOUR,
+        { mission: swap(clA.id, clB.id), tasks: tasksWith(clA, clB), ctx: boundOneLeft });
+      const sp = planOf(split);
+      ok(sp.servedNext.some((w) => w.taskId === clA.id && w.hardFilterClean && !w.coversAllRemaining),
+        `MRP-SERVEDNEXT: servedNext should be the first split-cover remediation — ${JSON.stringify(sp.servedNext)}`);
+      ok(!sp.complete && split.reservations.size === 0,
+        `MRP-SERVEDNEXT: split coverage falsified → complete=${sp.complete} reserved=${JSON.stringify([...split.reservations])}`);
+
+      const whole = repairable(PLACE, DIR, arc, T0 + DAY + 2 * HOUR,
+        { mission: swap(clAB.id), tasks: tasksWith(clAB), ctx: boundOneLeft });
+      const wp = planOf(whole);
+      ok(wp.complete
+        && wp.servedNext.some((w) => w.taskId === clAB.id && w.coversAllRemaining && w.hardFilterClean)
+        && whole.reservations.has('task.place.retrieval.follow')
+        && whole.reservations.has('task.place.retrieval.follow_landmark'),
+        `MRP-SERVEDNEXT: single served task covering all missing fns must prove — ${JSON.stringify({ c: wp.complete, sn: wp.servedNext, r: [...whole.reservations] })}`);
+      say('MRP-SERVEDNEXT: split coverage under bound → false; covers-all served-next → proven');
+    }
+
     /* — A6: relapse rewrites the surface set — the burned retest surface
      *     leaves the reservation (it is repair-eligible now) while the
      *     still-fresh probe stays withheld. — */

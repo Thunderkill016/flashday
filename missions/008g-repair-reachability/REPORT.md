@@ -43,19 +43,21 @@ Mission 008G (ChatGPT control room): replace the full-task-registry repair-chann
 - (none)
 
 ## Acceptance criteria
-- [ ] `deriveCorrectionEpisodes` output carries no reservation fields.
-- [ ] Repair proof binds missionId+revision, episodeId, capabilityId,
+- [x] `deriveCorrectionEpisodes` output carries no reservation fields.
+- [x] Repair proof binds missionId+revision, episodeId, capabilityId,
       per-function witnesses with task@revision + candidate kind +
-      hard-filter result; reserve iff `complete` for every remaining fn.
-- [ ] All 12 required attacks pinned by tests.
-- [ ] Metamorphic: adding out-of-mission tasks to the registry changes
+      hard-filter result; reserve iff `complete` — and per R1 review,
+      `complete` additionally requires a route's ACTUAL served-next task
+      (probes withheld) to cover EVERY remaining function.
+- [x] All required attacks pinned by tests (see substantive report).
+- [x] Metamorphic: adding out-of-mission tasks to the registry changes
       neither proof, reserved ids, B1 decision, nor B1 reason code.
-- [ ] clock-time / price / direction paths keep a positive
+- [x] clock-time / price / direction paths keep a positive
       mission-local repair proof.
-- [ ] B0 corpus byte-identical; B1 differential has no unclassified rows.
-- [ ] Perf: incremental overhead profiled; no second full replay or
+- [x] B0 corpus byte-identical; B1 differential has no unclassified rows.
+- [x] Perf: incremental overhead profiled; no second full replay or
       generateCandidates pass.
-- [ ] `npm run verify:full` green; exact-head CI green.
+- [x] `npm run verify:full` green; exact-head CI green.
 
 ## Known failures
 - (none recorded)
@@ -144,9 +146,30 @@ lazy/memoized.
 the suite carried all 008F/008G behavioral coverage but had been orphaned
 from `npm test`/`verify`/CI since 008E.
 
+### R1 patch — servedNext is load-bearing
+First submission proved `complete` by collecting a witness **per function
+independently** across each route's fn-filtered stream. Counterexample
+from review: F1+F2 missing, task A covers F1, task B covers F2, repair
+bound has 1 action left — A serves next and exhausts the bound, so B is
+unreachable, yet the per-fn streams claimed both covered.
+Patch (narrow, no new planner): in REPAIRING/RELAPSED the proof now
+requires SOME live repair route whose **actual next serve under probe
+exclusion** is mission-local, hard-filter-clean, non-probe, AND covers
+EVERY remaining function. Per-fn witness streams remain for audit;
+`servedNext` is the completeness condition, not an audit field.
+Pinned by `MRP-SERVEDNEXT` regression pair (split coverage under
+bound→false; covers-all→proven). Differential counts unchanged —
+remediation tasks on all three real paths cover their caps' full
+missing-function sets.
+
 ### Known limitations
 - `REPAIRED_WAITING` reserves directly without witnesses (repair already
   demonstrated); proof obligation attaches only to states that owe repair.
+- Carried-over 008F limitation (recorded, not fixed in 008G): an episode
+  enters REPAIRED_WAITING after a success covering ≥1 missing function,
+  not necessarily all — the servedNext/covers-all semantics is strongest
+  in REPAIRING/RELAPSED; generalising multi-function repair needs
+  `repairedFunctions` tracking or redefined partial-repair semantics.
 - Witness enumeration scales with the fn-covering servable stream; fine at
   fixture scale, quadratic-ish only under adversarial streams.
 - B1 remains shadow/experiment; `?mode=b1` fails closed to reference.

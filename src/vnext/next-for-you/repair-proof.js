@@ -10,13 +10,18 @@
  * another mission (false positive) or name a task the live routes would
  * never actually serve (existence ≠ reachability).
  *
- * This module proves, per open episode and per still-missing function,
- * that a currently reachable, mission-local, validator-clean repair
- * route exists that does NOT consume a fresh retest probe:
+ * This module proves, per open episode, that SOME repair route's actual
+ * next serve — computed with the fresh retest probes withheld — is a
+ * mission-local, validator-clean, non-probe task covering EVERY
+ * still-missing function. Per-function witness streams are kept for
+ * audit only; a different-stream-member-per-function proof is NOT
+ * accepted, because the route can only serve one task next and serving
+ * it may exhaust the repair bound (R1 review):
  *
  *   deriveCorrectionEpisodes()      — evidence truth
  *         ↓
- *   deriveMissionRepairPlan(s)()    — this file: ∀ missing fn ∃ witness
+ *   deriveMissionRepairPlan(s)()    — this file: ∃ route whose
+ *                                     servedNext covers ALL missing fns
  *         ↓
  *   deriveRetestReservations()      — the withheld probe-id set
  *         ↓
@@ -99,6 +104,7 @@ export function deriveMissionRepairPlan({
     remainingFunctions: [...remaining],
     retestSurfaceIds: probes.map((t) => t.id),
     witnesses: {},
+    servedNext: [],
     required: PROOF_REQUIRED_STATES.has(ep.state),
     complete: false,
     reserved: false,
@@ -133,25 +139,54 @@ export function deriveMissionRepairPlan({
     assessmentMode: 'fresh', episodes, reservations: null
   };
 
+  /* Load-bearing check (R1 patch): a route serves exactly ONE task next,
+   * and serving it may consume the last repair action the episode budget
+   * allows. A proof built by picking a different stream member per
+   * function can claim reachability that never materialises — F1→A and
+   * F2→B are witnesses on paper, but if only A can actually serve next
+   * and it does not cover F2, B is dead. So `complete` requires SOME
+   * repair route whose actual next serve (probes withheld) is
+   * mission-local, filter-clean, non-probe AND covers EVERY remaining
+   * function. Per-function witness streams remain below for audit. */
+  for (const route of REPAIR_ROUTES) {
+    /* Route liveness is read from the ACTUAL generated candidate set —
+     * the policy only serves through intents it minted. A route the
+     * generator suppressed (failure ceiling, no attribution, …) is
+     * not currently reachable, whatever the registry holds. */
+    const live = candidates.find((c) => c.capabilityId === ep.capabilityId && c.kind === route.kind);
+    if (!live) continue;
+    const pick = route.viaPickTask
+      ? resolver.pickTask(ep.capabilityId, route.purposes, live.facts ?? {}, ceiling, { excludeTaskIds: probeIds })
+      : { task: resolver.servable(ep.capabilityId, route.purposes, { excludeTaskIds: probeIds }), identicalRetry: false, alternateTask: false };
+    const t = pick.task;
+    if (!t || !repairEligible(t, burned)) continue;
+    const violations = hardFilter({
+      kind: route.kind, capabilityId: ep.capabilityId,
+      servableTask: t, facts: live.facts ?? {},
+      identicalRetry: pick.identicalRetry, alternateTask: pick.alternateTask
+    }, envSansReservation);
+    plan.servedNext.push({
+      candidateKind: route.kind,
+      taskId: t.id,
+      taskRevision: t.revision ?? 1,
+      purpose: t.purpose,
+      missionMember: missionTaskIds.has(t.id),
+      coversAllRemaining: remaining.every((fn) =>
+        (t.response?.requiredFunctions ?? []).includes(fn)),
+      hardFilterClean: violations.length === 0,
+      filterReasons: violations,
+      consumesFreshRetestSurface: probeIds.has(t.id)
+    });
+  }
+
+  /* Per-function audit streams: every repair-eligible member of each
+   * route's fn-covering servable stream, probes withheld — kept for
+   * review/backlog diagnosis, NOT for completeness. */
   for (const fn of remaining) {
     for (const route of REPAIR_ROUTES) {
-      /* Route liveness is read from the ACTUAL generated candidate set —
-       * the policy only serves through intents it minted. A route the
-       * generator suppressed (failure ceiling, no attribution, …) is
-       * not currently reachable, whatever the registry holds. */
       const live = candidates.find((c) => c.capabilityId === ep.capabilityId && c.kind === route.kind);
       if (!live) continue;
-
-      /* The route's own next serve with the probes withheld — the
-       * repick the real routing would make if reservation existed. */
-      const primary = route.viaPickTask
-        ? resolver.pickTask(ep.capabilityId, route.purposes, live.facts ?? {}, ceiling, { excludeTaskIds: probeIds }).task
-        : resolver.servable(ep.capabilityId, route.purposes, { excludeTaskIds: probeIds });
-
-      /* Witness set = every repair-eligible member of the route's
-       * fn-covering servable stream — the tasks this route can still
-       * serve for `fn` in mission order, probes withheld. The primary
-       * serve is listed first by construction. */
+      const primary = plan.servedNext.find((w) => w.candidateKind === route.kind)?.taskId ?? null;
       const stream = resolver.optionsFor(ep.capabilityId, route.purposes, {
         requiredFunctions: [fn], excludeTaskIds: probeIds
       });
@@ -166,7 +201,7 @@ export function deriveMissionRepairPlan({
            * constrained stream: re-serving the last-failed task under
            * a ceiling is an identical retry. */
           identicalRetry: lastTask != null && t.id === lastTask.id && observedFails >= ceiling,
-          alternateTask: t.id !== primary?.id
+          alternateTask: t.id !== primary
         };
         const violations = hardFilter(hypothetical, envSansReservation);
         plan.witnesses[fn].push({
@@ -179,16 +214,15 @@ export function deriveMissionRepairPlan({
           hardFilterClean: violations.length === 0,
           filterReasons: violations,
           consumesFreshRetestSurface: probeIds.has(t.id),
-          servedNext: t.id === primary?.id
+          servedNext: t.id === primary
         });
       }
     }
   }
 
-  plan.complete = remaining.every((fn) =>
-    plan.witnesses[fn].some((w) =>
-      w.missionMember && w.coversFunction && w.hardFilterClean &&
-      !w.consumesFreshRetestSurface));
+  plan.complete = plan.servedNext.some((w) =>
+    w.missionMember && w.coversAllRemaining && w.hardFilterClean &&
+    !w.consumesFreshRetestSurface);
   plan.reasonCode = plan.complete
     ? 'mission_repair_channel_proven'
     : 'mission_repair_channel_unproven';
