@@ -19,6 +19,30 @@ Course content lives in `src/content/a1/` (30 lessons, validated by
   but do not merge.
 - Deploys (hosting/rules) happen only on explicit user confirmation.
 
+## Devin CLI workspace (.devin/)
+
+Committed Devin CLI primitives — use them instead of re-deriving
+procedure in each session:
+
+- `.devin/skills/` — `/flashday-mission` (mission lifecycle contract),
+  `/flashday-policy-review` (counterexample-first semantic review),
+  `/verify-pr` (exact-HEAD + CI verification; never merges).
+- `.devin/agents/` — restricted subagents: `repo-researcher`
+  (read-only), `adversarial-reviewer` (falsification review, exec for
+  git/tests), `test-runner` (executes verification commands, no edits).
+- `.devin/hooks.v1.json` → `scripts/devin-guard.mjs` — PreToolUse guard
+  that hard-blocks force-push, pushes to main/master,
+  `git reset --hard`, `git clean -f`, worktree-discarding
+  checkout/restore, recursive `rm` on repo/system paths,
+  `firebase deploy`, `vercel --prod`, `gh pr merge`, and sudo. If a
+  legitimate command is blocked, ask the user — do not route around it.
+- `.devin/config.json` — committed permissions + `read_config_from`
+  import policy (every import source stays on; `.agents/skills` is the
+  canonical skill home — never copy skill packs into `.devin/`).
+- Machine-local overrides belong in `.devin/*.local.json` or
+  `AGENTS.local.md` (both gitignored) — never commit secrets or
+  machine-specific paths.
+
 ## Build / verify / deploy
 
 ```bash

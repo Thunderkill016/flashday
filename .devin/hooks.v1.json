@@ -1,0 +1,14 @@
+{
+  "PreToolUse": [
+    {
+      "matcher": "^(exec|write_to_process)$",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "node \"$DEVIN_PROJECT_DIR/scripts/devin-guard.mjs\"",
+          "timeout": 10
+        }
+      ]
+    }
+  ]
+}
