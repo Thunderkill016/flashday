@@ -11,6 +11,10 @@ mission-shots/
 firebase-debug*.log
 firestore-debug*.log
 
+# Devin CLI machine-local overrides — personal config, never committed
+.devin/*.local.json
+AGENTS.local.md
+
 # mission factory local state — never commit
 missions/*/state.json
 missions/*/logs/
