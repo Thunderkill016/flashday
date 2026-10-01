@@ -20,7 +20,10 @@ export const PROVENANCE = deepFreeze({
 export const POLICY_VERSIONS = deepFreeze({
   A: 'vnext.selection-policy.a0.v1',
   B: 'vnext.selection-policy.b0.v1',
-  C: 'vnext.selection-policy.c0.v1'
+  C: 'vnext.selection-policy.c0.v1',
+  /* 008F: B0 + correction-episode gating — a delayed independent retest
+   * must verify a repair before transfer/assessment may certify. */
+  B1: 'vnext.selection-policy.b1.v1'
 });
 
 /* Intent kinds — mirrors spec §2. `fluency` intentionally absent. */
@@ -36,6 +39,10 @@ export const KINDS = deepFreeze({
   INDEPENDENT_ATTEMPT: 'independent_attempt',
   MISSION_CONTINUATION: 'mission_continuation',
   NEW_INPUT: 'new_input',
+  /* 008F/B1 only: a delayed independent retest of a corrected
+   * capability — minted while a correction episode is RETEST_DUE.
+   * B0 never emits it (B0 has no episode derivation). */
+  CORRECTION_RETEST: 'correction_retest',
   BLOCKED: 'blocked',
   IDLE: 'idle'
 });
@@ -60,6 +67,9 @@ export const TIER_OF = deepFreeze({
   correction: TIERS.REPAIR,
   refresh: TIERS.REPAIR,
   due_retrieval: TIERS.MAINTENANCE,
+  /* A due correction retest is repair-lifecycle work: it must outrank
+   * maintenance/evidence so the episode can actually close. */
+  correction_retest: TIERS.REPAIR,
   assessment: TIERS.EVIDENCE,
   diagnostic_probe: TIERS.EVIDENCE,
   transfer: TIERS.PROGRESS,

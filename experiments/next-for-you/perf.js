@@ -18,8 +18,9 @@ import { LEARNING_POLICY_V1 } from '../../src/vnext/policy.js';
 import { RISK_PRIORS } from '../../src/vnext/risk-priors.js';
 import { engineState, selectNextTask } from '../../src/vnext/next-for-you/selector.js';
 import { generateCandidates } from '../../src/vnext/next-for-you/candidate-generator.js';
-import { policyB } from '../../src/vnext/next-for-you/policies.js';
+import { policyB, policyB1 } from '../../src/vnext/next-for-you/policies.js';
 import { validateDecision } from '../../src/vnext/next-for-you/validator.js';
+import { deriveCorrectionEpisodes } from '../../src/vnext/correction-episodes.js';
 import { emptyContext } from '../../src/vnext/next-for-you/decision-context.js';
 import { attemptEvent, observeEvent } from './scenarios.js';
 import { nextMissionTask } from '../../src/vnext/mission-runner.js';
@@ -92,11 +93,15 @@ export function measure(target, iters = 21) {
   }), iters);
   const b0 = time(() => selectNextTask({ ...input, mode: 'b0' }), iters);
   const shadow = time(() => selectNextTask({ ...input, mode: 'shadow_b0' }), iters);
+  /* 008F: B1 = B0 + episode derivation + gate; shadow_b1 = worst case
+   * (reference + B0 + B1 + classifier + both validations). */
+  const b1 = time(() => selectNextTask({ ...input, mode: 'b1' }), iters);
+  const shadowB1 = time(() => selectNextTask({ ...input, mode: 'shadow_b1' }), iters);
   const ref = time(() => nextMissionTask({
     learnerId: 'SIM', mission: MISSION, tasks: TASKS, capabilities: CAPABILITIES,
     events, riskPriors: RISK_PRIORS, now: base.now, policy: LEARNING_POLICY_V1
   }), iters);
-  return { events: events.length, generate: gen, policyB: pol, validate: val, b0, shadow, reference: ref };
+  return { events: events.length, generate: gen, policyB: pol, validate: val, b0, shadow, b1, shadowB1, reference: ref };
 }
 
 /* 008D P2 — stage-level breakdown inside one B0 select. The composite
@@ -124,8 +129,15 @@ export function profileStages(target, iters = 15) {
     generate: time(() => generateCandidates(state), iters),
     policyB: null,
     validate: null,
+    /* 008F stages: episode replay is the only net-new derivation B1
+     * pays for; b1/shadowB1 measure the full select paths. */
+    episodes: time(() => deriveCorrectionEpisodes({
+      learnerId: 'SIM', events, capabilities: CAPABILITIES, tasks: TASKS, policy: pol, now: base.now
+    }), iters),
     b0: time(() => selectNextTask({ ...base, mode: 'b0' }), iters),
     shadow: time(() => selectNextTask({ ...base, mode: 'shadow_b0' }), iters),
+    b1: time(() => selectNextTask({ ...base, mode: 'b1' }), iters),
+    shadowB1: time(() => selectNextTask({ ...base, mode: 'shadow_b1' }), iters),
     reference: time(() => nextMissionTask({
       learnerId: 'SIM', mission: MISSION, tasks: TASKS, capabilities: CAPABILITIES,
       events, riskPriors: RISK_PRIORS, now: base.now, policy: LEARNING_POLICY_V1
@@ -146,7 +158,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   for (const n of [100, 500, 2000]) {
     const r = measure(n);
     console.log(`events=${r.events}`);
-    for (const stage of ['generate', 'policyB', 'validate', 'b0', 'shadow', 'reference']) {
+    for (const stage of ['generate', 'policyB', 'validate', 'b0', 'shadow', 'b1', 'shadowB1', 'reference']) {
       const s = r[stage];
       console.log(`  ${stage.padEnd(10)} median ${s.median.toFixed(1)}ms  p95 ${s.p95.toFixed(1)}ms`);
     }

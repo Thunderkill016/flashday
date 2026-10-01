@@ -137,6 +137,39 @@ try {
     await context.close();
   }
 
+  /* ── 008F: experimental policies are unreachable from the product
+   *     URL — ?mode=b1 / ?mode=shadow_b1 must fail closed to the
+   *     reference runner, byte-identical to ?mode=reference. ── */
+  {
+    const refRun = async (learner) => {
+      const { context, page } = await mk(learner);
+      await page.goto(`${origin}vnext/?mission=mission.meet_new_person&learner=${learner}&mode=reference`);
+      const r = await drive(page, 12);
+      await context.close();
+      return r.served;
+    };
+    const ref = await refRun('sim-route-ref');
+    for (const mode of ['b1', 'shadow_b1']) {
+      const learner = `sim-route-${mode}`;
+      const { context, page, errors } = await mk(learner);
+      await page.goto(`${origin}vnext/?mission=mission.meet_new_person&learner=${learner}&mode=${mode}`);
+      const { served } = await drive(page, 12);
+      assert.equal(errors.length, 0, `${mode} pageerrors: ${errors.join(' | ')}`);
+      assert.deepEqual(served, ref, `?mode=${mode} served a non-reference sequence`);
+      /* The run pin is the tell: the resolved mode and its policy
+       * version must both show the reference fallthrough, never a B1
+       * selection policy. */
+      const pin = await page.evaluate(() => {
+        const s = window.__FD_VNEXT__?.session?.runInfo?.()?.selection;
+        return s ? `${s.mode}|${s.selectionPolicyVersion}` : null;
+      });
+      assert.equal(pin, 'reference|production.nextMissionTask',
+        `?mode=${mode} did not fail closed to reference — pinned ${pin}`);
+      await context.close();
+    }
+    check('?mode=b1|shadow_b1 fail closed on the product route (reference-identical, no B1 pin)');
+  }
+
   // ── Reload resumes the run; audit persists; decision log populated ──
   {
     const { context, page, errors } = await mk('sim-reload');

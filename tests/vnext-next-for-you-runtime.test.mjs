@@ -33,14 +33,19 @@ import { LEARNING_POLICY_V1 } from '../src/vnext/policy.js';
 import { nextMissionTask } from '../src/vnext/mission-runner.js';
 import { sha256, canon, sha256HexOfString } from '../src/vnext/next-for-you/canonical.js';
 import { emptyContext, consumeDecision, recordChoice, normalizeContext } from '../src/vnext/next-for-you/decision-context.js';
-import { selectNextTask, engineState, SELECTION_MODES, POLICY_VERSIONS, validateB0 } from '../src/vnext/next-for-you/selector.js';
-import { policyB } from '../src/vnext/next-for-you/policies.js';
+import { selectNextTask, engineState, SELECTION_MODES, POLICY_VERSIONS, POLICY_VERSION_FOR_MODE, validateB0, classifyB0B1 } from '../src/vnext/next-for-you/selector.js';
+import { policyB, policyB1 } from '../src/vnext/next-for-you/policies.js';
 import { KINDS } from '../src/vnext/next-for-you/constants.js';
+import {
+  deriveCorrectionEpisodes, pickRetestSurface, retestSurfaces,
+  remainingOf, CORRECTION_EPISODES_VERSION
+} from '../src/vnext/correction-episodes.js';
+
 import { stateDigest } from '../src/vnext/next-for-you/decision-log.js';
 import { canonicalFamilyId } from '../src/vnext/contracts.js';
 import { contractAttributesFunctions, evaluateAttempt } from '../src/vnext/evaluators.js';
 import { TASK_SITUATION, FUNCTION_MODEL } from '../src/vnext/ui/copy.js';
-import { attemptEvent, observeEvent } from '../experiments/next-for-you/scenarios.js';
+import { attemptEvent, observeEvent, missionState } from '../experiments/next-for-you/scenarios.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const T0 = Date.parse('2026-02-01T09:00:00Z');
@@ -1935,6 +1940,863 @@ const ANSWERS_008E = {
     ok(assessDecisions.length === 1,
       `008E-TRAJ ${capId}: expected exactly one assessment decision for ${assessId}, got ${assessDecisions.length}`);
     say(`008E-TRAJ: ${capId} independent → retained → transferred → ${assessId} (once)`);
+  }
+}
+
+/* ═══ 008F — correction episodes + B1 shadow policy ══════════════════
+ * CEP  pure replay derivation: lifecycle + every boundary the kernel
+ *      enforces (attribution, taught-precondition, surface freshness,
+ *      independence, relapse, canonical order).
+ * B1   policy-level: retest minting, certification gate, honest backlog,
+ *      version stamping — B0 untouched on the same frozen input.
+ * VAL  validator: independently derived episode checks, forged-version
+ *      and retest-without-episode rejection.
+ * SES  real createMissionSession trajectories under mode 'b1' + the
+ *      shadow_b1 comparison path.
+ * All events are SIM-learner attemptEvents on real fixture tasks — the
+ * same bar the projection applies (registered task@rev, modality,
+ * verifyEventTask). */
+{
+  const LAG = LEARNING_POLICY_V1.retention.minLagMs;
+  const BUY_T = (id) => BUY.tasks.find((t) => t.id === id);
+  const PLACE_T = (id) => PLACE.tasks.find((t) => t.id === id);
+  const TIME_T = (id) => TIME.tasks.find((t) => t.id === id);
+  const PRICE = 'reception.listen.understand_spoken_price';
+  const DIR = 'reception.listen.follow_short_direction';
+  const CLOCK = 'reception.listen.understand_clock_time';
+
+  const ANSWERS_008F_TIME = {
+    'task.time.diagnostic.hear': 'three',
+    'task.time.diagnostic.say': "it's three o'clock",
+    'task.time.retrieval.greeting': 'greeting',
+    'task.time.remediation.hear': 'eight',
+    'task.time.retrieval.hear': 'half_four',
+    'task.time.retrieval.say': "it's two o'clock",
+    'task.time.retrieval.greet': 'hi',
+    'task.time.interaction.ask_name': 'what is your name',
+    'task.time.interaction.guided': "it's four o'clock",
+    'task.time.interaction.unaided': "it's four o'clock",
+    'task.time.delayed.hear': 'six',
+    'task.time.delayed.say': "it's six o'clock",
+    'task.time.transfer.clinic': 'half_ten',
+    'task.time.transfer.event': "it's six o'clock",
+    'task.time.assessment.hear': 'nine',
+    'task.time.assessment.checkpoint': 'hi! it is three o clock. what is your name?',
+    'task.time.support.number_probe': 'ten'
+  };
+
+  const episodesOf = (events, now = null) => deriveCorrectionEpisodes({
+    learnerId: 'SIM', events, capabilities: CAPABILITIES, tasks: TASK_REGISTRY,
+    policy: LEARNING_POLICY_V1, now
+  });
+  const openEp = (events, capId, now = null) => episodesOf(events, now).openByCapability[capId] ?? null;
+
+  /* Shared session driver — consumes whatever the mode actually serves;
+   * `missOnce` fails the FIRST serve of that task id only. Reloads share
+   * the caller's store handles so the trajectory survives reopening. */
+  async function drive008f(sessionPromise, answerFn, { missOnce = null, missedSet = new Set(), servedList = [], steps = 200 } = {}) {
+    const session = await sessionPromise;
+    for (let i = 0; i < steps; i += 1) {
+      const s = session.screen();
+      if (s.type === 'summary') return { session, done: true };
+      if (s.type === 'intro') { await session.start({ learnerName: 'linh' }); continue; }
+      if (s.type === 'input') { await session.view(); continue; }
+      if (s.type !== 'task') throw new Error(`008F unknown screen ${s.type}`);
+      if (s.phase === 'feedback') { await session.next(); continue; }
+      servedList.push(s.taskId);
+      let a = answerFn(s);
+      if (missOnce === s.taskId && !missedSet.has(s.taskId)) {
+        missedSet.add(s.taskId);
+        a = s.responseType === 'choice' ? '__wrong__' : 'zz nonsense';
+      }
+      assert.ok(a != null, `008F no scripted answer for ${s.taskId}`);
+      if (s.responseType === 'choice') await session.commit({ optionId: a });
+      else await session.commit({ text: a });
+    }
+    return { session, done: false };
+  }
+  const bState = (fixture, events, now) => engineState({
+    learnerId: 'SIM', mission: fixture.mission, tasks: TASK_REGISTRY,
+    capabilities: CAPABILITIES, events, riskPriors: RISK_PRIORS,
+    policy: LEARNING_POLICY_V1, selection: {},
+    decisionContext: emptyContext('ep.cep', 'ses.cep'), now
+  });
+  /* The canonical failure arc on the price cap: taught → attributed miss
+   * → repair → (caller lands the retest/gate event at will). */
+  const priceArc = () => [
+    attemptEvent(BUY_T('task.price.diagnostic.hear'), capabilityById(PRICE), { at: T0, outcome: 'success' }),
+    attemptEvent(BUY_T('task.price.delayed.hear'), capabilityById(PRICE), { at: T0 + DAY, outcome: 'fail', missing: ['understand_spoken_price'] }),
+    attemptEvent(BUY_T('task.price.remediation.hear'), capabilityById(PRICE), { at: T0 + DAY + HOUR, outcome: 'success' })
+  ];
+  const arcRepairedAt = T0 + DAY + HOUR;
+
+  /* ── CEP-1..6: what may and may not open an episode ── */
+  {
+    const taughtFail = [
+      attemptEvent(BUY_T('task.price.diagnostic.hear'), capabilityById(PRICE), { at: T0, outcome: 'success' }),
+      attemptEvent(BUY_T('task.price.delayed.hear'), capabilityById(PRICE), { at: T0 + DAY, outcome: 'fail', missing: ['understand_spoken_price'] })
+    ];
+    const ep = openEp(taughtFail, PRICE, T0 + DAY + 1);
+    ok(ep && ep.state === 'OPEN', 'CEP: attributed fail on taught cap did not open an episode');
+    ok(ep.sourceTaskId === 'task.price.delayed.hear'
+      && ep.sourceTaskRevision === (BUY_T('task.price.delayed.hear').revision ?? 1)
+      && ep.sourceEventId === taughtFail[1].id
+      && ep.missingFunctions.join() === 'understand_spoken_price',
+      'CEP: episode provenance (source event/task@rev/missing fns) wrong');
+    say('CEP: attributed fail opens OPEN episode with full provenance');
+
+    /* Baseline-probe miss (nothing taught yet) — information, not a
+     * correctable episode. */
+    const baselineMiss = [attemptEvent(BUY_T('task.price.diagnostic.hear'), capabilityById(PRICE), { at: T0, outcome: 'fail', missing: ['understand_spoken_price'] })];
+    ok(openEp(baselineMiss, PRICE, T0 + 1) == null, 'CEP: baseline-probe miss opened an episode');
+    say('CEP: untaught-cap failure never opens an episode');
+
+    /* Non-attributing contract: a spoken_turn miss stamps no authority-
+     * backed missingFunctions — eval.required_functions.v1 observes but
+     * never attributes (Mission 007 boundary). */
+    const askCap = capabilityById(BUY_T('task.price.diagnostic.ask').capabilityId);
+    const unattributed = [
+      attemptEvent(BUY_T('task.price.diagnostic.ask'), askCap, { at: T0, outcome: 'success' }),
+      attemptEvent(BUY_T('task.price.delayed.ask'), askCap, { at: T0 + DAY, outcome: 'fail', missing: ['ask_price'] })
+    ];
+    ok(openEp(unattributed, askCap.id, T0 + DAY + 1) == null,
+      'CEP: non-attributing contract failure opened an episode');
+    say('CEP: eval.required_functions.v1 (non-attributing) never opens an episode');
+
+    /* Unobserved failure, stale revision, foreign learner — all filtered
+     * before any episode logic runs. */
+    const unobserved = [
+      taughtFail[0],
+      attemptEvent(BUY_T('task.price.delayed.hear'), capabilityById(PRICE), { at: T0 + DAY, outcome: 'fail', observed: false, missing: ['understand_spoken_price'] })
+    ];
+    ok(openEp(unobserved, PRICE, T0 + DAY + 1) == null, 'CEP: unobserved failure opened an episode');
+    const stale = [taughtFail[0], { ...taughtFail[1], id: 'sim-stale', taskRevision: taughtFail[1].taskRevision + 1 }];
+    ok(openEp(stale, PRICE, T0 + DAY + 1) == null, 'CEP: stale-revision failure opened an episode');
+    const foreign = [taughtFail[0], { ...taughtFail[1], id: 'sim-foreign', learnerId: 'OTHER' }];
+    ok(openEp(foreign, PRICE, T0 + DAY + 1) == null, 'CEP: another learner\'s failure leaked into this derivation');
+    say('CEP: unobserved / stale-revision / foreign-learner events never open episodes');
+  }
+
+  /* ── CEP-7..13: repair → waiting → due → verified lifecycle ── */
+  {
+    const arc = priceArc();
+    const waiting = openEp(arc, PRICE, arcRepairedAt + 1);
+    ok(waiting?.state === 'REPAIRED_WAITING'
+      && waiting.repairedAt === arcRepairedAt
+      && waiting.retestDueAt === arcRepairedAt + LAG,
+      `CEP: post-repair state wrong — ${JSON.stringify({ state: waiting?.state, dueAt: waiting?.retestDueAt })}`);
+    ok(openEp(arc, PRICE, arcRepairedAt + LAG)?.state === 'RETEST_DUE',
+      'CEP: episode not RETEST_DUE at the lag boundary');
+    ok(openEp(arc, PRICE, arcRepairedAt + LAG - 1)?.state === 'REPAIRED_WAITING',
+      'CEP: episode went due one tick early');
+    say('CEP: repair → REPAIRED_WAITING → RETEST_DUE at exactly retention.minLagMs');
+
+    /* A FAILED remediation attempt is still a repair attempt (regression:
+     * bookkeeping must run before the failure branch's continue). */
+    const failedRepair = [
+      arc[0], arc[1],
+      attemptEvent(BUY_T('task.price.remediation.hear'), capabilityById(PRICE), { at: arcRepairedAt, outcome: 'fail', missing: ['understand_spoken_price'] })
+    ];
+    const epF = openEp(failedRepair, PRICE, arcRepairedAt + 1);
+    ok(epF?.state === 'REPAIRING' && epF.repairAttempts === 1
+      && epF.repairTaskIds.includes('task.price.remediation.hear'),
+      'CEP: failed remediation did not count as a repair attempt');
+    say('CEP: failed remediation attempt counts (REPAIRING, repairAttempts=1)');
+
+    /* Early retest = valid practice, invalid verification. */
+    const early = [...arc, attemptEvent(BUY_T('task.price.retrieval.hear'), capabilityById(PRICE), { at: arcRepairedAt + LAG - HOUR, outcome: 'success' })];
+    const epEarly = openEp(early, PRICE, arcRepairedAt + LAG + 1);
+    ok(epEarly?.state === 'RETEST_DUE' && epEarly.earlyRetestAttempts === 1 && epEarly.verifiedAt == null,
+      'CEP: pre-lag covering success wrongly verified the episode');
+    say('CEP: pre-lag retest success counts as earlyRetestAttempt, never verification');
+
+    /* Source-task and repair-task surfaces can never verify — reuse is
+     * exactly the contamination the retest contract exists to prevent. */
+    const srcReuse = [...arc, attemptEvent(BUY_T('task.price.delayed.hear'), capabilityById(PRICE), { at: arcRepairedAt + LAG + HOUR, outcome: 'success' })];
+    ok(openEp(srcReuse, PRICE, arcRepairedAt + LAG + HOUR + 1)?.state === 'RETEST_DUE',
+      'CEP: source-task success post-lag wrongly verified');
+    const repReuse = [...arc, attemptEvent(BUY_T('task.price.remediation.hear'), capabilityById(PRICE), { at: arcRepairedAt + LAG + HOUR, outcome: 'success' })];
+    ok(openEp(repReuse, PRICE, arcRepairedAt + LAG + HOUR + 1)?.state === 'RETEST_DUE',
+      'CEP: repair-task success post-lag wrongly verified');
+    ok(!retestSurfaces(openEp(arc, PRICE, arcRepairedAt + LAG), TASK_REGISTRY).some((t) => t.id === 'task.price.delayed.hear' || t.id === 'task.price.remediation.hear'),
+      'CEP: retest surface pool contains source/repair task');
+    say('CEP: failed source task + consumed repair task are never retest surfaces');
+
+    /* A supported post-lag success is not independent — never verifies. */
+    const aided = [...arc, attemptEvent(BUY_T('task.price.retrieval.hear'), capabilityById(PRICE), { at: arcRepairedAt + LAG + HOUR, outcome: 'success', support: { modelAnswer: true } })];
+    ok(openEp(aided, PRICE, arcRepairedAt + LAG + HOUR + 1)?.state === 'RETEST_DUE',
+      'CEP: aided retest success wrongly verified the episode');
+    say('CEP: supported post-lag success is not retest evidence');
+
+    /* The real close: independent post-lag success on the alternate
+     * surface covering the missed function. */
+    const verified = [...arc, attemptEvent(BUY_T('task.price.retrieval.hear'), capabilityById(PRICE), { at: arcRepairedAt + LAG + HOUR, outcome: 'success' })];
+    const done = episodesOf(verified, arcRepairedAt + LAG + 2 * HOUR);
+    const epV = done.episodes[0];
+    ok(epV.state === 'VERIFIED' && epV.verifiedAt === arcRepairedAt + LAG + HOUR
+      && epV.verifiedFunctions.understand_spoken_price != null
+      && done.openByCapability[PRICE] == null,
+      'CEP: post-lag alternate-surface success did not verify the episode');
+    say('CEP: delayed independent retest on alternate surface → VERIFIED + episode closes');
+  }
+
+  /* ── CEP-14..17: relapse, replay order, re-derivation, backlog ── */
+  {
+    const arc = priceArc();
+    /* Relapse: an attributed failure while waiting/due re-opens the
+     * repair path — repairedAt/retestDueAt reset, gap widens. */
+    const relapsed = [...arc,
+      attemptEvent(BUY_T('task.price.retrieval.hear'), capabilityById(PRICE), { at: arcRepairedAt + LAG + HOUR, outcome: 'fail', missing: ['understand_spoken_price'] })];
+    const epR = openEp(relapsed, PRICE, arcRepairedAt + LAG + 2 * HOUR);
+    ok(epR?.state === 'RELAPSED' && epR.relapseCount === 1 && epR.repairedAt == null && epR.failures.length === 2,
+      `CEP: post-due failure did not relapse — ${epR?.state}`);
+    const reRepaired = [...relapsed,
+      attemptEvent(BUY_T('task.price.remediation.hear'), capabilityById(PRICE), { at: arcRepairedAt + LAG + 2 * HOUR, outcome: 'success' })];
+    const epRR = openEp(reRepaired, PRICE, arcRepairedAt + LAG + 3 * HOUR);
+    ok(epRR?.state === 'REPAIRED_WAITING' && epRR.retestDueAt === arcRepairedAt + LAG + 2 * HOUR + LAG,
+      'CEP: relapse re-repair did not restart the lag clock');
+    say('CEP: post-due failure → RELAPSED → re-repair restarts the lag');
+
+    /* Canonical replay: delivery permutation must not change the result. */
+    const shuffled = [arc[2], arc[0], arc[1]];
+    assert.deepEqual(
+      JSON.parse(JSON.stringify(episodesOf(shuffled, arcRepairedAt + 1))),
+      JSON.parse(JSON.stringify(episodesOf(arc, arcRepairedAt + 1))),
+      'CEP: event delivery order changed the derivation'
+    );
+    assert.deepEqual(episodesOf(arc, arcRepairedAt + 1), episodesOf(arc, arcRepairedAt + 1),
+      'CEP: re-derivation is not deterministic');
+    say('CEP: replay is canonical — permutation + re-derivation identical');
+
+    /* Support success is never target evidence: a support_attempt on the
+     * substrate capability cannot repair, narrow, or close the episode
+     * on the demand capability — it is not even an attempt type. */
+    const supArc = [
+      attemptEvent(TIME_T('task.time.retrieval.hear'), capabilityById(CLOCK), { at: T0, outcome: 'success' }),
+      attemptEvent(TIME_T('task.time.delayed.hear'), capabilityById(CLOCK), { at: T0 + DAY, outcome: 'fail', missing: ['understand_clock_time'] }),
+      attemptEvent(TIME_T('task.time.support.number_probe'), capabilityById('reception.listen.identify_spoken_number'), { at: T0 + DAY + HOUR, outcome: 'success' })
+    ];
+    const epSup = openEp(supArc, CLOCK, T0 + DAY + 2 * HOUR);
+    ok(epSup?.state === 'OPEN' && epSup.repairAttempts === 0 && epSup.repairedAt == null
+      && epSup.missingFunctions.join() === 'understand_clock_time',
+      'CEP: substrate support_attempt touched the target episode');
+    ok(supArc.find((e) => e.taskId === 'task.time.support.number_probe').eventType === 'support_attempt',
+      'CEP: support task did not emit support_attempt (fixture drift)');
+    say('CEP: support success on the substrate never repairs or narrows the target episode');
+
+    /* A retest surface that itself FAILED is burned for the episode —
+     * post-relapse the only honest surface is the untouched alternate. */
+    const burnedArc = [
+      attemptEvent(PLACE_T('task.place.diagnostic.follow'), capabilityById(DIR), { at: T0, outcome: 'success' }),
+      attemptEvent(PLACE_T('task.place.delayed.follow'), capabilityById(DIR), { at: T0 + DAY, outcome: 'fail', missing: ['follow_short_direction'] }),
+      attemptEvent(PLACE_T('task.place.remediation.follow'), capabilityById(DIR), { at: T0 + DAY + HOUR, outcome: 'success' }),
+      attemptEvent(PLACE_T('task.place.retrieval.follow'), capabilityById(DIR), { at: T0 + DAY + HOUR + LAG, outcome: 'fail', missing: ['follow_short_direction'] })
+    ];
+    const epBurned = openEp(burnedArc, DIR, T0 + DAY + HOUR + LAG + HOUR);
+    ok(epBurned?.state === 'RELAPSED', `CEP: failed retest did not relapse — ${epBurned?.state}`);
+    assert.deepEqual(
+      retestSurfaces(epBurned, TASK_REGISTRY).map((t) => t.id),
+      ['task.place.retrieval.follow_landmark'],
+      'CEP: burned retest surface still eligible post-relapse'
+    );
+    ok(!retestSurfaces(epBurned, TASK_REGISTRY).some((t) => t.purpose === 'support'),
+      'CEP: a support-purpose surface leaked into the retest pool');
+    say('CEP: failed retest surface is burned — only the untouched alternate remains');
+
+    /* Content backlog: a multi-function miss on clock-time can never
+     * fully verify — no mission task retests identify_spoken_number
+     * (honest authoring debt, surfaced — never silently dropped). */
+    const timeArc = [
+      attemptEvent(TIME_T('task.time.diagnostic.hear'), capabilityById(CLOCK), { at: T0, outcome: 'success' }),
+      attemptEvent(TIME_T('task.time.retrieval.hear'), capabilityById(CLOCK), { at: T0 + DAY, outcome: 'fail', missing: ['understand_clock_time', 'identify_spoken_number'] }),
+      attemptEvent(TIME_T('task.time.remediation.hear'), capabilityById(CLOCK), { at: T0 + DAY + HOUR, outcome: 'success' }),
+      attemptEvent(TIME_T('task.time.delayed.hear'), capabilityById(CLOCK), { at: T0 + 2 * DAY + 2 * HOUR, outcome: 'success' })
+    ];
+    const epB = openEp(timeArc, CLOCK, T0 + 2 * DAY + 3 * HOUR);
+    ok(epB?.state === 'RETEST_DUE' && remainingOf(epB).join() === 'identify_spoken_number',
+      `CEP: partial verification wrong — remaining=${JSON.stringify(remainingOf(epB ?? {}))}`);
+    ok(retestSurfaces(epB, TIME.tasks).length === 0,
+      'CEP: a retest surface claimed to cover identify_spoken_number — impossible today');
+    say('CEP: partial verification leaves episode open; uncovered function = real content backlog');
+  }
+
+  /* ── B1-1..5: policy behavior on the SAME frozen input ── */
+  {
+    const arc = priceArc();
+    const dueNow = arcRepairedAt + LAG + HOUR;
+    const st = bState(BUY, arc, dueNow);
+    const b0 = policyB(st);
+    const b1 = policyB1(st);
+
+    /* B0 untouched: no episode knowledge, no retest kind, no gate. */
+    ok(!(b0.candidates ?? []).some((c) => c.kind === KINDS.CORRECTION_RETEST), 'B1: B0 minted a correction_retest candidate');
+    ok(!(b0.candidates ?? []).some((c) => (c.filterReason ?? '').includes('correction_episode_gate')), 'B1: B0 ran the episode gate');
+    ok(b0.selectionPolicyVersion === POLICY_VERSIONS.B, 'B1: B0 version stamp drifted');
+
+    /* B1: retest candidate on the alternate surface, eligible, stamped. */
+    const rt = (b1.candidates ?? []).find((c) => c.kind === KINDS.CORRECTION_RETEST);
+    ok(rt && rt.taskId === 'task.price.retrieval.hear' && rt.eligible === true,
+      `B1: retest candidate missing/ineligible — ${JSON.stringify(rt && { id: rt.taskId, fr: rt.filterReason })}`);
+    ok(b1.selectionPolicyVersion === POLICY_VERSIONS.B1 && b1.correctionEpisodes?.contractVersion === CORRECTION_EPISODES_VERSION,
+      'B1: decision lacks B1 version stamp or episode digest');
+    ok(validateB0(b1, st).length === 0, `B1: genuine retest decision failed validation — ${validateB0(b1, st).join('; ')}`);
+    say('B1: RETEST_DUE mints eligible correction_retest on the alternate surface (validator-clean, B1-stamped)');
+
+    /* Certification gate: while the episode is unresolved, transfer and
+     * assessment candidates on the capability must carry the gate. */
+    const gated = (b1.candidates ?? []).filter((c) =>
+      (c.filterReason ?? '').includes('correction_episode_gate'));
+    const gatedKinds = new Set(gated.map((c) => c.kind));
+    ok(gated.length >= 1 && [...gatedKinds].every((k) => k === KINDS.TRANSFER || k === KINDS.ASSESSMENT),
+      `B1: gate hit non-certification kinds — ${[...gatedKinds].join(',')}`);
+    say(`B1: unresolved episode gates ${gated.length} certification candidate(s) [${[...gatedKinds].join(',')}]`);
+
+    /* Waiting (pre-lag): gate exists, no retest minted yet. */
+    const stWait = bState(BUY, arc, arcRepairedAt + HOUR);
+    const b1w = policyB1(stWait);
+    ok(!(b1w.candidates ?? []).some((c) => c.kind === KINDS.CORRECTION_RETEST && c.eligible),
+      'B1: retest candidate eligible before the lag elapsed');
+    ok((b1w.candidates ?? []).some((c) => (c.filterReason ?? '') === `correction_episode_gate:REPAIRED_WAITING`),
+      'B1: waiting-state gate reason missing');
+    say('B1: REPAIRED_WAITING gates certification without minting a retest');
+
+    /* Classifier coverage on real divergences. */
+    ok(classifyB0B1(b0, b1).class === 'CORRECTION_RETEST_DUE',
+      `B1: retest-vs-B0 misclassified — ${JSON.stringify(classifyB0B1(b0, b1))}`);
+    ok(classifyB0B1(b0, b0).class === 'MATCH', 'B1: identical decisions misclassified');
+    const clsWait = classifyB0B1(policyB(stWait), b1w);
+    ok(['REPAIR_WAIT', 'CORRECTION_EPISODE_GATE', 'MATCH', 'CORRECTION_CONTENT_BACKLOG'].includes(clsWait.class),
+      `B1: waiting-state divergence landed outside the taxonomy — ${clsWait.class}`);
+    say(`B1: classifier attributes divergences (retest→${classifyB0B1(b0, b1).class}, waiting→${clsWait.class})`);
+
+    /* Backlog: multi-function time-cap miss — B1 must report the
+     * uncovered remainder instead of minting a useless retest. */
+    const timeArc = [
+      attemptEvent(TIME_T('task.time.diagnostic.hear'), capabilityById(CLOCK), { at: T0, outcome: 'success' }),
+      attemptEvent(TIME_T('task.time.retrieval.hear'), capabilityById(CLOCK), { at: T0 + DAY, outcome: 'fail', missing: ['understand_clock_time', 'identify_spoken_number'] }),
+      attemptEvent(TIME_T('task.time.remediation.hear'), capabilityById(CLOCK), { at: T0 + DAY + HOUR, outcome: 'success' }),
+      attemptEvent(TIME_T('task.time.delayed.hear'), capabilityById(CLOCK), { at: T0 + 2 * DAY + 2 * HOUR, outcome: 'success' })
+    ];
+    const stB = bState(TIME, timeArc, T0 + 2 * DAY + 3 * HOUR);
+    const b1b = policyB1(stB);
+    ok((b1b.explanation?.suppressed ?? []).some((s) => s.includes('correction_content_backlog')),
+      'B1: uncovered remaining function did not surface as correction_content_backlog');
+    ok(!(b1b.candidates ?? []).some((c) => c.kind === KINDS.CORRECTION_RETEST && c.eligible),
+      'B1: retest minted although no surface covers the remaining function');
+    say('B1: uncovered remaining function → explicit correction_content_backlog, no fake retest');
+  }
+
+  /* ── VAL: validator independence — never trusts decision-attached
+   *     episode state; forged or mismatched B1 claims fail closed ── */
+  {
+    const arc = priceArc();
+    const dueNow = arcRepairedAt + LAG + HOUR;
+    const st = bState(BUY, arc, dueNow);
+    const b0 = policyB(st);
+    const b1 = policyB1(st);
+
+    /* A B0 decision that served certification on the open episode is
+     * legal B0 (episode-blind). Stamp it as B1 → the validator must
+     * re-derive the episode itself and reject the certification. */
+    const forged = structuredClone(b0);
+    forged.selectionPolicyVersion = POLICY_VERSIONS.B1;
+    const certCand = (b0.candidates ?? []).find((c) => c.eligible && (c.kind === KINDS.TRANSFER || c.kind === KINDS.ASSESSMENT) && c.capabilityId === PRICE);
+    if (certCand) {
+      forged.chosen = { ...certCand };
+      const v = validateB0(forged, st);
+      ok(v.some((x) => x.startsWith('certification_under_open_episode')),
+        `VAL: forged B1 certification on open episode passed — ${v.join(';')}`);
+    } else {
+      /* No certification mintable on this state — still require the
+       * retest checks to fire on a forged retest claim. */
+      forged.chosen = { kind: KINDS.CORRECTION_RETEST, taskId: 'task.price.retrieval.hear', taskRevision: 1, capabilityId: PRICE };
+      const v = validateB0(forged, st);
+      ok(v.length === 0 || v.every((x) => x.startsWith('correction_retest') || x.startsWith('certification_under_open_episode')),
+        `VAL: forged B1 decision produced unexpected verdict — ${v.join(';')}`);
+    }
+
+    /* A B1-stamped retest claim where NO episode exists must be caught
+     * without trusting the decision's own (absent) episode digest. */
+    const clean = bState(BUY, [arc[0]], dueNow);
+    const forged2 = structuredClone(policyB(clean));
+    forged2.selectionPolicyVersion = POLICY_VERSIONS.B1;
+    forged2.chosen = { kind: KINDS.CORRECTION_RETEST, taskId: 'task.price.retrieval.hear', taskRevision: BUY_T('task.price.retrieval.hear').revision ?? 1, capabilityId: PRICE };
+    const v2 = validateB0(forged2, clean);
+    ok(v2.includes('correction_retest_without_episode'),
+      `VAL: episode-free retest claim passed validation — ${v2.join(';')}`);
+
+    /* The genuine B1 retest decision stays clean — control case. */
+    ok(validateB0(b1, st).length === 0, 'VAL: genuine B1 retest wrongly rejected');
+    say('VAL: validator independently re-derives episodes; forged/stale retest claims fail closed');
+  }
+
+  /* ── CEP-ID: episode identity is provenance-bound — a canonical
+   *     digest of learner + capability + opening-failure record, never
+   *     an ordinal. Same replay → same id; inserts, permutations and
+   *     relapses can never renumber or share it. ── */
+  {
+    const cap = capabilityById(PRICE);
+    const ev = (tid, at, outcome, missing) =>
+      attemptEvent(BUY_T(tid), cap, { at, outcome, missing });
+
+    /* Two learners on the same capability can never share an id. */
+    const other = priceArc().map((e) => ({ ...e, learnerId: 'OTHER', id: `${e.id}.o` }));
+    const epSim = episodesOf(priceArc(), arcRepairedAt).episodes[0];
+    const epOther = deriveCorrectionEpisodes({
+      learnerId: 'OTHER', events: other, capabilities: CAPABILITIES,
+      tasks: TASK_REGISTRY, policy: LEARNING_POLICY_V1, now: arcRepairedAt
+    }).episodes[0];
+    ok(epSim.episodeId !== epOther.episodeId && epSim.learnerId === 'SIM' && epOther.learnerId === 'OTHER',
+      `CEP-ID: cross-learner episode collision — ${epSim.episodeId}`);
+
+    /* Appending an EARLIER closed episode on the same capability must
+     * not renumber an existing later episode (ordinal ids would). */
+    const epA = [
+      ev('task.price.diagnostic.hear', T0, 'success'),
+      ev('task.price.delayed.hear', T0 + DAY, 'fail', ['understand_spoken_price']),
+      ev('task.price.remediation.hear', T0 + DAY + HOUR, 'success'),
+      ev('task.price.retrieval.hear', T0 + DAY + HOUR + LAG, 'success')
+    ];
+    const epBEvents = [ev('task.price.delayed.hear', T0 + 4 * DAY, 'fail', ['understand_spoken_price'])];
+    const base = [...epA, ...epBEvents];
+    const idsBase = episodesOf(base, T0 + 5 * DAY).episodes.map((x) => x.episodeId);
+    /* C opens only AFTER A verified (A's retest lands at +2D+1h) and
+     * closes before B opens — a genuinely EARLIER closed episode in
+     * replay order that must not disturb B's identity. */
+    const epC = [
+      ev('task.price.delayed.hear', T0 + 2 * DAY + 2 * HOUR, 'fail', ['understand_spoken_price']),
+      ev('task.price.remediation.hear', T0 + 2 * DAY + 3 * HOUR, 'success'),
+      ev('task.price.retrieval.hear', T0 + 2 * DAY + 3 * HOUR + LAG, 'success')
+    ];
+    const idsAfter = episodesOf([...base, ...epC], T0 + 5 * DAY).episodes.map((x) => x.episodeId);
+    ok(idsBase.length === 2 && idsAfter.length === 3 && idsBase.every((id) => idsAfter.includes(id)),
+      `CEP-ID: historical insert renumbered episodes — ${JSON.stringify(idsBase)} → ${JSON.stringify(idsAfter)}`);
+
+    /* Event-order permutation is byte-irrelevant — same failure records
+     * produce the same episode ids regardless of delivery order. */
+    const shuffled = [...base].reverse();
+    const idsPerm = episodesOf(shuffled, T0 + 5 * DAY).episodes.map((x) => x.episodeId).sort();
+    assert.deepEqual(idsPerm, [...idsBase].sort(), 'CEP-ID: permutation changed episode ids');
+
+    /* A relapse keeps the same episode — identity is the opening
+     * failure, not the latest state. */
+    const rel = [
+      ev('task.price.diagnostic.hear', T0, 'success'),
+      ev('task.price.delayed.hear', T0 + DAY, 'fail', ['understand_spoken_price']),
+      ev('task.price.remediation.hear', T0 + DAY + HOUR, 'success'),
+      ev('task.price.retrieval.hear', T0 + DAY + HOUR + LAG, 'fail', ['understand_spoken_price'])
+    ];
+    const epRel = episodesOf(rel, T0 + DAY + HOUR + LAG + HOUR).episodes;
+    ok(epRel.length === 1 && epRel[0].relapseCount === 1
+      && epRel[0].episodeId === episodesOf(rel.slice(0, 3), T0 + DAY + 2 * HOUR).episodes[0]?.episodeId,
+      'CEP-ID: relapse did not retain the opening episode id');
+    say('CEP-ID: provenance-bound ids — cross-learner unique, insert/permutation/relapse stable');
+  }
+
+  /* ── CEP-BURN: every exposed surface is unfit to be the delayed
+   *     retest — repair-establishing successes (ANY purpose) and
+   *     pre-lag practiced probes burn exactly like failures do. ── */
+  {
+    const cap = capabilityById(PRICE);
+    const ev = (tid, at, outcome, missing) =>
+      attemptEvent(BUY_T(tid), cap, { at, outcome, missing });
+    const buyTasks = BUY.tasks.filter((t) => BUY.mission.taskIds.includes(t.id));
+    const dueNow = arcRepairedAt + LAG + HOUR;
+
+    /* Repair riding a retest-eligible surface (retrieval.hear, NOT a
+     * remediation task) — that surface is now exposed evidence and can
+     * never double as the delayed independent probe. */
+    const epA = episodesOf([
+      ev('task.price.diagnostic.hear', T0, 'success'),
+      ev('task.price.delayed.hear', T0 + DAY, 'fail', ['understand_spoken_price']),
+      ev('task.price.retrieval.hear', arcRepairedAt, 'success')
+    ], dueNow).episodes[0];
+    ok(epA?.state === 'RETEST_DUE' && epA.repairSurfaceTaskIds.includes('task.price.retrieval.hear')
+      && pickRetestSurface(epA, buyTasks) == null,
+      `CEP-BURN: repair surface still retest-eligible — ${pickRetestSurface(epA, buyTasks)?.id}`);
+
+    /* Pre-lag practice on the probe burns it too — an exposed item is
+     * not an independent delayed check. */
+    const epB2 = episodesOf([
+      ev('task.price.diagnostic.hear', T0, 'success'),
+      ev('task.price.delayed.hear', T0 + DAY, 'fail', ['understand_spoken_price']),
+      ev('task.price.remediation.hear', arcRepairedAt, 'success'),
+      ev('task.price.retrieval.hear', arcRepairedAt + HOUR, 'success')
+    ], dueNow).episodes[0];
+    ok(epB2?.earlyRetestAttempts === 1 && epB2.practicedRetestTaskIds.includes('task.price.retrieval.hear')
+      && pickRetestSurface(epB2, buyTasks) == null,
+      'CEP-BURN: pre-lag practiced surface stayed retest-eligible');
+
+    /* While the episode waits out the lag, the surviving probe surfaces
+     * are reserved — nothing may serve them inside the window. */
+    const dWait = episodesOf([
+      ev('task.price.diagnostic.hear', T0, 'success'),
+      ev('task.price.delayed.hear', T0 + DAY, 'fail', ['understand_spoken_price']),
+      ev('task.price.remediation.hear', arcRepairedAt, 'success')
+    ], arcRepairedAt + HOUR);
+    const waitEp = dWait.episodes[0];
+    ok(waitEp?.state === 'REPAIRED_WAITING'
+      && dWait.retestReservedTaskIds.has('task.price.retrieval.hear')
+      && !dWait.retestReservedTaskIds.has('task.price.delayed.hear'),
+      `CEP-BURN: probe surfaces not reserved during the lag — ${JSON.stringify([...dWait.retestReservedTaskIds])}`);
+
+    /* And with every honest surface consumed, B1 surfaces backlog —
+     * never a recycled probe. */
+    const arcBurned = [
+      ev('task.price.diagnostic.hear', T0, 'success'),
+      ev('task.price.delayed.hear', T0 + DAY, 'fail', ['understand_spoken_price']),
+      ev('task.price.remediation.hear', arcRepairedAt, 'success'),
+      ev('task.price.retrieval.hear', arcRepairedAt + HOUR, 'success')
+    ];
+    const stBurned = bState(BUY, arcBurned, dueNow);
+    const b1Burned = policyB1(stBurned);
+    ok((b1Burned.explanation?.suppressed ?? []).some((s) => s.includes('correction_content_backlog')),
+      'CEP-BURN: exhausted surfaces produced a recycled retest, not backlog');
+    say('CEP-BURN: repair surfaces + pre-lag probes burned; exhausted set → explicit backlog');
+  }
+
+  /* ── VAL-TERM: the validator independently reconstructs B1 due-retest
+   *     work — forged terminal decisions on a due episode with an
+   *     honest surface are caught even when the generic rebuild finds
+   *     nothing. Isolated single-task mission so generic work is ∅. ── */
+  {
+    const cap = capabilityById(PRICE);
+    const ev = (tid, at, outcome, missing) =>
+      attemptEvent(BUY_T(tid), cap, { at, outcome, missing });
+    const dueNow = arcRepairedAt + LAG + HOUR;
+    const isoMission = {
+      ...BUY.mission,
+      taskIds: ['task.price.retrieval.hear'],
+      targetCapabilities: [PRICE],
+      carrierCapabilities: [], prerequisiteCapabilities: [], supportCapabilities: []
+    };
+    const isoState = (events) => engineState({
+      learnerId: 'SIM', mission: isoMission, tasks: TASK_REGISTRY,
+      capabilities: CAPABILITIES, events, riskPriors: RISK_PRIORS,
+      policy: LEARNING_POLICY_V1, selection: {},
+      decisionContext: emptyContext('ep.vt', 'ses.vt'), now: dueNow
+    });
+
+    /* Due + honest surface: the retest is the ONLY work — forged
+     * terminals can only be caught by the episode-derived path. */
+    const stDue = isoState(priceArc());
+    const b1Due = policyB1(stDue);
+    ok(b1Due.chosen?.kind === KINDS.CORRECTION_RETEST, `VAL-TERM: setup wrong — ${b1Due.chosen?.kind}`);
+    const vIdle = validateB0({ ...structuredClone(b1Due), chosen: { kind: 'idle' } }, stDue);
+    ok(vIdle.includes('fabricated_idle'), `VAL-TERM: forged idle on due retest passed — ${vIdle.join(';')}`);
+    const vBlocked = validateB0({ ...structuredClone(b1Due), chosen: { kind: 'blocked' } }, stDue);
+    ok(vBlocked.includes('blocked_while_valid_work'), `VAL-TERM: forged blocked on due retest passed — ${vBlocked.join(';')}`);
+
+    /* Due + NO honest surface: blocked/backlog stays valid. */
+    const stBurned = isoState([
+      ...priceArc(),
+      ev('task.price.retrieval.hear', arcRepairedAt + HOUR, 'success')
+    ]);
+    const b1Burned = policyB1(stBurned);
+    const vReal = validateB0(b1Burned, stBurned);
+    ok(!vReal.some((x) => x === 'blocked_while_valid_work' || x === 'fabricated_idle'),
+      `VAL-TERM: honest backlog decision rejected — ${vReal.join(';')}`);
+    const vForgeBlocked = validateB0({ ...structuredClone(b1Burned), chosen: { kind: 'blocked' } }, stBurned);
+    ok(!vForgeBlocked.includes('blocked_while_valid_work'),
+      `VAL-TERM: blocked still rejected though no surface exists — ${vForgeBlocked.join(';')}`);
+    say('VAL-TERM: forged idle/blocked on due retest rejected; no-surface backlog stays valid');
+  }
+
+  /* ── SEL-ADAPTER: correction_content_backlog survives the selection
+   *     boundary as its own reasonCode, never generic blocked. ── */
+  {
+    const cap = capabilityById(PRICE);
+    const ev = (tid, at, outcome, missing) =>
+      attemptEvent(BUY_T(tid), cap, { at, outcome, missing });
+    const dueNow = arcRepairedAt + LAG + HOUR;
+    const sel = selectNextTask({
+      mode: 'b1', learnerId: 'SIM',
+      mission: { ...BUY.mission, taskIds: ['task.price.retrieval.hear'], targetCapabilities: [PRICE], carrierCapabilities: [], prerequisiteCapabilities: [], supportCapabilities: [] },
+      tasks: TASK_REGISTRY, capabilities: CAPABILITIES,
+      events: [
+        ...priceArc(),
+        ev('task.price.retrieval.hear', arcRepairedAt + HOUR, 'success')
+      ],
+      riskPriors: RISK_PRIORS, policy: LEARNING_POLICY_V1, selection: {},
+      decisionContext: emptyContext('ep.sa', 'ses.sa'), now: dueNow
+    });
+    ok(sel.reasonCode === 'correction_content_backlog' && sel.status === 'blocked',
+      `SEL-ADAPTER: backlog collapsed — status=${sel.status} reasonCode=${sel.reasonCode}`);
+    ok(typeof sel.reason === 'string' && sel.reason.includes('correction_content_backlog'),
+      `SEL-ADAPTER: reason text lost — ${sel.reason}`);
+    say('SEL-ADAPTER: b1 backlog surfaces as correction_content_backlog reasonCode');
+  }
+
+  /* ── SES-B1: full trajectory under mode 'b1' — the policy actually
+   *     serving. Miss → repair → WAIT (no certification) → lag → retest
+   *     → verify → certification resumes. ── */
+  {
+    const learner = 'RT.008f.b1.buy';
+    const eventStore = createMemoryEventStore();
+    const runStore = createMemoryRunStore();
+    const decisionStore = createMemoryDecisionStore();
+    const served = [];
+    const missed = new Set();
+    const answers = (s) => ANSWERS_008E[s.taskId] ?? SCRIPT[s.taskId];
+    const open = async () => {
+      const s = makeSession({ fixture: BUY, learner, mode: 'b1', eventStore, runStore, decisionStore });
+      await s.init();
+      return s;
+    };
+
+    /* Phase A+B: teach everything immediately routable, jump the
+     * retention lag, miss the delayed retest once — episode OPENs. */
+    for (let round = 0; round < 4; round += 1) await drive008f(open(), answers, { servedList: served });
+    tick += DAY + HOUR;
+    for (let round = 0; round < 10 && !missed.has('task.price.delayed.hear'); round += 1) {
+      await drive008f(open(), answers, { missOnce: 'task.price.delayed.hear', missedSet: missed, servedList: served });
+      tick += 2 * HOUR;
+    }
+    ok(missed.has('task.price.delayed.hear'), `SES-B1: attributing miss never produced — ${served.join(' → ')}`);
+    let events = await eventStore.list();
+    /* The same drive may already have served the repair — what the log
+     * must prove is that an episode OPENED from the delayed-retest miss
+     * (source provenance), whatever lifecycle stage it has reached. */
+    let epSet = deriveCorrectionEpisodes({ learnerId: learner, events, capabilities: CAPABILITIES, tasks: TASK_REGISTRY, policy: LEARNING_POLICY_V1, now: tick });
+    let ep = epSet.episodes.find((e) => e.capabilityId === PRICE);
+    ok(ep != null && ep.sourceTaskId === 'task.price.delayed.hear' && ep.failures.length >= 1,
+      `SES-B1: no episode opened from the delayed-retest miss — ${JSON.stringify(epSet.episodes.map((e) => [e.capabilityId, e.state]))}`);
+    const epOpenedAt = ep.openedAt;
+
+    /* Phase C: repair + delayed retest may all complete inside the drive.
+     * What must hold: NO certification decision on PRICE was consumed
+     * inside the episode's open window [openedAt, verifiedAt).
+     * B1 deliberately lets the mission idle while the episode waits out
+     * the lag — `done` is NOT the stop condition here; the clock must
+     * keep jumping until the retest is due and verifies. */
+    const priceEp = async () => deriveCorrectionEpisodes({
+      learnerId: learner, events: await eventStore.list(), capabilities: CAPABILITIES,
+      tasks: TASK_REGISTRY, policy: LEARNING_POLICY_V1, now: tick
+    }).episodes.find((e) => e.capabilityId === PRICE);
+    for (let round = 0; round < 30; round += 1) {
+      await drive008f(open(), answers, { servedList: served });
+      const cur = await priceEp();
+      if (cur?.state === 'VERIFIED') break;
+      /* A terminal-mission summary while the episode is open means B1
+       * is correctly refusing to certify — jump the lag and re-drive. */
+      tick += 2 * HOUR;
+    }
+    events = await eventStore.list();
+    const finalSet = deriveCorrectionEpisodes({ learnerId: learner, events, capabilities: CAPABILITIES, tasks: TASK_REGISTRY, policy: LEARNING_POLICY_V1, now: tick });
+    const epDone = finalSet.episodes.find((e) => e.capabilityId === PRICE);
+    const audits = await decisionStore.list();
+    const BUY_TASK_ON_CAP = (id) => BUY_T(id)?.capabilityId === PRICE;
+    const certInsideWindow = audits.filter((r) =>
+      ['transfer', 'assessment'].includes(r.chosenKind)
+      && r.taskId && BUY_TASK_ON_CAP(r.taskId)
+      && r.timestamp >= epOpenedAt
+      && (epDone?.verifiedAt == null || r.timestamp < epDone.verifiedAt));
+    ok(certInsideWindow.length === 0,
+      `SES-B1: certification consumed while episode open — ${certInsideWindow.map((r) => `${r.chosenKind}@${r.taskId}@${r.timestamp}`).join(',')}`);
+    ok(epDone?.state === 'VERIFIED', `SES-B1: episode never verified — state=${epDone?.state}`);
+
+    const retestAudit = audits.find((r) => r.chosenKind === 'correction_retest');
+    ok(retestAudit != null, 'SES-B1: no correction_retest decision was consumed — the retest never served under B1');
+    ok(retestAudit.selectionPolicyVersion === POLICY_VERSIONS.B1,
+      `SES-B1: retest audit pinned ${retestAudit.selectionPolicyVersion}`);
+    ok(retestAudit.taskId !== 'task.price.delayed.hear' && retestAudit.taskId !== 'task.price.remediation.hear',
+      `SES-B1: retest reused source/repair surface — ${retestAudit.taskId}`);
+    const pin = (await runStore.list()).find((r) => r.id)?.selection?.selectionPolicyVersion;
+    ok(pin === POLICY_VERSIONS.B1, `SES-B1: run pinned '${pin}', expected '${POLICY_VERSIONS.B1}'`);
+    say(`SES-B1: BUY miss→episode→repair→retest(${retestAudit.taskId})→VERIFIED under 'b1'; certification held inside the open window; pin=${pin}`);
+  }
+
+  /* ── SES-B1-RELAPSE: PLACE trajectory — the retest itself FAILS while
+   *     due: the same episode relapses (never replaced), repair returns,
+   *     the lag restarts, and the burned retest surface can never come
+   *     back as the "independent" retest (retrieval.follow_landmark is
+   *     the only honest surface left). ── */
+  {
+    const learner = 'RT.008f.b1.place';
+    const eventStore = createMemoryEventStore();
+    const runStore = createMemoryRunStore();
+    const decisionStore = createMemoryDecisionStore();
+    const served = [];
+    const missed = new Set();
+    const answers = (s) => ANSWERS_008E[s.taskId] ?? SCRIPT[s.taskId];
+    const open = async () => {
+      const s = makeSession({ fixture: PLACE, learner, mode: 'b1', eventStore, runStore, decisionStore });
+      await s.init();
+      return s;
+    };
+    const epNow = async () => deriveCorrectionEpisodes({
+      learnerId: learner, events: await eventStore.list(), capabilities: CAPABILITIES,
+      tasks: TASK_REGISTRY, policy: LEARNING_POLICY_V1, now: tick
+    }).episodes.find((e) => e.capabilityId === DIR);
+
+    for (let round = 0; round < 4; round += 1) await drive008f(open(), answers, { servedList: served });
+    tick += DAY + HOUR;
+    for (let round = 0; round < 10 && !missed.has('task.place.delayed.follow'); round += 1) {
+      await drive008f(open(), answers, { missOnce: 'task.place.delayed.follow', missedSet: missed, servedList: served });
+      tick += 2 * HOUR;
+    }
+    ok(missed.has('task.place.delayed.follow'), `SES-B1-PLACE: attributing miss never produced — ${served.join(' → ')}`);
+    let ep = await epNow();
+    ok(ep != null && ep.sourceTaskId === 'task.place.delayed.follow',
+      `SES-B1-PLACE: no episode opened from the delayed miss — ${ep?.sourceTaskId}`);
+    const episodeId = ep.episodeId;
+    const epOpenedAt = ep.openedAt;
+
+    /* Repair → wait for the retest to come due (the clock keeps jumping
+     * while B1 refuses to certify). */
+    for (let round = 0; round < 30 && (await epNow())?.state !== 'RETEST_DUE'; round += 1) {
+      await drive008f(open(), answers, { servedList: served });
+      tick += 2 * HOUR;
+    }
+    ok((await epNow())?.state === 'RETEST_DUE', `SES-B1-PLACE: episode never reached RETEST_DUE — ${(await epNow())?.state}`);
+
+    /* Relapse: fail the retest surface itself — a fresh attributing miss
+     * inside the same episode, never a new one. */
+    for (let round = 0; round < 12 && !missed.has('task.place.retrieval.follow'); round += 1) {
+      await drive008f(open(), answers, { missOnce: 'task.place.retrieval.follow', missedSet: missed, servedList: served });
+      tick += 2 * HOUR;
+    }
+    ok(missed.has('task.place.retrieval.follow'), 'SES-B1-PLACE: retest surface never served to be failed');
+    ep = await epNow();
+    /* The same drive may already have re-repaired — what the log must
+     * prove is the SAME episode absorbed the retest failure (never a
+     * replacement), recorded the relapse, and is not yet verified. */
+    ok(ep != null && ep.episodeId === episodeId && ep.relapseCount === 1 && ep.failures.length === 2
+      && ep.state !== 'VERIFIED',
+      `SES-B1-PLACE: relapse did not reopen the SAME episode — ${JSON.stringify(ep && { id: ep.episodeId, state: ep.state, relapses: ep.relapseCount, failures: ep.failures.length })}`);
+
+    /* Re-repair → lag restarts → the verifying retest must be the
+     * un-burned alternate; the failed retest surface stays banned. */
+    for (let round = 0; round < 30; round += 1) {
+      await drive008f(open(), answers, { servedList: served });
+      const cur = await epNow();
+      if (cur?.state === 'VERIFIED') break;
+      tick += 2 * HOUR;
+    }
+    const epDone = await epNow();
+    ok(epDone?.state === 'VERIFIED', `SES-B1-PLACE: episode never verified — state=${epDone?.state}`);
+    const audits = await decisionStore.list();
+    const retestAudits = audits.filter((r) => r.chosenKind === 'correction_retest');
+    /* The burned surface was minted exactly ONCE — the decision that
+     * produced the relapse (audit ts can trail the failure's occurredAt
+     * by minutes: now() advances per call). It can never come back. */
+    ok(retestAudits.filter((r) => r.taskId === 'task.place.retrieval.follow').length === 1,
+      `SES-B1-PLACE: burned retest surface minted again — ${JSON.stringify(retestAudits.map((r) => r.taskId))}`);
+    /* Provenance: the verifying event sits on the un-burned alternate. */
+    const events = await eventStore.list();
+    const verifier = events.find((e) => e.id === epDone.verifiedByEventId);
+    ok(verifier?.taskId === 'task.place.retrieval.follow_landmark',
+      `SES-B1-PLACE: episode verified by ${verifier?.taskId} — expected retrieval.follow_landmark`);
+    const PLACE_TASK_ON_CAP = (id) => PLACE_T(id)?.capabilityId === DIR;
+    const certInsideWindow = audits.filter((r) =>
+      ['transfer', 'assessment'].includes(r.chosenKind)
+      && r.taskId && PLACE_TASK_ON_CAP(r.taskId)
+      && r.timestamp >= epOpenedAt
+      && r.timestamp < epDone.verifiedAt);
+    ok(certInsideWindow.length === 0,
+      `SES-B1-PLACE: certification consumed inside the open window — ${certInsideWindow.map((r) => r.taskId).join(',')}`);
+    say(`SES-B1-PLACE: miss→episode→repair→retest FAIL→RELAPSED(same episode)→re-repair→retest(${verifier.taskId})→VERIFIED; burned surface banned`);
+  }
+
+  /* ── SES-B1-TIME: clock-time path end-to-end under 'b1'. The support
+   *     probe (identify_spoken_number substrate) may serve on demand —
+   *   it is a different capability AND a non-attempt event type, so the
+   *     target episode must outlive it. ── */
+  {
+    const learner = 'RT.008f.b1.time';
+    const eventStore = createMemoryEventStore();
+    const runStore = createMemoryRunStore();
+    const decisionStore = createMemoryDecisionStore();
+    const served = [];
+    const missed = new Set();
+    const answers = (s) => ANSWERS_008F_TIME[s.taskId] ?? SCRIPT[s.taskId];
+    const open = async () => {
+      const s = makeSession({ fixture: TIME, learner, mode: 'b1', eventStore, runStore, decisionStore });
+      await s.init();
+      return s;
+    };
+    const epNow = async () => deriveCorrectionEpisodes({
+      learnerId: learner, events: await eventStore.list(), capabilities: CAPABILITIES,
+      tasks: TASK_REGISTRY, policy: LEARNING_POLICY_V1, now: tick
+    }).episodes.find((e) => e.capabilityId === CLOCK);
+
+    for (let round = 0; round < 4; round += 1) await drive008f(open(), answers, { servedList: served });
+    tick += DAY + HOUR;
+    for (let round = 0; round < 10 && !missed.has('task.time.delayed.hear'); round += 1) {
+      await drive008f(open(), answers, { missOnce: 'task.time.delayed.hear', missedSet: missed, servedList: served });
+      tick += 2 * HOUR;
+    }
+    ok(missed.has('task.time.delayed.hear'), `SES-B1-TIME: attributing miss never produced — ${served.join(' → ')}`);
+    let ep = await epNow();
+    ok(ep != null && ep.sourceTaskId === 'task.time.delayed.hear' && ep.missingFunctions.includes('understand_clock_time'),
+      `SES-B1-TIME: no episode opened from the delayed miss — ${ep?.sourceTaskId} missing=${ep?.missingFunctions}`);
+    const epOpenedAt = ep.openedAt;
+
+    for (let round = 0; round < 30; round += 1) {
+      await drive008f(open(), answers, { servedList: served });
+      const cur = await epNow();
+      if (cur?.state === 'VERIFIED') break;
+      tick += 2 * HOUR;
+    }
+    const epDone = await epNow();
+    ok(epDone?.state === 'VERIFIED', `SES-B1-TIME: episode never verified — state=${epDone?.state}`);
+
+    /* Provenance: the verifying event must be the retest surface, never
+     * the support probe (support success cannot close a target episode)
+     * and never the burned source/repair surfaces. */
+    const events = await eventStore.list();
+    const verifier = events.find((e) => e.id === epDone.verifiedByEventId);
+    ok(verifier?.taskId === 'task.time.retrieval.hear',
+      `SES-B1-TIME: episode verified by ${verifier?.taskId} — expected the alternate retest surface`);
+    const audits = await decisionStore.list();
+    const TIME_TASK_ON_CAP = (id) => TIME_T(id)?.capabilityId === CLOCK;
+    const certInsideWindow = audits.filter((r) =>
+      ['transfer', 'assessment'].includes(r.chosenKind)
+      && r.taskId && TIME_TASK_ON_CAP(r.taskId)
+      && r.timestamp >= epOpenedAt
+      && r.timestamp < epDone.verifiedAt);
+    ok(certInsideWindow.length === 0,
+      `SES-B1-TIME: certification consumed inside the open window — ${certInsideWindow.map((r) => r.taskId).join(',')}`);
+    say(`SES-B1-TIME: miss→episode→repair→retest(${verifier.taskId})→VERIFIED under 'b1'; ${served.includes('task.time.support.number_probe') ? 'support probe served mid-window and did not close the episode' : 'no support demand on this arc'}`);
+  }
+
+  /* ── SES-SHADOW: mode 'shadow_b1' serves the REFERENCE path while the
+   *     B0↔B1 comparison is recorded — the learner never sees B1. ── */
+  {
+    const learner = 'RT.008f.shadow';
+    const eventStore = createMemoryEventStore();
+    const runStore = createMemoryRunStore();
+    const decisionStore = createMemoryDecisionStore();
+    const shadows = [];
+    const session = makeSession({
+      fixture: BUY, learner, mode: 'shadow_b1',
+      eventStore, runStore, decisionStore,
+      shadowSink: (s) => shadows.push(s)
+    });
+    await session.init();
+    const served = [];
+    for (let round = 0; round < 24; round += 1) {
+      const s = session.screen();
+      if (s.type === 'summary') break;
+      if (s.type === 'intro') { await session.start({ learnerName: 'linh' }); continue; }
+      if (s.type === 'input') { await session.view(); continue; }
+      if (s.type === 'task' && s.phase === 'prompt') {
+        served.push(s.taskId);
+        const a = ANSWERS_008E[s.taskId] ?? SCRIPT[s.taskId] ?? 'x';
+        if (s.responseType === 'choice') await session.commit({ optionId: a });
+        else await session.commit({ text: a });
+        continue;
+      }
+      if (s.type === 'task') { await session.next(); continue; }
+      break;
+    }
+    ok(served.length > 0, 'SES-SHADOW: shadow_b1 served nothing — reference path broken');
+    ok(shadows.length > 0, 'SES-SHADOW: no shadow comparisons recorded');
+    ok(shadows.every((s) => s.b1 != null && s.b0VsB1 != null && typeof s.b0VsB1.class === 'string'),
+      'SES-SHADOW: comparison rows missing b1 or b0VsB1 fields');
+    const pin = session.runInfo()?.selection?.selectionPolicyVersion;
+    ok(pin === POLICY_VERSIONS.B1, `SES-SHADOW: shadow_b1 run pinned '${pin}'`);
+    say(`SES-SHADOW: shadow_b1 served ${served.length} reference task(s); ${shadows.length} comparisons logged; pin=${pin}`);
   }
 }
 

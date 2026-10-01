@@ -9,7 +9,7 @@
  */
 import { createMissionSession } from '../ui-session.js';
 import { createLocalEventStore, createLocalRunStore, createLocalDecisionStore } from './local-store.js';
-import { SELECTION_MODES } from '../next-for-you/selector.js';
+import { SELECTION_MODES, PRODUCT_ROUTE_MODES } from '../next-for-you/selector.js';
 import {
   PURPOSE_FRAME, FUNCTION_MODEL, FUNCTION_HINT, CAP_LABEL,
   TASK_SITUATION, MISSION_INTRO, progressCopy, SUMMARY_COPY,
@@ -61,11 +61,13 @@ export async function bootMissionPage(root) {
   /* 008C §19: this dedicated surface deliberately runs B0 by default;
    * ?mode=reference|shadow overrides for comparison and debugging. An
    * unrecognized value fails closed to reference, never silently to an
-   * unintended policy. */
+   * unintended policy. 008F: the allowlist is the pre-008F set only —
+   * b1/shadow_b1 are experiment entry points reachable through
+   * createMissionSession, never through this learner-facing URL. */
   const modeParam = params.get('mode');
   const selectionMode = modeParam == null
     ? SELECTION_MODES.B0
-    : Object.values(SELECTION_MODES).includes(modeParam)
+    : PRODUCT_ROUTE_MODES.includes(modeParam)
       ? modeParam
       : SELECTION_MODES.REFERENCE;
 
