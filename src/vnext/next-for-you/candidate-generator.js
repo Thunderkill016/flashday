@@ -14,10 +14,11 @@ import { buildLearnerModel } from '../learner-model.js';
 import { projectLearnerState, RETENTION_DELAY_MS } from '../projection.js';
 import { deriveSupportLifecycle } from '../planner.js';
 import { resolvePolicy } from '../policy.js';
-import { verifyEventTask, validateTask, canonicalFamilyId } from '../contracts.js';
+import { canonicalFamilyId } from '../contracts.js';
 import { contractAttributesFunctions } from '../evaluators.js';
 import { priorById } from '../risk-priors.js';
 import { KINDS, PROVENANCE } from './constants.js';
+import { createTaskResolver } from './task-resolver.js';
 
 const EXPOSURE_PURPOSES = ['input', 'notice'];
 const ELICITING_PURPOSES = ['retrieval', 'production', 'interaction'];
@@ -89,37 +90,24 @@ export function generateCandidates({ learnerId, events, capabilities, tasks, rol
   const ceiling = selection.failureCeiling ?? 3;
   const diagnosticBudget = selection.diagnosticMaxPerEpisode ?? 2;
 
-  /* Mission/task registry integrity (BLOCKER-4, mirrors production
-   * fail-closed): validated BEFORE any derived state is built — the
-   * projection throws on duplicate registrations, and a missing,
+  /* Mission/task registry integrity + consumption + task resolution all
+   * come from the SHARED resolver (Mission 008G) — the same machinery
+   * the B1 repair proof uses to ask counterfactual reachability. The
+   * resolver validates BEFORE any derived state is built: a missing,
    * invalid, or duplicated declared task must become an explicit
-   * BLOCKED, never a silently narrowed surface. */
-  const integrityViolations = [];
-  const taskByRev = new Map();
-  const latestById = new Map();
-  for (const t of tasks) {
-    const k = keyOf(t);
-    if (taskByRev.has(k)) integrityViolations.push(`duplicate_task_revision:${k}`);
-    taskByRev.set(k, t);
-    const prev = latestById.get(t.id);
-    if (!prev || (t.revision ?? 1) > (prev.revision ?? 1)) latestById.set(t.id, t);
-    if (validateTask(t).length) integrityViolations.push(`invalid_task_contract:${k}`);
-  }
-  const missionTaskIds = mission ? new Set(mission.taskIds ?? []) : null;
-  let missionTasks = tasks;
-  if (mission) {
-    missionTasks = [];
-    for (const id of missionTaskIds) {
-      const t = latestById.get(id);
-      if (!t) { integrityViolations.push(`missing_declared_task:${id}`); continue; }
-      missionTasks.push(t);
-    }
-  }
+   * BLOCKED, never a silently narrowed surface (BLOCKER-4). */
+  const resolver = createTaskResolver({ mission, tasks, learnerId, events, capabilities });
+  const {
+    integrityViolations, missionTasks,
+    verifiedEventKey, lastObservedAttemptByCap, observedFailStreak,
+    servable, pendingPhase
+  } = resolver;
+  const pickTask = (capId, purposes, f) => resolver.pickTask(capId, purposes, f, ceiling);
   if (integrityViolations.length) {
     return {
       candidates: [],
       skipped: capabilities.map((c) => ({ kind: null, capabilityId: c.id, reason: `mission_integrity: ${integrityViolations.join('; ')}` })),
-      model: null, projection: null, pendingDemands: [],
+      model: null, projection: null, pendingDemands: [], resolver,
       integrityViolations
     };
   }
@@ -135,73 +123,6 @@ export function generateCandidates({ learnerId, events, capabilities, tasks, rol
     ? (id) => (roles.targets?.has(id) ? 'target' : roles.supports?.has(id) ? 'support' : 'carrier')
     : () => null;
   const isSupportCap = (id) => roleOf(id) === 'support';
-
-  /* Verified-attempt consumption per task (same bar the runner uses) so
-   * candidates attach only to tasks that can still yield evidence. */
-  const verifiedAttemptKey = new Set();
-  const verifiedEventKey = new Set();
-  const lastAttemptByCap = new Map();
-  const lastObservedAttemptByCap = new Map();
-  const observedFailStreak = new Map();
-  const seen = new Set();
-  for (const e of [...events].sort((a, b) => a.occurredAt - b.occurredAt || (a.id < b.id ? -1 : 1))) {
-    if (e.learnerId !== learnerId || seen.has(e.id)) continue;
-    seen.add(e.id);
-    const t = taskByRev.get(`${e.taskId}@${e.taskRevision}`);
-    const cap = t ? capById.get(t.capabilityId) : null;
-    if (!t || !cap || !verifyEventTask(e, t, cap)) continue;
-    verifiedEventKey.add(keyOf(t));
-    if (e.attempt?.outcome != null) {
-      verifiedAttemptKey.add(keyOf(t));
-      lastAttemptByCap.set(t.capabilityId, { outcome: e.attempt.outcome, task: t, event: e });
-      /* Refresh/correction semantics require OBSERVED direct failure —
-       * self-reported (observed:false) outcomes are context, never
-       * verified performance evidence (review HIGH-5). */
-      if (e.attempt.observed === true) {
-        /* STRICT (MEDIUM-11): only an explicit observed===true counts as
-         * direct verified performance evidence — a legacy/malformed raw
-         * event missing the flag is context, never verified evidence. */
-        lastObservedAttemptByCap.set(t.capabilityId, { outcome: e.attempt.outcome, task: t, event: e });
-        observedFailStreak.set(t.capabilityId, e.attempt.outcome === 'success' ? 0 : (observedFailStreak.get(t.capabilityId) ?? 0) + 1);
-      }
-    }
-  }
-  const REPEATABLE = new Set(['retrieval', 'production', 'interaction', 'remediation', 'delayed_retrieval', 'transfer', 'support']);
-  const servable = (capId, purposes, { requiresFunction = null, exceptTaskId = null } = {}) => {
-    const matches = missionTasks.filter((t) =>
-      t.capabilityId === capId &&
-      purposes.includes(t.purpose) &&
-      t.id !== exceptTaskId &&
-      (requiresFunction == null || (t.response?.requiredFunctions ?? []).includes(requiresFunction)));
-    const fresh = matches.find((t) => !verifiedEventKey.has(keyOf(t)));
-    if (fresh) return fresh;
-    if (purposes.every((p) => !REPEATABLE.has(p))) return null;
-    return matches.find((t) => REPEATABLE.has(t.purpose)) ?? null;
-  };
-
-  /* Pending-phase selection (runner's pickPendingPhase): introduction
-   * serves the next UNCONSUMED exposure task, else the next unconsumed
-   * eliciting one — a retrieval/production task can be a learner's
-   * first contact when the mission authored no input for the cap. */
-  const pendingPhase = (capId) => {
-    const exp = missionTasks.find((t) => t.capabilityId === capId && EXPOSURE_PURPOSES.includes(t.purpose) && !verifiedEventKey.has(keyOf(t)));
-    if (exp) return exp;
-    return missionTasks.find((t) => t.capabilityId === capId && ELICITING_FOR_INTRO.includes(t.purpose) && !verifiedEventKey.has(keyOf(t))) ?? null;
-  };
-
-  /* Failure ceiling [SAFETY_PRIOR]: once a capability racks up `ceiling`
-   * consecutive failures, serving the SAME task again is a hard
-   * violation. An alternative task on the capability is offered when
-   * one exists (spec §17 escape hatch). */
-  const pickTask = (capId, purposes, f) => {
-    const primary = servable(capId, purposes);
-    const lastTask = lastAttemptByCap.get(capId)?.task;
-    if (primary && (f.observedFails ?? f.consecutiveFailures) >= ceiling && lastTask && primary.id === lastTask.id) {
-      const alt = servable(capId, purposes, { exceptTaskId: lastTask.id });
-      return { task: alt ?? primary, identicalRetry: alt == null, alternateTask: alt != null };
-    }
-    return { task: primary, identicalRetry: false, alternateTask: false };
-  };
 
   const ctx = decisionContext;
   const diagUsed = ctx?.counts?.diagnostic ?? 0;
@@ -482,7 +403,10 @@ export function generateCandidates({ learnerId, events, capabilities, tasks, rol
     }
   }
 
-  return { candidates, skipped, model, projection, pendingDemands };
+  /* The resolver rides the result so downstream proof layers (Mission
+   * 008G repair reachability) ask reachability questions through THE
+   * SAME machinery — never a second, drifting implementation. */
+  return { candidates, skipped, model, projection, pendingDemands, resolver };
 }
 
 export { INTENT_PURPOSES };

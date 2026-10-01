@@ -17,6 +17,7 @@ import { validateTask, verifyEventTask, canonicalFamilyId } from '../contracts.j
 import { generateCandidates } from './candidate-generator.js';
 import { hardFilter } from './policies.js';
 import { deriveCorrectionEpisodes, pickRetestSurface, burnedSurfaces } from '../correction-episodes.js';
+import { deriveMissionRepairPlans, deriveRetestReservations } from './repair-proof.js';
 import { TIER_OF } from './constants.js';
 
 const PURPOSE_OK = {
@@ -73,32 +74,51 @@ export function validateDecision(decision, { events, tasks, capabilities, roles,
     ? deriveCorrectionEpisodes({ learnerId, events, capabilities, tasks, policy: pol, now })
     : null;
 
-  const rebuild = (selCfg, ctx) => {
+  /* One shared rebuild per decision — memoized so the terminal path
+   * and the chosen-side reservation check never pay two generation
+   * passes. For B1 the rebuild also derives the mission-local repair
+   * proof + reservations independently (never the decision's own
+   * digest/plans). */
+  let _rebuilt = null;
+  const rebuild = () => {
+    if (_rebuilt) return _rebuilt;
     try {
       const gen = generateCandidates({
         learnerId, events, capabilities, tasks, roles, policy: pol,
-        now, mission, decisionContext: ctx, selection: selCfg
+        now, mission, decisionContext, selection
       });
-      if (gen.integrityViolations?.length) return { work: false, integrity: true };
+      if (gen.integrityViolations?.length) return _rebuilt = { work: false, integrity: true, reservations: null };
       /* Recompute eligibility with the shared hard-filter contract —
        * the point is that the DECISION's emitted candidate view is
        * untrusted, not that the filter spec is re-derived here. The
        * freshness mode follows the decision's own policy version:
        * a0 mirrors production re-probe; b0/c0 run fresh-only; b1
-       * additionally re-derives the correction-episode gate — the
-       * validator never trusts a B1 decision's own episode digest. */
+       * additionally re-derives the correction-episode gate AND the
+       * mission-local reservation set. */
       const mode = /a0/.test(decision.selectionPolicyVersion ?? '') ? 'production' : 'fresh';
-      const env = { ctx, selection: selCfg, pendingDemands: pending, roles, assessmentMode: mode, episodes };
+      let reservations = null;
+      if (isB1 && gen.resolver) {
+        const plans = deriveMissionRepairPlans({
+          episodes, mission, tasks, candidates: gen.candidates,
+          resolver: gen.resolver, selection,
+          decisionContext, pendingDemands: pending, roles,
+          episodes, hardFilter
+        });
+        reservations = deriveRetestReservations({
+          episodes, plans, missionTasks: gen.resolver.missionTasks
+        });
+      }
+      const env = { ctx: decisionContext, selection, pendingDemands: pending, roles, assessmentMode: mode, episodes, reservations };
       const work = (gen.candidates ?? []).some((c) =>
         hardFilter(c, env).length === 0);
-      return { work, integrity: false };
+      return _rebuilt = { work, integrity: false, reservations };
     } catch {
-      return { work: false, integrity: true };
+      return _rebuilt = { work: false, integrity: true, reservations: null };
     }
   };
   if (ch.kind === 'idle' || ch.kind === 'blocked') {
     if (ch.capabilityId != null || ch.taskId != null) v.push(`${ch.kind}_with_payload`);
-    const { work, integrity } = rebuild(selection, decisionContext);
+    const { work, integrity } = rebuild();
     /* 008F: B1 due-retest work is synthesized inside policyB1 and never
      * appears in the generic candidate rebuild — reconstruct it from
      * the independently derived episodes, never from the decision's own
@@ -293,6 +313,18 @@ export function validateDecision(decision, { events, tasks, capabilities, roles,
   if (episodes && (ch.kind === 'transfer' || ch.kind === 'assessment')) {
     const ep = episodes.openByCapability?.[ch.capabilityId];
     if (ep) v.push(`certification_under_open_episode:${ep.state}`);
+  }
+  /* 008G: a B1 decision may not serve a retest probe while the
+   * mission-local repair proof withholds it — the reservation set is
+   * re-derived here, never read off the decision record. The rebuild
+   * pays only when the chosen task sits on an open-episode capability
+   * in a reserving state. */
+  if (task && episodes && ch.kind !== 'correction_retest') {
+    const ep = episodes.openByCapability?.[ch.capabilityId];
+    if (ep && ep.state !== 'RETEST_DUE' && ep.state !== 'VERIFIED') {
+      const { reservations } = rebuild();
+      if (reservations?.has(task.id)) v.push('correction_retest_surface_reserved');
+    }
   }
 
   return v;

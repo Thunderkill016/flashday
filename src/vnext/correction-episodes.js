@@ -47,6 +47,14 @@
  *     episode; one open episode per capability at a time;
  *   - canonical order is (occurredAt, id): replay of the same event set
  *     is byte-identical regardless of delivery order or resyncs.
+ *
+ * Mission 008G boundary: this module is EVIDENCE TRUTH only — which
+ * episodes exist, which functions remain missing, which surfaces are
+ * burned, what state each episode is in. Whether the serving mission can
+ * still repair an open episode (and therefore whether fresh retest
+ * surfaces may be withheld) is ROUTING TRUTH, proven per-mission in
+ * next-for-you/repair-proof.js — never inferred from the full task
+ * registry here.
  */
 import { answerBearing, conditionsViolated, unionSupport } from './evidence.js';
 import { effectiveAllowedSupport, verifyEventTask } from './contracts.js';
@@ -345,29 +353,6 @@ export function deriveCorrectionEpisodes({ learnerId, events, capabilities, task
     if (UNRESOLVED.has(ep.state)) unresolvedIndex[ep.capabilityId] = ep;
   }
 
-  /* Retest surfaces withheld while an episode is unresolved — practice
-   * on the probe contaminates the delayed evidence. During REPAIRING/
-   * RELAPSED the reservation applies only when a repair channel survives
-   * without the probes (a covering remediation or an already-burned
-   * surface can re-establish repair; re-practicing contaminated items
-   * costs nothing). During OPEN nothing is reserved: the first covering
-   * success legitimately IS the repair, whatever surface carries it. */
-  const retestReservedTaskIds = new Set();
-  for (const ep of episodes) {
-    if (ep.state !== 'REPAIRING' && ep.state !== 'REPAIRED_WAITING' && ep.state !== 'RELAPSED') continue;
-    const surfaces = retestSurfaces(ep, tasks);
-    if (!surfaces.length) continue;
-    if (ep.state !== 'REPAIRED_WAITING') {
-      const burned = usedSurfaces(ep);
-      const repairChannelSurvives = (tasks ?? []).some((t) =>
-        t.capabilityId === ep.capabilityId &&
-        (t.response?.requiredFunctions ?? []).some((f) => remainingOf(ep).includes(f)) &&
-        (t.purpose === 'remediation' || burned.has(t.id)));
-      if (!repairChannelSurvives) continue;
-    }
-    for (const t of surfaces) retestReservedTaskIds.add(t.id);
-  }
-
   return {
     contractVersion: CORRECTION_EPISODES_VERSION,
     learnerId,
@@ -377,8 +362,7 @@ export function deriveCorrectionEpisodes({ learnerId, events, capabilities, task
     episodes,
     /* capabilityId → episode for every UNRESOLVED episode — the B1
      * gate reads exactly this. */
-    openByCapability: unresolvedIndex,
-    retestReservedTaskIds
+    openByCapability: unresolvedIndex
   };
 }
 
