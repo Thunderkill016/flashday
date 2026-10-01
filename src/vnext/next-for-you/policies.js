@@ -18,6 +18,7 @@
 import { KINDS, POLICY_VERSIONS, PROVENANCE, TIER_OF } from './constants.js';
 import { generateCandidates } from './candidate-generator.js';
 import { deriveCorrectionEpisodes, episodeDigest, pickRetestSurface, remainingOf, CORRECTION_EPISODES_VERSION } from '../correction-episodes.js';
+import { deriveMissionRepairPlans, deriveRetestReservations } from './repair-proof.js';
 import { LEARNER_MODEL_VERSION } from '../learner-model.js';
 import { decisionInputSnapshot } from './decision-log.js';
 import { sha256, canon } from './canonical.js';
@@ -178,7 +179,7 @@ const PURPOSE_OK = {
  * pedagogical optimum. */
 const REPAIR_BOUND_PER_CAP_EPISODE = 3;
 
-export function hardFilter(cand, { ctx, selection, pendingDemands, roles, assessmentMode = 'fresh', episodes = null }) {
+export function hardFilter(cand, { ctx, selection, pendingDemands, roles, assessmentMode = 'fresh', episodes = null, reservations = null }) {
   const reasons = [];
   const diagBudget = selection.diagnosticMaxPerEpisode ?? 2;
   const ceiling = selection.failureCeiling ?? 3;
@@ -250,12 +251,14 @@ export function hardFilter(cand, { ctx, selection, pendingDemands, roles, assess
       reasons.push(`correction_retest_not_due:${openEp?.state ?? 'none'}`);
     }
   }
-  /* While an episode waits out its lag, B1 withholds the surfaces that
-   * could serve as its delayed retest — pre-lag practice on the probe
-   * would contaminate the delayed evidence (and any exposure is burned
-   * by the episode contract regardless). Null under A/B/C. */
+  /* While an episode waits out its lag — or still owes a mission-local
+   * repair path — B1 withholds the surfaces that could serve as its
+   * delayed retest: pre-lag practice on the probe contaminates the
+   * delayed evidence. The withheld set is produced by the mission-local
+   * repair proof (repair-proof.js), never by the evidence layer. Null
+   * under A/B/C. */
   if (cand.kind !== KINDS.CORRECTION_RETEST && cand.servableTask &&
-      episodes?.retestReservedTaskIds?.has(cand.servableTask.id)) {
+      reservations?.has(cand.servableTask.id)) {
     reasons.push('correction_retest_surface_reserved');
   }
   return reasons;
@@ -448,11 +451,28 @@ export function policyB1(state, opts = {}) {
   }
 
   /* Episode derivation runs on THE SAME inputs as the learner model —
-   * learner-scoped, registered-task-verified, canonical replay order. */
+   * learner-scoped, registered-task-verified, canonical replay order.
+   * Evidence truth only (Mission 008G); the reservation question is
+   * answered by the mission-local repair proof below. */
   const episodes = deriveCorrectionEpisodes({
     learnerId: state.learnerId, events: state.events,
     capabilities: state.capabilities, tasks: state.tasks,
     policy: state.policy, now: state.now
+  });
+
+  /* Routing truth (008G): per open episode, prove inside THIS mission —
+   * through the shared resolver — that every still-missing function has
+   * a reachable, hard-filter-clean repair route that does not consume a
+   * fresh retest probe. Only a complete proof reserves the probes. */
+  const repairPlans = deriveMissionRepairPlans({
+    episodes, mission: s2.mission, tasks: state.tasks,
+    candidates, resolver: gen.resolver,
+    selection: sel.config, decisionContext: ctx,
+    pendingDemands, roles: state.roles, episodes,
+    hardFilter
+  });
+  const reservations = deriveRetestReservations({
+    episodes, plans: repairPlans, missionTasks: gen.resolver?.missionTasks
   });
 
   /* Mint one retest candidate per due episode. The surface must not be
@@ -484,17 +504,19 @@ export function policyB1(state, opts = {}) {
     });
   }
 
-  applyFilters(candidates, { ctx, selection: sel.config, pendingDemands, roles: state.roles, assessmentMode: 'fresh', episodes });
+  applyFilters(candidates, { ctx, selection: sel.config, pendingDemands, roles: state.roles, assessmentMode: 'fresh', episodes, reservations });
   const eligible = candidates.filter((c) => c.eligible);
   const { winner, losers, escape } = pickOrdinal(eligible, ctx, sel.config);
   if (winner) { winner._losers = losers; winner._tieBreak = winner._tieBreak ?? 'total_order'; }
   const decision = makeDecision({ version: POLICY_VERSIONS.B1, chosen: winner, candidates, skipped, model, ctx, pendingDemands, state: s2, escape });
   /* The episode view rides the decision record so the audit/shadow path
    * and the B0↔B1 classifier can attribute every divergence to an
-   * episode state without re-deriving. */
+   * episode state without re-deriving — including the machine-readable
+   * repair proofs that justified each reservation. */
   decision.correctionEpisodes = {
     contractVersion: CORRECTION_EPISODES_VERSION,
-    digest: episodeDigest(episodes)
+    digest: episodeDigest(episodes),
+    repairPlans
   };
   return decision;
 }

@@ -34,8 +34,12 @@ import { nextMissionTask } from '../src/vnext/mission-runner.js';
 import { sha256, canon, sha256HexOfString } from '../src/vnext/next-for-you/canonical.js';
 import { emptyContext, consumeDecision, recordChoice, normalizeContext } from '../src/vnext/next-for-you/decision-context.js';
 import { selectNextTask, engineState, SELECTION_MODES, POLICY_VERSIONS, POLICY_VERSION_FOR_MODE, validateB0, classifyB0B1 } from '../src/vnext/next-for-you/selector.js';
-import { policyB, policyB1 } from '../src/vnext/next-for-you/policies.js';
+import { policyB, policyB1, hardFilter } from '../src/vnext/next-for-you/policies.js';
 import { KINDS } from '../src/vnext/next-for-you/constants.js';
+import { generateCandidates } from '../src/vnext/next-for-you/candidate-generator.js';
+import {
+  deriveMissionRepairPlans, deriveRetestReservations, REPAIR_PROOF_VERSION
+} from '../src/vnext/next-for-you/repair-proof.js';
 import {
   deriveCorrectionEpisodes, pickRetestSurface, retestSurfaces,
   remainingOf, CORRECTION_EPISODES_VERSION
@@ -2021,6 +2025,29 @@ const ANSWERS_008E = {
     policy: LEARNING_POLICY_V1, selection: {},
     decisionContext: emptyContext('ep.cep', 'ses.cep'), now
   });
+  /* 008G: reservations are a routing-layer artifact now — derived from
+   * the generated candidate set + shared resolver via the mission-local
+   * repair proof, not from the episode derivation. */
+  const reservationsFor = (fixture, events, now, { tasks = TASK_REGISTRY, mission = fixture.mission, ctx = null } = {}) => {
+    const st = { ...bState(fixture, events, now), tasks, mission, ...(ctx ? { decisionContext: ctx } : {}) };
+    const gen = generateCandidates(st);
+    const eps = deriveCorrectionEpisodes({
+      learnerId: 'SIM', events, capabilities: st.capabilities, tasks,
+      policy: LEARNING_POLICY_V1, now
+    });
+    const plans = deriveMissionRepairPlans({
+      episodes: eps, mission, tasks, candidates: gen.candidates,
+      resolver: gen.resolver, selection: {}, decisionContext: st.decisionContext,
+      pendingDemands: gen.pendingDemands, roles: st.roles, episodes: eps,
+      hardFilter
+    });
+    return {
+      reservations: deriveRetestReservations({
+        episodes: eps, plans, missionTasks: gen.resolver?.missionTasks
+      }),
+      plans, gen, eps, st
+    };
+  };
   /* The canonical failure arc on the price cap: taught → attributed miss
    * → repair → (caller lands the retest/gate event at will). */
   const priceArc = () => [
@@ -2428,17 +2455,21 @@ const ANSWERS_008E = {
       'CEP-BURN: pre-lag practiced surface stayed retest-eligible');
 
     /* While the episode waits out the lag, the surviving probe surfaces
-     * are reserved — nothing may serve them inside the window. */
-    const dWait = episodesOf([
+     * are reserved — nothing may serve them inside the window. 008G:
+     * the reserved set is a routing-layer artifact (mission-local repair
+     * proof → deriveRetestReservations), not an episode-derivation field. */
+    const waitEvents = [
       ev('task.price.diagnostic.hear', T0, 'success'),
       ev('task.price.delayed.hear', T0 + DAY, 'fail', ['understand_spoken_price']),
       ev('task.price.remediation.hear', arcRepairedAt, 'success')
-    ], arcRepairedAt + HOUR);
+    ];
+    const dWait = episodesOf(waitEvents, arcRepairedAt + HOUR);
     const waitEp = dWait.episodes[0];
+    const { reservations: waitReserved } = reservationsFor(BUY, waitEvents, arcRepairedAt + HOUR);
     ok(waitEp?.state === 'REPAIRED_WAITING'
-      && dWait.retestReservedTaskIds.has('task.price.retrieval.hear')
-      && !dWait.retestReservedTaskIds.has('task.price.delayed.hear'),
-      `CEP-BURN: probe surfaces not reserved during the lag — ${JSON.stringify([...dWait.retestReservedTaskIds])}`);
+      && waitReserved.has('task.price.retrieval.hear')
+      && !waitReserved.has('task.price.delayed.hear'),
+      `CEP-BURN: probe surfaces not reserved during the lag — ${JSON.stringify([...waitReserved])}`);
 
     /* And with every honest surface consumed, B1 surfaces backlog —
      * never a recycled probe. */
@@ -2525,6 +2556,297 @@ const ANSWERS_008E = {
     ok(typeof sel.reason === 'string' && sel.reason.includes('correction_content_backlog'),
       `SEL-ADAPTER: reason text lost — ${sel.reason}`);
     say('SEL-ADAPTER: b1 backlog surfaces as correction_content_backlog reasonCode');
+  }
+
+  /* ── 008G: mission-local repair reachability proof ──
+   * deriveCorrectionEpisodes is evidence-only now — whether repair is
+   * still reachable INSIDE the serving mission is a routing question
+   * answered per episode × per missing function through the SHARED
+   * resolver (task-resolver.js), with fresh retest probes withheld.
+   * Registry presence alone must never rescue a proof. */
+  {
+    const FN_PRICE = 'understand_spoken_price';
+    const FN_DIR = 'follow_short_direction';
+    const FN_CLOCK = 'understand_clock_time';
+    const remB = 'task.price.remediation.hear';
+    const remT = 'task.time.remediation.hear';
+    const remP = 'task.place.remediation.follow';
+    const repairable = (fixture, capId, evList, now, opts = {}) =>
+      reservationsFor(fixture, evList, now, opts);
+    const evOn = (fixture, capId) => (tid, at, outcome, missing) =>
+      attemptEvent(fixture.tasks.find((t) => t.id === tid), capabilityById(capId), { at, outcome, missing });
+    const evB = evOn(BUY, PRICE);
+    const evP = evOn(PLACE, DIR);
+    const evT = evOn(TIME, CLOCK);
+    const repairingB = () => [
+      evB('task.price.diagnostic.hear', T0, 'success'),
+      evB('task.price.delayed.hear', T0 + DAY, 'fail', [FN_PRICE]),
+      evB(remB, T0 + DAY + HOUR, 'fail', [FN_PRICE])
+    ];
+    const planOf = (r) => r.plans[0];
+    const sortedIds = (s) => [...s].sort();
+
+    /* — Positive proofs on all three real listening paths — */
+    {
+      const r = repairable(TIME, CLOCK, [
+        evT('task.time.diagnostic.hear', T0, 'success'),
+        evT('task.time.delayed.hear', T0 + DAY, 'fail', [FN_CLOCK]),
+        evT(remT, T0 + DAY + HOUR, 'fail', [FN_CLOCK])
+      ], T0 + DAY + 2 * HOUR);
+      const p = planOf(r);
+      ok(r.eps.episodes[0].state === 'REPAIRING' && p.required && p.complete
+        && p.reasonCode === 'mission_repair_channel_proven'
+        && p.witnesses[FN_CLOCK].some((w) => w.taskId === remT && w.hardFilterClean && w.missionMember && !w.consumesFreshRetestSurface)
+        && sortedIds(r.reservations).join() === 'task.time.retrieval.hear',
+        `MRP-TIME: clock-time proof failed — ${JSON.stringify({ s: r.eps.episodes[0].state, c: p.complete, w: p.witnesses, r: [...r.reservations] })}`);
+      ok(p.missionId === TIME.mission.id && p.missionRevision === TIME.mission.revision
+        && p.capabilityId === CLOCK && p.episodeId === r.eps.episodes[0].episodeId
+        && p.version === REPAIR_PROOF_VERSION,
+        'MRP-TIME: proof not bound to mission/revision/episode/capability');
+    }
+    {
+      const r = repairable(BUY, PRICE, repairingB(), T0 + DAY + 2 * HOUR);
+      const p = planOf(r);
+      ok(p.complete && p.witnesses[FN_PRICE].some((w) => w.taskId === remB && w.hardFilterClean)
+        && sortedIds(r.reservations).join() === 'task.price.retrieval.hear',
+        'MRP-BUY: spoken-price proof failed');
+    }
+    {
+      /* PLACE is the repick case: the refresh route's NATURAL next serve
+       * is a fresh retest probe — the proof must find the repair under
+       * probe exclusion, not merely spot a remediation id in a list. */
+      const r = repairable(PLACE, DIR, [
+        evP('task.place.diagnostic.follow', T0, 'success'),
+        evP('task.place.delayed.follow', T0 + DAY, 'fail', [FN_DIR]),
+        evP(remP, T0 + DAY + HOUR, 'fail', [FN_DIR])
+      ], T0 + DAY + 2 * HOUR);
+      const p = planOf(r);
+      const liveRefresh = r.gen.candidates.find((c) => c.capabilityId === DIR && c.kind === KINDS.REFRESH);
+      ok(p.retestSurfaceIds.includes('task.place.retrieval.follow')
+        && p.retestSurfaceIds.includes('task.place.retrieval.follow_landmark'),
+        `MRP-PLACE: expected both retest surfaces — ${JSON.stringify(p.retestSurfaceIds)}`);
+      ok(liveRefresh?.servableTask?.id === 'task.place.retrieval.follow',
+        `MRP-PLACE: refresh primary was not the reserved probe — ${liveRefresh?.servableTask?.id}`);
+      ok(p.complete
+        && p.witnesses[FN_DIR].some((w) => w.candidateKind === KINDS.REFRESH && w.taskId === remP && w.servedNext && w.hardFilterClean),
+        `MRP-PLACE: refresh repick under probe-exclusion did not reach ${remP} — ${JSON.stringify(p.witnesses)}`);
+      ok(sortedIds(r.reservations).join() === 'task.place.retrieval.follow,task.place.retrieval.follow_landmark',
+        `MRP-PLACE: reservation set wrong — ${JSON.stringify([...r.reservations])}`);
+      say('MRP-POS: clock/price/direction proofs; refresh repick off the reserved probe');
+    }
+
+    /* — State table — */
+    {
+      const open = repairable(BUY, PRICE, [
+        evB('task.price.diagnostic.hear', T0, 'success'),
+        evB('task.price.delayed.hear', T0 + DAY, 'fail', [FN_PRICE])
+      ], T0 + DAY + 1);
+      ok(open.eps.episodes[0].state === 'OPEN' && !planOf(open).required && open.reservations.size === 0,
+        'MRP-STATE: OPEN reserved a probe (a probe may legitimately BE the repair)');
+      const waiting = repairable(BUY, PRICE, priceArc(), T0 + DAY + 2 * HOUR);
+      ok(waiting.eps.episodes[0].state === 'REPAIRED_WAITING' && waiting.reservations.has('task.price.retrieval.hear'),
+        'MRP-STATE: REPAIRED_WAITING did not reserve the fresh probe directly');
+      const due = repairable(BUY, PRICE, priceArc(), arcRepairedAt + LAG + HOUR);
+      ok(due.eps.episodes[0].state === 'RETEST_DUE' && due.reservations.size === 0,
+        'MRP-STATE: RETEST_DUE withheld the surface the retest must serve');
+      const verified = repairable(BUY, PRICE, [
+        ...priceArc(),
+        evB('task.price.retrieval.hear', arcRepairedAt + LAG + HOUR, 'success')
+      ], arcRepairedAt + LAG + 2 * HOUR);
+      ok(verified.eps.episodes[0].state === 'VERIFIED' && verified.reservations.size === 0,
+        'MRP-STATE: VERIFIED still held a reservation');
+      say('MRP-STATE: OPEN/REPAIRED_WAITING/RETEST_DUE/VERIFIED reservation table');
+    }
+
+    /* — A1: repair exists only in ANOTHER mission's taskIds — the exact
+     *     008F bug shape: registry holds the task, the mission cannot
+     *     route to it. — */
+    {
+      const noRem = { ...BUY.mission, taskIds: BUY.mission.taskIds.filter((id) => id !== remB) };
+      const r = repairable(BUY, PRICE, repairingB(), T0 + DAY + 2 * HOUR, { mission: noRem });
+      const p = planOf(r);
+      ok(r.eps.episodes[0].state === 'REPAIRING' && !p.complete
+        && p.reasonCode === 'mission_repair_channel_unproven' && r.reservations.size === 0,
+        `MRP-XM: cross-mission remediation rescued the proof — ${JSON.stringify(p)}`);
+      /* same construction, ghost task: a remediation for the cap+fn that
+       * lives in the registry but was never declared on the mission. */
+      const ghost = { ...structuredClone(BUY_T(remB)), id: 'task.ghost.remediation.hear' };
+      const g = repairable(BUY, PRICE, repairingB(), T0 + DAY + 2 * HOUR,
+        { mission: noRem, tasks: [...TASK_REGISTRY, ghost] });
+      ok(!planOf(g).complete && g.reservations.size === 0,
+        'MRP-XM: out-of-mission registry ghost rescued the proof');
+      say('MRP-XM: cross-mission + ghost-registry repairs cannot fake reachability');
+    }
+
+    /* — A2: wrong capability / wrong function coverage in-mission — */
+    {
+      const wrongCap = { ...structuredClone(BUY_T(remB)), id: 'task.price.remediation.othercap', capabilityId: 'interaction.ask_price' };
+      const mWrongCap = { ...BUY.mission, taskIds: BUY.mission.taskIds.map((id) => id === remB ? wrongCap.id : id) };
+      const r = repairable(BUY, PRICE, repairingB(), T0 + DAY + 2 * HOUR,
+        { mission: mWrongCap, tasks: [...TASK_REGISTRY, wrongCap] });
+      ok(!planOf(r).complete && r.reservations.size === 0,
+        'MRP-FN: wrong-capability remediation witnessed the price episode');
+      const wrongFn = { ...structuredClone(BUY_T(remB)), id: 'task.price.remediation.wrongfn' };
+      wrongFn.response = { ...wrongFn.response, requiredFunctions: ['identify_spoken_number'] };
+      const mWrongFn = { ...BUY.mission, taskIds: BUY.mission.taskIds.map((id) => id === remB ? wrongFn.id : id) };
+      const f = repairable(BUY, PRICE, repairingB(), T0 + DAY + 2 * HOUR,
+        { mission: mWrongFn, tasks: [...TASK_REGISTRY, wrongFn] });
+      ok(!planOf(f).complete && f.reservations.size === 0,
+        'MRP-FN: remediation covering a different function witnessed the episode');
+      say('MRP-FN: wrong-capability / wrong-function repairs rejected');
+    }
+
+    /* — A3: stale task revision — the witness binds the CURRENT resolved
+     *     revision; bumping the registry mints a new servable surface. — */
+    {
+      const rev2 = { ...structuredClone(BUY_T(remB)), revision: 2 };
+      const tasks2 = [...TASK_REGISTRY, rev2];
+      const r = repairable(BUY, PRICE, repairingB(), T0 + DAY + 2 * HOUR, { tasks: tasks2 });
+      const w = planOf(r).witnesses[FN_PRICE].find((x) => x.taskId === remB);
+      ok(planOf(r).complete && w?.taskRevision === 2,
+        `MRP-REV: witness bound stale revision — ${JSON.stringify(w)}`);
+    }
+
+    /* — A4: repair bound / failure ceiling exhaust the live routes — */
+    {
+      const ctxBound = { ...emptyContext('ep.mrp', 'ses.mrp'), actionsChosen: [
+        { kind: KINDS.CORRECTION, capabilityId: PRICE },
+        { kind: KINDS.CORRECTION, capabilityId: PRICE },
+        { kind: KINDS.REFRESH, capabilityId: PRICE }
+      ] };
+      const r = repairable(BUY, PRICE, repairingB(), T0 + DAY + 2 * HOUR, { ctx: ctxBound });
+      const p = planOf(r);
+      ok(!p.complete && p.witnesses[FN_PRICE].length > 0
+        && p.witnesses[FN_PRICE].every((w) => !w.hardFilterClean && w.filterReasons.some((x) => x.startsWith('repair_bound')))
+        && r.reservations.size === 0,
+        `MRP-BOUND: exhausted repair bound still proved/reserved — ${JSON.stringify({ c: p.complete, w: p.witnesses, r: [...r.reservations] })}`);
+      const ceil = repairable(BUY, PRICE, [
+        ...repairingB(),
+        evB(remB, T0 + DAY + 2 * HOUR, 'fail', [FN_PRICE]),
+        evB(remB, T0 + DAY + 3 * HOUR, 'fail', [FN_PRICE])
+      ], T0 + DAY + 4 * HOUR);
+      const cp = planOf(ceil);
+      ok(!cp.complete && cp.witnesses[FN_PRICE].some((w) => w.filterReasons.includes('identical_retry_after_failure_ceiling'))
+        && ceil.reservations.size === 0,
+        `MRP-CEIL: ceiling-identical-retry route proved/reserved — ${JSON.stringify({ c: cp.complete, w: cp.witnesses })}`);
+      say('MRP-BOUND/CEIL: repair_bound + failure-ceiling-identical-retry break the proof');
+    }
+
+    /* — A5: multi-function completeness — the DIR episode misses TWO
+     *     functions. follow_short_direction keeps an in-mission witness
+     *     (burned retrieval.follow), but identify_basic_direction_term's
+     *     ONLY covering task is the dropped remediation — so the whole
+     *     proof must be false and no probe is withheld. — */
+    {
+      const arc = [
+        evP('task.place.diagnostic.follow', T0, 'success'),
+        evP('task.place.delayed.follow', T0 + DAY, 'fail', [FN_DIR]),
+        evP('task.place.retrieval.follow', T0 + DAY + HOUR, 'fail', [FN_DIR]),
+        evP(remP, T0 + DAY + 2 * HOUR, 'fail', [FN_DIR, 'identify_basic_direction_term'])
+      ];
+      const mNoRem = { ...PLACE.mission, taskIds: PLACE.mission.taskIds.filter((id) => id !== remP) };
+      const r = repairable(PLACE, DIR, arc, T0 + DAY + 3 * HOUR, { mission: mNoRem });
+      const p = planOf(r);
+      ok(r.eps.episodes[0]?.state === 'REPAIRING'
+        && p.remainingFunctions.includes(FN_DIR) && p.remainingFunctions.includes('identify_basic_direction_term'),
+        `MRP-MF: episode did not attribute both functions — ${JSON.stringify({ s: r.eps.episodes[0]?.state, f: p.remainingFunctions })}`);
+      ok((p.witnesses[FN_DIR] ?? []).some((w) => w.taskId === 'task.place.retrieval.follow' && w.hardFilterClean)
+        && (p.witnesses.identify_basic_direction_term ?? []).length === 0,
+        `MRP-MF: per-function witnesses wrong — ${JSON.stringify(p.witnesses)}`);
+      ok(!p.complete && r.reservations.size === 0,
+        `MRP-MF: uncovered second function did not falsify proof — reserved=${JSON.stringify([...r.reservations])}`);
+      say('MRP-MF: ∀ missing fn required — partial coverage falsifies');
+    }
+
+    /* — A6: relapse rewrites the surface set — the burned retest surface
+     *     leaves the reservation (it is repair-eligible now) while the
+     *     still-fresh probe stays withheld. — */
+    {
+      const arcP = [
+        evP('task.place.diagnostic.follow', T0, 'success'),
+        evP('task.place.delayed.follow', T0 + DAY, 'fail', [FN_DIR]),
+        evP(remP, T0 + DAY + HOUR, 'success')
+      ];
+      const waiting = repairable(PLACE, DIR, arcP, T0 + DAY + 2 * HOUR);
+      const relapsed = repairable(PLACE, DIR, [
+        ...arcP,
+        evP('task.place.retrieval.follow', T0 + DAY + HOUR + LAG + HOUR, 'fail', [FN_DIR])
+      ], T0 + DAY + HOUR + LAG + 2 * HOUR);
+      const pw = planOf(waiting); const pr = planOf(relapsed);
+      ok(pw.reserved && waiting.reservations.has('task.place.retrieval.follow')
+        && waiting.reservations.has('task.place.retrieval.follow_landmark'),
+        'MRP-REL: pre-relapse reservation wrong');
+      ok(relapsed.eps.episodes[0].state === 'RELAPSED' && pr.required && pr.complete
+        && sortedIds(relapsed.reservations).join() === 'task.place.retrieval.follow_landmark'
+        && !relapsed.reservations.has('task.place.retrieval.follow'),
+        `MRP-REL: burned retest surface stayed reserved / fresh probe freed — ${JSON.stringify({ s: relapsed.eps.episodes[0].state, r: [...relapsed.reservations] })}`);
+      say('MRP-REL: relapse moves the failed surface from probe to repair-eligible');
+    }
+
+    /* — A7: mission revision is part of the proof binding — same events
+     *     under a bumped mission revision re-derive, never reuse. — */
+    {
+      const r2 = repairable(BUY, PRICE, repairingB(), T0 + DAY + 2 * HOUR);
+      const r3 = repairable(BUY, PRICE, repairingB(), T0 + DAY + 2 * HOUR,
+        { mission: { ...BUY.mission, revision: BUY.mission.revision + 1 } });
+      ok(planOf(r2).missionRevision !== planOf(r3).missionRevision,
+        'MRP-REV: proof not rebound when the mission revision changed');
+    }
+
+    /* — METAMORPHIC: adding an arbitrary out-of-mission task to the
+     *     registry — and removing an unrelated one — must not change the
+     *     proof, the reservations, or the B1 decision (modulo the input
+     *     digest that legitimately binds the changed registry). — */
+    {
+      /* Even a ghost that WOULD serve (remediation-shaped, covers the
+       * missing fn) changes nothing — it is not mission-reachable. The
+       * same event array feeds every run so provenance-bound episode
+       * ids are comparable. */
+      const ghost = { ...structuredClone(BUY_T(remB)), id: 'task.ghost.out_of_mission' };
+      const arc = repairingB();
+      const base = repairable(BUY, PRICE, arc, T0 + DAY + 2 * HOUR);
+      const added = repairable(BUY, PRICE, arc, T0 + DAY + 2 * HOUR, { tasks: [...TASK_REGISTRY, ghost] });
+      const removed = repairable(BUY, PRICE, arc, T0 + DAY + 2 * HOUR,
+        { tasks: TASK_REGISTRY.filter((t) => t.id !== 'task.time.transfer.clinic') });
+      for (const [name, r] of [['+ghost', added], ['-unrelated', removed]]) {
+        ok(canon(r.plans) === canon(base.plans), `MRP-META(${name}): repair proof changed`);
+        ok(sortedIds(r.reservations).join() === sortedIds(base.reservations).join(),
+          `MRP-META(${name}): reservations changed`);
+      }
+      const b1 = (r) => policyB1(r.st);
+      const strip = ({ decisionId, ...rest }) => canon(rest);
+      ok(strip(b1(added)) === strip(b1(base)) && strip(b1(removed)) === strip(b1(base)),
+        'MRP-META: B1 decision changed under registry perturbation');
+      say('MRP-META: registry add/remove leaves proof, reservations, B1 decision invariant');
+    }
+
+    /* — VAL-008G: the validator re-derives the reservation set itself —
+     *     a decision claiming a serve on a withheld probe fails closed,
+     *     and the identical serve under a non-reserving state stays
+     *     clean. — */
+    {
+      const reserved = repairable(BUY, PRICE, repairingB(), T0 + DAY + 2 * HOUR);
+      ok(reserved.reservations.has('task.price.retrieval.hear'),
+        'VAL-008G: fixture did not reserve the probe — test setup broken');
+      const forgeServe = (st) => {
+        const d = structuredClone(policyB1(st));
+        d.chosen = {
+          kind: KINDS.REFRESH, taskId: 'task.price.retrieval.hear',
+          taskRevision: BUY_T('task.price.retrieval.hear').revision ?? 1,
+          capabilityId: PRICE
+        };
+        return d;
+      };
+      const vReserved = validateB0(forgeServe(reserved.st), reserved.st);
+      ok(vReserved.includes('correction_retest_surface_reserved'),
+        `VAL-008G: forged serve on a reserved probe passed — ${vReserved.join(';')}`);
+      const open = repairable(BUY, PRICE, repairingB().slice(0, 2), T0 + DAY + 1);
+      const vOpen = validateB0(forgeServe(open.st), open.st);
+      ok(!vOpen.includes('correction_retest_surface_reserved'),
+        `VAL-008G: probe serve in OPEN wrongly rejected — ${vOpen.join(';')}`);
+      say('VAL-008G: forged serve on reserved probe rejected; OPEN-state probe serve clean');
+    }
+    say('MRP: 008G mission-local repair proof attack table green');
   }
 
   /* ── SES-B1: full trajectory under mode 'b1' — the policy actually
