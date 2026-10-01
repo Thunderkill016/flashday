@@ -1,163 +1,154 @@
-# Mission 008G — Mission-Local Repair Reachability Proof — REPORT
+# Mission report: 008g-repair-reachability
 
-## §0 Identity
+- status: **DONE**
+- mission: `missions/008g-repair-reachability/mission.md`
+- started: 2026-10-01T05:41:04.740Z
+- finished: 2026-10-01T06:36:53.253Z
+- branch: devin/m008g-repair-reachability
+- starting sha: `c9e80562a887773c2147b14a3d97c0b917dbd494`
+- ending sha: `3870b9f8272c86aba82dee8f8104d98c991562e9`
 
-- **Base SHA**: `e98a6e7a8e9017cb83fae4600fd160ef36084eb5` (main @ merge of PR #74)
-- **Ending SHA**: `5b4f0ae7811d39c81576b71bb13a8a22b54b4abe` (implementation HEAD at
-  `swe:verify` time; final head may gain doc/checkpoint commits on top)
-- **Branch**: `devin/m008g-repair-reachability`
-- **PR**: opened after finish — see §CI (not merged; user is merge authority)
+## Objective
+Mission 008G (ChatGPT control room): replace the full-task-registry repair-channel assumption with an explicit mission@revision + capability + missing-function reachability proof — episodes stay evidence-only, reservation moves to a routing-proof layer, B0 frozen byte-identical, B1 stays shadow/experiment.
 
-## §1 Old failure mode
+## Commits (2)
+- `3870b9f 008G: checkpoint + report — verify green @5b4f0ae`
+- `5b4f0ae 008G: mission-local repair reachability proof`
 
+## Files changed vs start (10)
+- `A	missions/008g-repair-reachability/REPORT.md`
+- `A	missions/008g-repair-reachability/checkpoints/cp-001.md`
+- `M	package.json`
+- `M	src/vnext/correction-episodes.js`
+- `M	src/vnext/next-for-you/candidate-generator.js`
+- `M	src/vnext/next-for-you/policies.js`
+- `A	src/vnext/next-for-you/repair-proof.js`
+- `A	src/vnext/next-for-you/task-resolver.js`
+- `M	src/vnext/next-for-you/validator.js`
+- `M	tests/vnext-next-for-you-runtime.test.mjs`
+
+## Verification runs (2)
+- 2026-10-01T06:32:45.476Z @ `5b4f0ae7811d` — **PASS**
+  - `npm run verify:full` → exit 0 (logs/verify-1790836365472-0.log)
+- 2026-10-01T06:36:44.586Z @ `3870b9f8272c` — **PASS**
+  - `npm run verify:full` → exit 0 (logs/verify-1790836604580-0.log)
+
+## Commands executed (4)
+- 2026-10-01T05:41:04.763Z start: devin/m008g-repair-reachability@c9e80562a887
+- 2026-10-01T06:32:45.476Z verify: PASS
+- 2026-10-01T06:36:44.587Z verify: PASS
+- 2026-10-01T06:36:53.253Z finish: done
+
+## Checkpoints (0)
+- (none)
+
+## Acceptance criteria
+- [ ] `deriveCorrectionEpisodes` output carries no reservation fields.
+- [ ] Repair proof binds missionId+revision, episodeId, capabilityId,
+      per-function witnesses with task@revision + candidate kind +
+      hard-filter result; reserve iff `complete` for every remaining fn.
+- [ ] All 12 required attacks pinned by tests.
+- [ ] Metamorphic: adding out-of-mission tasks to the registry changes
+      neither proof, reserved ids, B1 decision, nor B1 reason code.
+- [ ] clock-time / price / direction paths keep a positive
+      mission-local repair proof.
+- [ ] B0 corpus byte-identical; B1 differential has no unclassified rows.
+- [ ] Perf: incremental overhead profiled; no second full replay or
+      generateCandidates pass.
+- [ ] `npm run verify:full` green; exact-head CI green.
+
+## Known failures
+- (none recorded)
+
+## Browser verification
+not required — headless policy/routing change; B1 remains shadow/experiment only, production B0 serving unchanged.
+
+## Final result
+Completed; required verification green on ending SHA.
+
+---
+
+## Substantive report (008G)
+
+### Old failure mode
 `deriveCorrectionEpisodes()` owned `retestReservedTaskIds` and decided
-"repair channel survives" by scanning the **full task registry**:
+"repair channel survives" by scanning the **full task registry**
+(`(tasks ?? []).some(t => t.capabilityId === ep.capabilityId && covering && (remediation || burned))`).
+A remediation task in *another* mission's taskIds could make B1 believe
+repair existed and reserve this mission's fresh retest surfaces — registry
+existence was treated as reachability.
 
-```js
-(tasks ?? []).some((t) =>
-  t.capabilityId === ep.capabilityId &&
-  (t.response?.requiredFunctions ?? []).some((f) => remainingOf(ep).includes(f)) &&
-  (t.purpose === 'remediation' || burned.has(t.id)))
-```
+### Proof contract — `vnext.mission-repair-proof.v1`
+`src/vnext/next-for-you/repair-proof.js`: `deriveMissionRepairPlan` binds
+`missionId` + `missionRevision` + `episodeId` + `capabilityId` +
+`remainingFunctions[]`, with `witnesses[fn][]`, `required`, `complete`,
+`reserved`, `reasonCode`. Reservation table: `OPEN` never ·
+`REPAIRING`/`RELAPSED` iff ∀ missing fn ∃ clean witness ·
+`REPAIRED_WAITING` direct · `RETEST_DUE`/`VERIFIED` never.
 
-A remediation task in **another mission's** taskIds made B1 believe repair
-existed and reserve this mission's fresh retest surfaces — existence in the
-registry was treated as reachability. Equally, a task the live routes could
-never serve satisfied the check.
+### Shared resolver
+`src/vnext/next-for-you/task-resolver.js` — `resolveMissionTasks` +
+`deriveTaskConsumption` + `createTaskResolver` extracted verbatim from the
+candidate generator; `optionsFor`/`servable`/`pickTask`/`pendingPhase`
+accept `excludeTaskIds`. `generateCandidates` returns `gen.resolver`; B0
+never passes exclusions (byte-identical). The B1 proof asks the same
+machinery the counterfactual "reachable while probes stay withheld".
 
-## §2 Proof contract
+### Function-level witnesses
+`candidateKind` (correction|refresh — SUPPORT_DEMAND never repairs),
+`taskId`, `taskRevision`, `purpose`, `missionMember`, `coversFunction`,
+`hardFilterClean`, `filterReasons[]`, `consumesFreshRetestSurface`,
+`servedNext` (route's actual next serve under probe exclusion).
 
-`vnext.mission-repair-proof.v1` — `deriveMissionRepairPlan({episode, mission,
-tasks, candidates, resolver, selection, decisionContext, pendingDemands,
-roles, episodes, hardFilter})` in `src/vnext/next-for-you/repair-proof.js`.
-Machine-readable plan bound to `missionId` + `missionRevision` + `episodeId`
-+ `capabilityId` + `remainingFunctions[]`, with `witnesses[fn][]`, `required`,
-`complete`, `reserved`, `reasonCode`.
+### Positive proofs (real paths)
+- clock-time `meet_at_a_time` REPAIRING → witness `task.time.remediation.hear@1`; reserves `task.time.retrieval.hear`.
+- price `buy_small_item` REPAIRING → witness `task.price.remediation.hear@1`; reserves `task.price.retrieval.hear`.
+- direction `find_a_place` REPAIRING → witness `task.place.remediation.follow@1`; reserves `{retrieval.follow, retrieval.follow_landmark}`.
 
-Reservation table (per episode state):
-`OPEN` → never reserved (a probe success may legitimately BE the repair) ·
-`REPAIRING`/`RELAPSED` → reserved **iff** ∀ missing fn ∃ clean witness ·
-`REPAIRED_WAITING` → reserved directly (repair already demonstrated) ·
-`RETEST_DUE`/`VERIFIED` → nothing.
+### Attacks (335-check runtime suite, all green)
+- cross-mission: remediation dropped from `taskIds` but present in registry → `mission_repair_channel_unproven`, nothing reserved; undeclared ghost task changes nothing.
+- registry-invariance metamorphic: +ghost / −unrelated registry changes leave proof, reserved ids, and B1 decision canon-identical (modulo `decisionId` input digest).
+- wrong capability / wrong function: no witness → proof false → no reservation.
+- stale revision: registry bump to rev2 rebinds witness `taskRevision: 2`; mission revision bump rebinds `missionRevision` — no reuse.
+- repair bound: saturated `actionsChosen` → every witness `repair_bound:3`-unclean → false, probes freed.
+- failure ceiling: 3-fail streak ending on last non-probe surface → refresh serve is `identical_retry_after_failure_ceiling` → false, probe freed.
+- alternate repick: PLACE refresh's natural next serve IS the reserved probe (`retrieval.follow`); under exclusion the route repicks `remediation.follow` — `servedNext` proves it.
+- multi-function: DIR episode missing `{follow_short_direction, identify_basic_direction_term}` with only the first covered in-mission → `complete=false`, empty reservations — ∀-fn not ∃-task.
+- relapse: burned retest surface leaves the probe set (repair-eligible); fresh alternate stays reserved — the reservation tracks the live surface set exactly.
+- validator: forged B1 serve on a reserved probe → `correction_retest_surface_reserved`; identical serve in OPEN → clean. The validator re-derives plans+reservations in its own memoized rebuild, never trusting the decision payload.
 
-## §3 Mission task resolver
-
-`src/vnext/next-for-you/task-resolver.js` — extracted verbatim from
-candidate-generator routing: `resolveMissionTasks` (integrity + mission
-taskIds → current revisions), `deriveTaskConsumption` (verified-event
-consumption, lastAttempt/observedFailStreak), `createTaskResolver` exposing
-`optionsFor` / `servable` / `pickTask` / `pendingPhase`, all accepting
-`excludeTaskIds`. `generateCandidates` now delegates to the shared resolver
-and returns it as `gen.resolver`; B0 never passes exclusions → identical
-behavior. The B1 proof calls the same machinery **with the fresh retest
-probe set excluded** — witnesses must be reachable even while probes stay
-protected.
-
-## §4 Function-level witnesses
-
-Each witness records: `candidateKind` (correction|refresh — SUPPORT_DEMAND
-is never a repair route), `taskId`, `taskRevision`, `purpose`,
-`missionMember`, `coversFunction`, `hardFilterClean`, `filterReasons[]`,
-`consumesFreshRetestSurface`, `servedNext` (the route's own next serve under
-probe exclusion). Witnesses come from the route's **live** fn-covering
-servable stream under `excludeTaskIds=probes`; a route the generator
-suppressed (failure ceiling, budget) is not claimed as reachable.
-
-## §5 Positive proofs (real paths)
-
-- **clock-time** `mission.meet_at_a_time` REPAIRING → witness
-  `task.time.remediation.hear@1` (correction + refresh), reserves
-  `task.time.retrieval.hear`.
-- **price** `mission.buy_small_item` REPAIRING → witness
-  `task.price.remediation.hear@1`, reserves `task.price.retrieval.hear`.
-- **direction** `mission.find_a_place` REPAIRING → witness
-  `task.place.remediation.follow@1`, reserves
-  `{retrieval.follow, retrieval.follow_landmark}`.
-
-## §6 Attack results (335-check runtime suite, all green)
-
-- **Cross-mission**: remediation dropped from `taskIds` but held by the
-  registry → `mission_repair_channel_unproven`, nothing reserved. A
-  remediation-shaped ghost registered but never declared changes nothing.
-- **Registry-invariance (metamorphic)**: adding an out-of-mission task —
-  even one that WOULD serve — and removing an unrelated task leave proof,
-  reserved ids, and the B1 decision canon-identical (modulo `decisionId`,
-  which legitimately binds the changed input digest).
-- **Wrong capability / wrong function**: in-mission remediation on the wrong
-  cap or covering a different fn yields no witness → proof false → no
-  reservation.
-- **Stale revision**: bumping registry remediation to rev2 rebinds the
-  witness to `taskRevision: 2` (latest-revision resolution); mission
-  `revision` bump rebinds `missionRevision` — proofs are never reused.
-- **Repair bound / failure ceiling**: saturated `actionsChosen` makes every
-  witness `repair_bound:3`-unclean; a 3-fail streak ending on the last
-  non-probe surface makes the refresh serve `identical_retry_after_failure_
-  ceiling`-unclean — both falsify the proof and free the probe.
-- **Alternate repick**: on PLACE the refresh route's natural next serve IS
-  the reserved probe (`task.place.retrieval.follow`); under probe exclusion
-  the route repicks `task.place.remediation.follow` — `servedNext` proves it.
-- **Multi-function**: DIR episode missing `{follow_short_direction,
-  identify_basic_direction_term}` where only the first has an in-mission
-  witness → `complete=false`, reservations empty — ∀-fn, not ∃-task.
-- **Relapse**: post-relapse the burned retest surface leaves the probe set
-  (becomes repair-eligible) while the still-fresh alternate stays reserved —
-  `reserved` tracks the live surface set exactly.
-- **Validator**: forged B1 serve on a reserved probe →
-  `correction_retest_surface_reserved`; identical serve in OPEN → clean.
-  The validator re-derives plans + reservations via its own memoized
-  rebuild — never the decision's `correctionEpisodes` payload.
-
-## §7 B0 parity / B1 differential
-
-Frozen corpus: `1792 rows {EXPECTED:1009, MATCH:783}`, b0 violations 0 —
-byte-identical to pre-008G. B0↔B1: `MATCH:1744,
+### B0 parity / B1 differential
+Frozen corpus `1792 rows {EXPECTED:1009, MATCH:783}`, b0 violations 0 —
+byte-identical to pre-008G. B0↔B1 `MATCH:1744,
 CORRECTION_RETEST_SURFACE_RESERVED:42, CORRECTION_RETEST_DUE:6`, b1
-violations 0, BUG 0 — the proof-based reservation reproduces the 008F
-registry-scan reservation **exactly** on the real corpus (the proof is
-strictly more honest, and the corpus shows it is not strictly smaller).
+violations 0, BUG 0 — proof-based reservation reproduces the 008F
+reservation set exactly on the real corpus.
 
-## §8 Performance (@2k events, median)
+### Performance @2k events (median)
+`episodes` 3.9ms · `b1` 124.1ms vs `b0` 125.9ms · `shadowB1` 203.4ms ·
+digest dominates ~118ms. The proof reuses the generator's resolver +
+candidate set: **no second learner-model replay, no second
+`generateCandidates` pass** on the policy path. Validator rebuild is
+lazy/memoized.
 
-`episodes` derivation 3.9ms · `b1` 124.1ms vs `b0` 125.9ms · `shadowB1`
-203.4ms worst case · digest dominates (~118ms). The proof reuses the
-generator's resolver and candidate set — **no second learner-model replay,
-no second `generateCandidates` pass** on the policy path. The validator's
-independent rebuild is lazy/memoized.
-
-## §9 Gates
-
-- `npm run verify:full` — green on `5b4f0ae` (typecheck 140 files; node
-  suites incl. newly-wired runtime suite — see §10; vite build; browser
+### Gates
+- `npm run verify:full` PASS on `5b4f0ae` and `3870b9f` (typecheck 140
+  files; node suites incl. now-wired runtime suite; vite build; browser
   26+10; Firestore emulator ×2 PASS).
-- `swe:verify 008g-repair-reachability` — **PASS @ 5b4f0ae**.
 - `node tests/vnext-next-for-you-runtime.test.mjs` — 335 checks PASS.
+- CI: pending at report time — recorded post-push.
 
-## §10 What is now proven
+### Extra fix in this diff
+`package.json` `test` script now includes `tests/vnext-next-for-you-runtime.test.mjs` —
+the suite carried all 008F/008G behavioral coverage but had been orphaned
+from `npm test`/`verify`/CI since 008E.
 
-- Repair-channel existence is a per-episode, per-function **reachability
-  proof inside the serving mission** — not registry presence.
-- Reservations are a routing artifact produced only by a complete proof
-  (or the demonstrated-repair waiting state); no proof ⇒ no silent
-  reservation.
-- Every witness is mission-member, fn-covering, hard-filter-clean, and
-  probe-preserving, bound to the exact task revision the route would serve.
-- Fresh retest probes survive REPAIRING/RELAPSED only when repair can be
-  carried by remediation-purpose or already-burned surfaces.
+### Known limitations
+- `REPAIRED_WAITING` reserves directly without witnesses (repair already
+  demonstrated); proof obligation attaches only to states that owe repair.
+- Witness enumeration scales with the fn-covering servable stream; fine at
+  fixture scale, quadratic-ish only under adversarial streams.
+- B1 remains shadow/experiment; `?mode=b1` fails closed to reference.
 
-## §11 Known limitations
-
-- `REPAIRED_WAITING` reserves directly without a witness set — repair was
-  demonstrated; the proof obligation attaches to states that still owe
-  repair. Documented in the module contract.
-- The witness check enumerates each route's fn-covering servable stream;
-  fine at fixture scale, quadratic-ish only in adversarial streams.
-- B1 remains experimental/shadow-only; product route continues to serve
-  B0. `?mode=b1` still fails closed to reference.
-- The orphaned runtime suite is now wired into `npm test` (package.json) —
-  it ran standalone since 008E and was never in the verify chain; this
-  closes that gap going forward.
-
-## §12 Merge status
-
-**Not merged.** PR awaits policy review / control-room verdict; the user is
-merge authority. CI recorded in §CI of the checkpoint thread once pushed.
+### Merge status
+Not merged — PR awaits policy review; the user is merge authority.
