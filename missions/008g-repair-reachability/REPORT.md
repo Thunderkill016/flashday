@@ -136,7 +136,8 @@ lazy/memoized.
   files; node suites incl. now-wired runtime suite; vite build; browser
   26+10; Firestore emulator ×2 PASS).
 - `node tests/vnext-next-for-you-runtime.test.mjs` — 335 checks PASS.
-- CI: pending at report time — recorded post-push.
+- CI: **Verify FlashDay** green on head `9d3690c` — push run
+  `36825803861` + pull_request run `36825837191` both success.
 
 ### Extra fix in this diff
 `package.json` `test` script now includes `tests/vnext-next-for-you-runtime.test.mjs` —
