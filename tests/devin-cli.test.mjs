@@ -144,6 +144,40 @@ const DANGEROUS = [
   'git push origin +HEAD',
   'git push origin +HEAD:main',
   'git push origin +refs/heads/feature:refs/heads/feature',
+  // Multi-ref pushes publish every matching ref — including main —
+  // and --mirror/--prune additionally force-update and delete refs.
+  'git push --all origin',
+  'git push --branches origin',
+  'git push --mirror origin',
+  'git push --prune origin refs/heads/*',
+  'git push --prune origin feature',
+  "git push origin ':'",
+  'git push origin :*',
+  'git push origin +:',
+  "git push origin '*'",
+  "git push origin 'refs/heads/*:refs/heads/*'",
+  "git push origin 'refs/*:refs/*'",
+  "git push origin 'm*'",
+  "git push origin 'main*'",
+  "git push origin 'refs/heads/m*:refs/heads/m*'",
+  // Aliases defined inline via -c are literal command text — the
+  // expanded invocation must be checked; --config-env hides the body
+  // in the environment so it fails closed.
+  "git -c alias.p='push origin HEAD:main' p",
+  'git -c alias.p="push origin HEAD:main" p',
+  'git -c alias.p=push p origin main',
+  "git -c alias.p='push --force' p",
+  'git -c "alias.p=push origin HEAD:main" p',
+  'git --config-env alias.x=PCMD x',
+  'git --config-env=alias.x=PCMD x',
+  "bash -c 'git -c alias.p=\"push origin HEAD:main\" p'",
+  // GNU xargs reads its argument list from a file with -a/--arg-file;
+  // the option value is input, not the command — the real command
+  // follows it.
+  'xargs -a /tmp/in git push --force origin feature',
+  'xargs --arg-file /tmp/in git push --force',
+  'xargs --arg-file=/tmp/in git push --force origin main',
+  'xargs -a /tmp/in rm -rf /',
   // Recursive rm against repo-owned work (generated dirs excepted).
   'rm -rf .git',
   'rm -rf .git/objects',
@@ -193,6 +227,20 @@ const SAFE = [
   'git push -o ci.skip origin feature',
   'git push --push-option=ci.skip origin feature',
   'git push origin --delete feature',
+  'git push origin HEAD:feature-x',
+  'git push origin @',
+  'git push --tags origin',
+  'git push origin refs/tags/v1.2.3',
+  // Wildcard refspecs whose destination prefix can never match
+  // main/master stay allowed — bulk feature/tag pushes still work.
+  "git push origin 'refs/heads/feature-*:refs/heads/feature-*'",
+  "git push origin 'refs/tags/*:refs/tags/*'",
+  "git push origin 'feature-*:feature-*'",
+  // Aliases whose expanded body is a safe command stay usable — the
+  // guard evaluates the expansion, not the -c flag itself.
+  'git -c alias.st=status st',
+  'git -c alias.l="log --oneline" l',
+  "git -c alias.p='push origin feature' p",
   // Git global options before the subcommand.
   'git -C . status',
   'git --no-pager log -5',
@@ -215,6 +263,10 @@ const SAFE = [
   'npm test',
   'npm run test:firestore',
   'node tests/devin-cli.test.mjs',
+  // xargs option-argument forms on benign commands.
+  'xargs -a /tmp/list echo hi',
+  'xargs --arg-file=/tmp/list echo hi',
+  'xargs -n1 echo hi',
   'echo git push --force',
   'git log | grep firebase',
   'ls -la && cat package.json'

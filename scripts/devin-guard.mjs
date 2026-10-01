@@ -37,16 +37,16 @@ function cmdName(head) {
 // command, and allowed as the prefix of a rescan.
 const WRAPPERS = /^(?:env|command|builtin|exec|nice|ionice|nohup|time|timeout|xargs|watch)$/;
 const SHELLISH = /^(?:bash|sh|zsh|dash|fish|ksh|eval|source|\.|find|parallel|ssh)$/;
-// Wrapper options that consume the following token (env -u DEBUG,
-// timeout -k 5, xargs -I{}, ...). Conservative superset.
+// Wrapper options that REQUIRE a following argument token
+// (env -u DEBUG, timeout -k 5, xargs -a cmds.txt, ...).
 const WRAPPER_ARG_FLAGS = new Set([
-  '-u', '-C', '-S', '-P', '-0', '-i',
-  '--unset', '--chdir', '--split-string', '--ignore-signal',
-  '--block-signal', '--default-signal', '--ignore-environment',
+  '-u', '-C', '-S', '-P',
+  '--unset', '--chdir', '--split-string',
   '-k', '-s', '-t', '--kill-after', '--signal',
-  '-n', '--adjustment', '-c', '-p',
-  '-I', '-L', '-e', '-E', '-d', '--replace', '--max-lines',
-  '--eof', '--delimiter', '--max-args', '-o'
+  '-n', '--adjustment',
+  '-I', '-L', '-E', '-d', '--replace', '--max-lines',
+  '--eof', '--delimiter', '--max-args', '--max-procs',
+  '--max-chars', '-a', '--arg-file', '--interval'
 ]);
 
 function segments(command) {
@@ -74,7 +74,12 @@ function unwrap(argv) {
     i++;
     while (i < argv.length) {
       const x = stripQuotes(argv[i]);
-      if (WRAPPER_ARG_FLAGS.has(x.split('=')[0])) { i += 2; continue; }
+      if (WRAPPER_ARG_FLAGS.has(x.split('=')[0])) {
+        // '--arg-file=F' carries its value inline — consume 1 token;
+        // '-a F' / '--arg-file F' consume the next token as well.
+        i += x.includes('=') ? 1 : 2;
+        continue;
+      }
       if (/^-/.test(x) || /^[A-Za-z_]\w*=/.test(x)) { i++; continue; }
       if (w === 'timeout' && /^\d/.test(x)) { i++; continue; }
       break;
@@ -141,23 +146,88 @@ const GIT_VALUE_OPTS = new Set([
 
 // Split `git [global opts] <subcommand> <args>`; unknown dash tokens are
 // skipped conservatively so an unrecognized option never hides the verb.
+// `-c`/`--config-env` values are inspected for `alias.<name>=<body>`
+// definitions — an alias body is literal command text the invocation
+// expands (git -c alias.p='push origin HEAD:main' p).
 function gitInvocation(args) {
+  const aliases = Object.create(null);
+  let opaqueAlias = false;
   let i = 0;
   while (i < args.length) {
     const t = stripQuotes(args[i]);
-    if (GIT_VALUE_OPTS.has(t)) { i += 2; continue; }
-    if (/^--[^=]+=/.test(t)) { i++; continue; }
+    if (GIT_VALUE_OPTS.has(t)) {
+      const v = i + 1 < args.length ? stripQuotes(args[i + 1]) : '';
+      const m = t === '-c' || t === '--config-env'
+        ? /^alias\.([\w-]+)=(.*)$/s.exec(v)
+        : null;
+      if (m && t === '--config-env') {
+        // --config-env name=ENVVAR reads the body from the
+        // environment — statically invisible, so fail closed.
+        opaqueAlias = true;
+      } else if (m) {
+        // The body arrives with its quoting intact
+        // (alias.p='push origin HEAD:main') — unwrap then retokenize
+        // so the expanded invocation sees real argv words.
+        aliases[m[1]] = tokens(stripQuotes(m[2]));
+      }
+      i += 2; continue;
+    }
+    if (/^--[^=]+=/.test(t)) {
+      // Inline forms: --config-env=alias.x=VAR (opaque body) or
+      // --exec-path=..., etc.
+      if (/^--config-env=alias\./.test(t)) opaqueAlias = true;
+      i++; continue;
+    }
     if (/^-/.test(t)) { i++; continue; }
     break;
   }
   return {
     sub: i < args.length ? stripQuotes(args[i]) : '',
-    rest: args.slice(i + 1)
+    rest: args.slice(i + 1),
+    aliases,
+    opaqueAlias
   };
 }
 
-function checkGit(args) {
-  const { sub, rest } = gitInvocation(args);
+// Does a wildcard refspec destination match refs/heads/main|master?
+// The static prefix before the first '*' must itself be a prefix of a
+// protected branch name — 'refs/heads/feature-*' cannot match main,
+// but '*', 'refs/heads/*', 'm*' and 'main*' can.
+function wildcardReachesProtected(dest) {
+  if (!dest.includes('*')) return false;
+  const ns = /^refs\/([a-z]+)\//.exec(dest);
+  let prefix;
+  if (ns) {
+    // Static non-heads namespace — refs/tags/* etc. cannot touch branches.
+    if (ns[1] !== 'heads') return false;
+    prefix = dest.slice(ns[0].length).split('*')[0];
+  } else if (dest.startsWith('refs/')) {
+    // Un-namespaced refs pattern (refs/*, refs/h*, re*) — compare on
+    // the full ref path.
+    const p = dest.split('*')[0];
+    return 'refs/heads/main'.startsWith(p) || 'refs/heads/master'.startsWith(p);
+  } else {
+    // Branch-name shorthand: the literal prefix before '*' must itself
+    // be a prefix of a protected branch name — 'feature-*' cannot
+    // match main, but '*', 'm*' and 'main*' can.
+    prefix = dest.split('*')[0];
+  }
+  return 'main'.startsWith(prefix) || 'master'.startsWith(prefix);
+}
+
+function checkGit(args, depth = 0) {
+  const { sub, rest, aliases, opaqueAlias } = gitInvocation(args);
+
+  if (opaqueAlias) {
+    return 'git --config-env alias.*=… reads the alias body from the environment — cannot verify it, blocked';
+  }
+  // `git <alias> <args>` expands to `git <alias-body> <args>`; re-check
+  // the expanded invocation (git never expands aliases recursively).
+  const body = sub && aliases[sub];
+  if (body && depth < 1) {
+    const reason = checkGit(body.concat(rest), depth + 1);
+    if (reason) return reason;
+  }
 
   if (sub === 'push') {
     // -o/--push-option consume a value token; strip them before
@@ -173,6 +243,18 @@ function checkGit(args) {
         longs.has('--force-if-includes') || shorts.has('f')) {
       return 'git push --force rewrites remote history — never allowed';
     }
+    // Multi-ref pushes publish every matching ref — including
+    // refs/heads/main — and --mirror/--prune additionally force-update
+    // and delete remote refs.
+    if (longs.has('--all') || longs.has('--branches')) {
+      return 'git push --all/--branches pushes every local branch — including main';
+    }
+    if (longs.has('--mirror')) {
+      return 'git push --mirror force-updates all refs and deletes missing ones';
+    }
+    if (longs.has('--prune')) {
+      return 'git push --prune deletes remote refs — human-only action';
+    }
     // positional[0] is the remote; later positionals are refspecs.
     // The refspec destination (after the last ':') decides whether a
     // protected ref is touched — 'main:feature-copy' pushes FROM main
@@ -182,13 +264,19 @@ function checkGit(args) {
       if (ref.startsWith('+')) {
         return 'git push +<refspec> forces the update — equivalent to --force';
       }
+      if (ref === ':') {
+        return "git push ':' pushes every matching branch — including main";
+      }
       const dest = ref.includes(':') ? ref.slice(ref.lastIndexOf(':') + 1) : ref;
       if (PROTECTED_DEST.test(dest)) {
         return 'push targets a protected branch (main/master) — open a PR instead';
       }
+      if (ref.includes('*') && wildcardReachesProtected(dest)) {
+        return 'wildcard refspec can update refs/heads/main|master — push branches one by one';
+      }
     }
     const implicit = positional.length <= 1 ||
-      positional.every((p) => /^(origin|upstream|HEAD)$/.test(p));
+      positional.every((p) => /^(origin|upstream|HEAD|@)$/.test(p));
     if (implicit) {
       const br = currentBranch();
       if (br && PROTECTED_DEST.test(br)) {
