@@ -153,7 +153,9 @@ function gitInvocation(args) {
   const aliases = Object.create(null);
   const configs = Object.create(null);
   const opaqueKeys = new Set();
+  const remotePushSpecs = [];
   let opaqueAlias = false;
+  let opaqueRemotePush = false;
   let i = 0;
   while (i < args.length) {
     const t = stripQuotes(args[i]);
@@ -161,15 +163,23 @@ function gitInvocation(args) {
       const v = i + 1 < args.length ? stripQuotes(args[i + 1]) : '';
       if (t === '-c' || t === '--config-env') {
         const eq = v.indexOf('=');
-        if (eq > 0) {
-          const key = v.slice(0, eq).toLowerCase();
-          const val = v.slice(eq + 1);
+        // '-c name' without '=' sets the key to implicit 'true'
+        // (git boolean semantics); 'name=' sets an empty value.
+        if (eq !== 0) {
+          const key = (eq === -1 ? v : v.slice(0, eq)).toLowerCase();
+          const val = eq === -1 ? 'true' : v.slice(eq + 1);
           if (t === '--config-env') {
             // Value comes from the environment — statically invisible.
             opaqueKeys.add(key);
             if (key.startsWith('alias.')) opaqueAlias = true;
+            if (/^remote\.[^.]+\.push$/.test(key)) opaqueRemotePush = true;
           } else {
             configs[key] = stripQuotes(val);
+            // remote.<name>.push is multi-valued: repeated -c entries
+            // ALL apply, so every value must be checked.
+            if (/^remote\.[^.]+\.push$/.test(key)) {
+              remotePushSpecs.push(stripQuotes(val));
+            }
             const am = /^alias\.([\w-]+)$/.exec(key);
             // The body arrives with its quoting intact
             // (alias.p='push origin HEAD:main') — unwrap then
@@ -185,8 +195,10 @@ function gitInvocation(args) {
       // --exec-path=..., etc.
       const ie = /^--config-env=([^=]+)=/.exec(t);
       if (ie) {
-        opaqueKeys.add(ie[1].toLowerCase());
-        if (ie[1].toLowerCase().startsWith('alias.')) opaqueAlias = true;
+        const ik = ie[1].toLowerCase();
+        opaqueKeys.add(ik);
+        if (ik.startsWith('alias.')) opaqueAlias = true;
+        if (/^remote\.[^.]+\.push$/.test(ik)) opaqueRemotePush = true;
       }
       i++; continue;
     }
@@ -198,7 +210,9 @@ function gitInvocation(args) {
     rest: args.slice(i + 1),
     aliases,
     configs,
+    remotePushSpecs,
     opaqueAlias,
+    opaqueRemotePush,
     opaqueKeys
   };
 }
@@ -229,31 +243,82 @@ function wildcardReachesProtected(dest) {
   return 'main'.startsWith(prefix) || 'master'.startsWith(prefix);
 }
 
+// Git config booleans: anything not explicitly false is true-ish —
+// '-c remote.x.mirror' (no '=') and '=yes/on/1' all enable it. An
+// empty value stays conservative: treated as true.
+const GIT_BOOL_FALSE = new Set(['false', 'no', 'off', '0']);
+function gitBoolFalse(v) {
+  return GIT_BOOL_FALSE.has((v || '').toLowerCase());
+}
+
+// Single-refspec danger check — shared by command-line refspecs and
+// remote.<name>.push config values (which act as implicit refspecs).
+function refspecReason(ref) {
+  if (ref.startsWith('+')) {
+    return 'push +<refspec> forces the update — equivalent to --force';
+  }
+  if (ref === ':') {
+    return "push ':' pushes every matching branch — including main";
+  }
+  const dest = ref.includes(':') ? ref.slice(ref.lastIndexOf(':') + 1) : ref;
+  if (PROTECTED_DEST.test(dest)) {
+    return 'push targets a protected branch (main/master) — open a PR instead';
+  }
+  if (ref.includes('*') && wildcardReachesProtected(dest)) {
+    return 'wildcard refspec can update refs/heads/main|master — push branches one by one';
+  }
+  return null;
+}
+
 function checkGit(args, depth = 0) {
-  const { sub, rest, aliases, configs, opaqueAlias, opaqueKeys } = gitInvocation(args);
+  const {
+    sub, rest, aliases, configs, remotePushSpecs,
+    opaqueAlias, opaqueRemotePush, opaqueKeys
+  } = gitInvocation(args);
 
   if (opaqueAlias) {
     return 'git --config-env alias.*=… reads the alias body from the environment — cannot verify it, blocked';
   }
 
-  // `git config <key> <value>` writes persistent config. An alias
-  // write smuggles a command the next invocation runs invisibly, and
-  // push.default=matching makes a bare push update every matching
-  // branch — the same checks apply to the literal value.
+  // `git config <key> <value>` (legacy) and `git config set <key>
+  // <value>` (modern) both write persistent config — invisible to
+  // later literal-text checks, so the write is the only checkpoint.
+  // get/unset/list/edit/rename-section/remove-section/comment read or
+  // reshape config and smuggle nothing.
   if (sub === 'config') {
     const { positional } = flagInfo(rest);
     const p = positional.map(stripQuotes);
-    if (p.length > 1) {
-      if (/^alias\./.test(p[0])) {
-        const bodyToks = tokens(p.slice(1).join(' '));
+    const READ_SUBS = new Set([
+      'get', 'unset', 'list', 'edit', 'rename-section',
+      'remove-section', 'comment', 'default'
+    ]);
+    let key = null;
+    let vals = [];
+    if (p[0] === 'set') {
+      key = p[1] || null;
+      vals = p.slice(2);
+    } else if (p[0] && !READ_SUBS.has(p[0])) {
+      key = p[0];
+      vals = p.slice(1);
+    }
+    if (key && vals.length > 0) {
+      if (/^alias\./.test(key)) {
+        const bodyToks = tokens(vals.join(' '));
         const f = stripQuotes(bodyToks[0] || '');
         const r = f.startsWith('!')
           ? evaluate(((f === '!' ? '' : f.slice(1)) + ' ' + bodyToks.slice(1).join(' ')).trim(), depth + 1)
           : checkGit(bodyToks, depth + 1);
         if (r) return r;
       }
-      if (p[0] === 'push.default' && p[1] === 'matching') {
+      if (key === 'push.default' && vals[0] === 'matching') {
         return "git config push.default=matching makes 'git push' update every matching branch — including main";
+      }
+      if (/^remote\.[^.]+\.push$/.test(key)) {
+        const r = refspecReason(vals.join(' '));
+        if (r) return `git config ${key} persists a dangerous refspec — ${r}`;
+      }
+      if (/^remote\.[^.]+\.mirror$/.test(key) && !gitBoolFalse(vals[0])) {
+        return 'git config remote.*.mirror=true makes pushes behave as --mirror — never allowed';
       }
     }
   }
@@ -307,6 +372,17 @@ function checkGit(args, depth = 0) {
     if (opaqueKeys.has('push.default')) {
       return 'git --config-env push.default=… hides the push.default value — cannot verify it, blocked';
     }
+    // remote.<name>.mirror=true makes the push behave as --mirror
+    // regardless of refspecs; the remote name can't be resolved from
+    // literal text so any remote.*.mirror counts.
+    for (const key of Object.keys(configs)) {
+      if (/^remote\.[^.]+\.mirror$/.test(key) && !gitBoolFalse(configs[key])) {
+        return 'git -c remote.*.mirror=true makes push behave as --mirror — never allowed';
+      }
+    }
+    if ([...opaqueKeys].some((k) => /^remote\.[^.]+\.mirror$/.test(k))) {
+      return 'git --config-env remote.*.mirror=… hides the value — cannot verify it, blocked';
+    }
     // Value-taking push options are stripped before positional
     // classification — otherwise a `--repo origin main` misreads
     // 'origin' as the remote and 'main' as a refspec destination.
@@ -357,19 +433,20 @@ function checkGit(args, depth = 0) {
     // 'feature/main-fix' never names main at all.
     const refspecs = remoteViaOpt ? positional : positional.slice(1);
     for (const rawRef of refspecs) {
-      const ref = stripQuotes(rawRef);
-      if (ref.startsWith('+')) {
-        return 'git push +<refspec> forces the update — equivalent to --force';
+      const reason = refspecReason(stripQuotes(rawRef));
+      if (reason) return reason;
+    }
+    // remote.<name>.push is used as the implicit refspec only when the
+    // command line carries none — each configured value (the key is
+    // multi-valued, every -c entry applies) goes through the same
+    // refspec validator.
+    if (refspecs.length === 0) {
+      if (opaqueRemotePush) {
+        return 'git --config-env remote.*.push=… hides the refspec — cannot verify it, blocked';
       }
-      if (ref === ':') {
-        return "git push ':' pushes every matching branch — including main";
-      }
-      const dest = ref.includes(':') ? ref.slice(ref.lastIndexOf(':') + 1) : ref;
-      if (PROTECTED_DEST.test(dest)) {
-        return 'push targets a protected branch (main/master) — open a PR instead';
-      }
-      if (ref.includes('*') && wildcardReachesProtected(dest)) {
-        return 'wildcard refspec can update refs/heads/main|master — push branches one by one';
+      for (const spec of remotePushSpecs) {
+        const reason = refspecReason(spec);
+        if (reason) return `configured remote.*.push refspec: ${reason}`;
       }
     }
     const implicit = positional.length <= 1 ||

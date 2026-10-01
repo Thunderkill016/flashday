@@ -212,6 +212,25 @@ const DANGEROUS = [
   'git rm -rf *',
   'git rm -rf',
   "git config alias.d 'rm -rf .'",
+  // remote.<name>.push acts as the implicit refspec when the command
+  // line carries none; remote.<name>.mirror makes push behave as
+  // --mirror. `git config set` is the modern write syntax — same
+  // checks as the legacy form.
+  'git -c remote.origin.push=+HEAD:main push origin',
+  'git -c remote.origin.push=HEAD:main push origin',
+  'git -c remote.origin.push=: push origin',
+  'git -c remote.origin.push=refs/heads/*:refs/heads/* push origin',
+  'git -c remote.origin.push=+HEAD:main push',
+  'git -c remote.origin.mirror=true push origin',
+  'git -c remote.origin.mirror push origin',
+  'git --config-env=remote.origin.push=RPUSH push origin',
+  'git --config-env=remote.origin.mirror=RM push origin',
+  'git -c remote.x.push=+HEAD:main -c remote.x.push=feature push origin',
+  'git config remote.origin.push +HEAD:main',
+  'git config remote.origin.mirror true',
+  "git config set alias.p 'push origin main'",
+  'git config set remote.origin.push +HEAD:main',
+  'git config set remote.origin.mirror true',
   // GNU xargs reads its argument list from a file with -a/--arg-file;
   // the option value is input, not the command — the real command
   // follows it.
@@ -310,6 +329,17 @@ const SAFE = [
   'git rm -rf src/generated',
   'git rm -f src/file.js',
   'git rm --cached -r dist',
+  // remote.*.push/mirror safe values and command-line-override semantics.
+  'git -c remote.origin.push=HEAD:feature push origin',
+  'git -c remote.origin.push=+HEAD:main push origin feature',
+  'git -c remote.origin.mirror=false push origin feature',
+  'git -c remote.x.push=feature -c remote.x.push=feature2 push origin',
+  'git config set user.name x',
+  'git config set push.default simple',
+  'git config set remote.origin.mirror false',
+  'git config set remote.origin.push feature',
+  'git config get alias.p',
+  'git config unset alias.p',
   // Git global options before the subcommand.
   'git -C . status',
   'git --no-pager log -5',
