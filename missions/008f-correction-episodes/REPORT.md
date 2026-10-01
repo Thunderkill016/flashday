@@ -64,7 +64,7 @@ Mission 008F (ChatGPT control room): model correction episodes (failed → repai
       identity, burn, validator-terminal, adapter regressions in R2).
 - [x] Perf @2k reported vs ~125ms B0 baseline; no extra O(events)
       replay where equivalent derived state exists.
-- [ ] `npm run verify:full` green; exact-head CI green.
+- [x] `npm run verify:full` green; exact-head CI green (`fa73104`).
 
 ## Known failures
 - (none recorded)
@@ -124,7 +124,7 @@ Completed; required verification green on ending SHA.
 - `npm run verify:full` — all legs green: typecheck 138 files; node suites (runtime 303 checks incl. CEP-ID/CEP-BURN/VAL-TERM/SEL-ADAPTER + 3 B1 trajectories); vite build; browser 26+10; Firestore emulator PASS.
 
 ## CI
-- Exact-head `Verify FlashDay` runs: recorded below (post-push).
+- Exact head `fa73104` — `Verify FlashDay` push #36818889866 + pull_request #36818893903: **success** (2m49s / 2m40s).
 
 ## OPEN LIMITATIONS
 - B1 remains an unproven validity hypothesis — divergence classes count reroutes, not learning outcomes.
